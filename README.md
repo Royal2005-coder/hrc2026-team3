@@ -1,4 +1,4 @@
-# HRC2026 Team 3 — Phân Loại Cấu Kiện Chính Xác Trên Bàn Làm Việc (Precise Desktop Sorting of Workpieces)
+# HRC2026 Team 3
 
 Global Humanoid Robot Challenge 2026 — Vòng Giả Lập (Simulation Round)
 Robot Walker S2 | NVIDIA Isaac Sim 5.1 | UBTECH Competition
@@ -11,6 +11,8 @@ Robot Walker S2 | NVIDIA Isaac Sim 5.1 | UBTECH Competition
 ```bash
 bash /home/ubuntu/auto_setup.sh
 ```
+
+Ý nghĩa: Thiết lập môi trường workspace và đồng bộ các đường dẫn/tài nguyên cần thiết cho team member.
 
 ### Bước 2: Vào thư mục dự án và cập nhật code mới nhất
 
@@ -56,7 +58,7 @@ git merge main
 | Anh Hoàng Anh | Cố vấn/Quản trị (Mentor) | Đánh giá kiến trúc hệ thống, phê duyệt các thay đổi mang tính cốt lõi |
 | Thầy Hải | Giảng viên/Cố vấn | Đánh giá bước cuối, phê duyệt mã nguồn trước khi nộp (submission-ready code) |
 
-Lưu ý quan trọng: Mỗi PR cần ít nhất 1 phê duyệt (approval) từ PM Gia trước khi gộp (merge). Các PR liên quan đến kiến trúc hệ thống hoặc mã nguồn nộp thi cần thêm sự phê duyệt từ Mentor Hoàng Anh hoặc Thầy Hải.
+Lưu ý quan trọng: Mỗi PR bắt buộc được review bởi Thầy Hải và Mentor Hoàng Anh, sau đó PM Gia chạy eval.py để đánh giá và approve trước khi merge.
 
 ## 3. Cấu Trúc Dự Án (Project Structure)
 
@@ -104,25 +106,9 @@ hrc2026_team3/
 |-- Ubtech_sim_ref -> symlink    # Mã nguồn giả lập gốc (đường dẫn ảo)
 ```
 
-## 4. Chi Tiết Nhiệm Vụ Đặc Thù (Task Specifics)
+## 4. Quy Trình Git và Các Nguyên Tắc (Git Workflow & Rules)
 
-### Người 4 - Gia (Evaluation + Debug + Ablation)
-
-Yêu cầu kỹ năng ưu tiên: Cẩn thận, tư duy kiểm thử, kỹ năng phân tích dữ liệu (Data Analytics - Pandas/CSV/JSON), kỹ năng viết báo cáo rõ ràng.
-
-#### Các Output Bắt Buộc (Deliverables)
-
-- Tạo log schema: File episode_log.csv và step_log.jsonl.
-- Viết evaluator: Script eval.py.
-- Hàm kiểm chứng: Hàm verify_in_bin() để xác nhận cấu kiện rơi đúng thùng.
-- Tạo bộ phân loại lỗi: File failure_taxonomy_task1.yaml (Định nghĩa các loại lỗi thường gặp).
-- Đánh giá hàng loạt (Batch Evaluation): Chạy và xuất kết quả ra eval_summary.csv.
-- Phân tích lỗi: Tổng hợp các trường hợp lỗi phổ biến nhất vào failure_cases.jsonl.
-- Phân tích loại bỏ (Ablation Study): So sánh các version qua ablation_task1.csv.
-
-## 5. Quy Trình Git và Các Nguyên Tắc (Git Workflow & Rules)
-
-### 5.1 Quy Ước Đặt Tên Nhánh (Branch Naming Convention)
+### 4.1 Quy Ước Đặt Tên Nhánh (Branch Naming Convention)
 
 Cú pháp: <tên_thành_viên>/<module>-<mô-tả-ngắn-gọn>
 
@@ -135,7 +121,7 @@ Ví dụ:
 - gia/evaluation-episode-logger
 - pm/integration-run-script
 
-### 5.2 Định Dạng Thông Điệp Commit (Commit Message Format)
+### 4.2 Định Dạng Thông Điệp Commit (Commit Message Format)
 
 Cú pháp: <loại_thay_đổi>(<phạm_vi>): <mô_tả_ngắn_gọn>
 
@@ -148,7 +134,7 @@ Cú pháp: <loại_thay_đổi>(<phạm_vi>): <mô_tả_ngắn_gọn>
 | refactor | Cải thiện cấu trúc mã (không thay đổi tính năng) | refactor(planner): simplify FSM |
 | wip | Lưu tạm tiến độ (chưa hoàn thành) | wip: saving progress before leaving |
 
-### 5.3 Quy Trình Làm Việc Hàng Ngày (Daily Workflow)
+### 4.3 Quy Trình Làm Việc Hàng Ngày (Daily Workflow)
 
 KHI VÀO workspace:
 
@@ -160,21 +146,25 @@ git checkout <nhánh-của-mình>
 git merge main
 ```
 
-Nhắn tin vào nhóm Zalo: [VÀO] <Tên> vào lúc <giờ>, làm <việc>
+Chỉ nhận báo cáo khi có PR theo lịch đăng ký sheet.
 
-TRONG LÚC LÀM VIỆC (mỗi 30-60 phút):
+TRONG LÚC LÀM VIỆC (thường xuyên kiểm tra):
 
-7. git add -A
-8. git commit -m "<loại>(<phạm_vi>): <mô_tả>"
+```bash
+git add -A
+git commit -m "<loại>(<phạm_vi>): <mô_tả>"
+```
 
 TRƯỚC KHI RỜI ĐI (BẮT BUỘC):
 
-9. git add -A
-10. git commit -m "wip: saving progress"
-11. git push origin <nhánh-của-mình>
-12. Nhắn tin vào nhóm Zalo: [RA] <Tên> rời lúc <giờ>, đã push <nhánh>
+```bash
+git add -A
+git commit -m "wip: saving progress"
+git push origin <nhánh-của-mình>
+```
 
-### 5.4 Quy Trình Tạo Yêu Cầu Gộp Mã (Pull Request - PR)
+
+### 4.4 Quy Trình Tạo Yêu Cầu Gộp Mã (Pull Request - PR)
 
 Bước 1: Hoàn thành tính năng trên nhánh cá nhân
 
@@ -186,12 +176,12 @@ git push origin tai/perception
 
 Bước 2: Tạo PR trên GitHub
 
-Truy cập https://github.com/Royal2005-coder/hrc2026-team3
-Chọn tab "Pull requests" -> "New pull request"
-Base: main <- Compare: tai/perception
-Tiêu đề (Title): "feat(perception): detect + classify 4 workpieces"
-Mô tả (Description): Ghi rõ những thay đổi, các tệp kết quả đầu ra, và các bài kiểm thử đã chạy.
-Người đánh giá (Assign reviewers): PM Gia (bắt buộc).
+- Truy cập https://github.com/Royal2005-coder/hrc2026-team3
+- Chọn tab "Pull requests" -> "New pull request".
+- Base: main <- Compare: tai/perception.
+- Tiêu đề (Title): "feat(perception): detect + classify 4 workpieces".
+- Mô tả (Description): Ghi rõ những thay đổi, các tệp kết quả đầu ra, và các bài kiểm thử đã chạy.
+- Người đánh giá (Assign reviewers): bắt buộc assign Thầy Hải, Mentor Hoàng Anh và PM Gia.
 
 Bước 3: Thông báo trên Zalo
 
@@ -199,9 +189,9 @@ Bước 3: Thông báo trên Zalo
 
 Bước 4: Xem xét và đánh giá (Review)
 
-PM Gia: Đánh giá mã nguồn, chạy thử, kiểm tra kết quả đầu ra.
-Cố vấn Hoàng Anh: Đánh giá kiến trúc hệ thống (nếu có thay đổi lớn).
-Thầy Hải: Đánh giá lần cuối trước khi nộp (nếu là mã nộp thi).
+- Thứ tự review: Thầy Hải (Teacher) -> Mentor Hoàng Anh -> PM Gia.
+- Thầy Hải và Mentor Hoàng Anh review và xác nhận đạt chuẩn yêu cầu.
+- PM Gia chạy eval.py, ghi log và đánh giá kết quả tự động, sau đó approve.
 
 Bước 5: Chỉnh sửa theo phản hồi (Nếu có)
 
@@ -223,7 +213,7 @@ git checkout main && git pull
 git checkout <nhánh-mình> && git merge main
 ```
 
-### 5.5 Danh Sách Kiểm Tra Trước Khi Tạo PR (PR Checklist)
+### 4.5 Danh Sách Kiểm Tra Trước Khi Tạo PR (PR Checklist)
 
 (Người tạo PR tự kiểm tra)
 
@@ -234,33 +224,31 @@ git checkout <nhánh-mình> && git merge main
 - [ ] Không gắn cứng đường dẫn (hard-code path) trong mã nguồn (Sử dụng đường dẫn trong file configs/).
 - [ ] Đã kiểm thử thành công trên môi trường workspace chung.
 
-## 6. Quy Tắc Giao Tiếp Trên Nhóm Zalo
+## 5. Quy Tắc Giao Tiếp Trên Nhóm Zalo
 
-### 6.1 Cú Pháp Tin Nhắn
+### 5.1 Cú Pháp Tin Nhắn
 
 | Tag | Khi Nào Sử Dụng | Cú Pháp | Ví Dụ |
 | --- | --- | --- | --- |
-| [VÀO] | Khi bắt đầu làm việc trên workspace | [VÀO] <Tên> vào lúc <giờ>, làm <việc> | [VÀO] Tài vào lúc 14:00, làm perception detect |
-| [RA] | Khi dừng làm việc và rời workspace | [RA] <Tên> rời lúc <giờ>, đã push <nhánh> | [RA] Tài rời lúc 16:00, đã push tai/perception |
-| [PR] | Thông báo vừa tạo Pull Request | [PR] <Tên> tạo PR #<số> — <mô_tả>. Xin review: @<tên> | [PR] Tài tạo PR #1 — detect workpieces. @Gia review |
-| [MERGED] | Thông báo PR đã được gộp | [MERGED] PR #<số> đã merge vào main | [MERGED] PR #1 đã merge. Mọi người pull main |
-| [LỖI] | Khi gặp lỗi cần hỗ trợ | [LỖI] <Tên> gặp lỗi <mô_tả>, cần help | [LỖI] Vinh gặp lỗi Isaac Sim crash khi pick-place |
-| [HỎI] | Thắc mắc chung | [HỎI] <Câu_hỏi> | [HỎI] Camera nào dùng cho Task 1? |
-| [BLOCK] | Bị tắc nghẽn, cần kết quả từ người khác | [BLOCK] <Tên> bị chặn bởi <việc>, cần @<tên> | [BLOCK] Thư cần perception output từ @Tài |
+| [PR] | Thành viên tạo PR và thông báo | [PR] <Tên> tạo PR #<số> — <mô_tả>. Xin review: @<tên> | [PR] Tài tạo PR #1 — detect workpieces. @Gia review |
+| [MERGED] | PM thông báo PR đã được gộp | [MERGED] PR #<số> đã merge vào main | [MERGED] PR #1 đã merge. Mọi người pull main |
+| [LỖI] | Thành viên gặp lỗi cần hỗ trợ | [LỖI] <Tên> gặp lỗi <mô_tả>, cần help | [LỖI] Vinh gặp lỗi Isaac Sim crash khi pick-place |
+| [HỎI] | Thành viên thắc mắc chung | [HỎI] <Câu_hỏi> | [HỎI] Camera nào dùng cho Task 1? |
+| [BLOCK] | Thành viên bị tắc nghẽn, cần kết quả từ người khác | [BLOCK] <Tên> bị chặn bởi <việc>, cần @<tên> | [BLOCK] Thư cần perception output từ @Tài |
 
-### 6.2 Quy Tắc Sử Dụng Workspace
+### 5.2 Quy Tắc Sử Dụng Workspace
 
 - Trước khi VÀO: Luôn hỏi trên nhóm Zalo để kiểm tra xem có ai đang sử dụng hay không.
 - KHÔNG dừng (stop) workspace khi chưa hỏi ý kiến cả đội.
 - Nếu gặp lỗi: Chụp màn hình log lỗi và thông báo ngay lập tức. KHÔNG tự ý xóa file hệ thống hoặc file của người khác.
 
-## 7. Thông Số Kỹ Thuật Task 1 — Desktop Sorting
+## 6. Thông Số Kỹ Thuật Task 1 — Desktop Sorting
 
-### 7.1 Mục Tiêu (Goal)
+### 6.1 Mục Tiêu (Goal)
 
 Robot thực hiện gắp 4 cấu kiện (2 loại A + 2 loại B) và đặt vào đúng vị trí thùng (bin) tương ứng.
 
-### 7.2 Cấu Hình Robot Walker S2
+### 6.2 Cấu Hình Robot Walker S2
 
 - Tổng cộng 41 khớp (joints) | 16 bậc tự do (DOF) đang kích hoạt (2 khớp hông + 2x7 khớp tay).
 - Điểm tác động cuối (End-effector): L_sixforce_link / R_sixforce_link.
@@ -268,7 +256,7 @@ Robot thực hiện gắp 4 cấu kiện (2 loại A + 2 loại B) và đặt v�
 - Động học ngược (IK): Thư viện Pinocchio [x,y,z,roll,pitch,yaw] so với hệ tọa độ gốc của robot.
 - Tọa độ (Coordinate): Dùng hàm world_to_robot() thông qua điểm neo torso_link.
 
-### 7.3 Bố Trí Môi Trường (Scene Layout)
+### 6.3 Bố Trí Môi Trường (Scene Layout)
 
 | Đối Tượng | Vị Trí (Position) | Ghi Chú |
 | --- | --- | --- |
@@ -277,12 +265,12 @@ Robot thực hiện gắp 4 cấu kiện (2 loại A + 2 loại B) và đặt v�
 | Hộp/Thùng (Box/Bins) | [1.20, 0.30, 1.05] | Vị trí cố định, không thay đổi |
 | Khu Vực Cấu Kiện | Tâm điểm [0.75, 0.28, 1.04] | Phạm vi rải: $x \in [0.50, 0.80]$, $y \in [0.10, 0.30]$ |
 
-### 7.4 Phân Loại Cấu Kiện (Part Variants)
+### 6.4 Phân Loại Cấu Kiện (Part Variants)
 
 - Cấu kiện A (Part A): Màu đồng/vàng nguyên bản (ori_color) kết hợp màu đỏ.
 - Cấu kiện B (Part B): Màu xanh dương kết hợp màu nguyên bản (ori_color).
 
-### 7.5 Hệ Thống Camera
+### 6.5 Hệ Thống Camera
 
 | Tên Camera | Vị Trí Gắn | Chức Năng / Ghi Chú |
 | --- | --- | --- |
@@ -291,7 +279,7 @@ Robot thực hiện gắp 4 cấu kiện (2 loại A + 2 loại B) và đặt v�
 | waist_front_cam | Gốc s2_v1 (root) | Camera trước cố định |
 | back_rear_cam | waist_pitch_link | Không sử dụng trong Task 1 |
 
-## 8. Luồng Xử Lý Chính (Pipeline)
+## 7. Luồng Xử Lý Chính (Pipeline)
 
 ```
 observe()
@@ -306,7 +294,7 @@ observe()
   -> Lặp lại cho đến khi xử lý xong 4 cấu kiện hoặc hết thời gian (timeout).
 ```
 
-## 9. Tiêu Chí Đánh Giá (Metrics)
+## 8. Tiêu Chí Đánh Giá (Metrics)
 
 | Tiêu Chí | Đạt Yêu Cầu Cơ Bản (MVP) | Xuất Sắc (Good) |
 | --- | --- | --- |
@@ -317,7 +305,7 @@ observe()
 | Số lần va chạm (collision_count) | $0-10$ | $0$ |
 | Số lần thử lại (retry_count) | $\le 2$ | $\le 1$ |
 
-## 10. Các Đường Dẫn Quan Trọng (Key Paths)
+## 9. Các Đường Dẫn Quan Trọng (Key Paths)
 
 | Mục | Đường Dẫn (Path) |
 | --- | --- |
@@ -330,7 +318,7 @@ observe()
 | Kịch bản thiết lập ban đầu | bash /home/ubuntu/auto_setup.sh |
 | Thư mục sao lưu sửa đổi Baseline | /home/ubuntu/backup_baseline_mods/ |
 
-## 11. Tóm Tắt Kỷ Luật (Rules Summary)
+## 10. Tóm Tắt Kỷ Luật (Rules Summary)
 
 - KHÔNG lập trình trực tiếp trên nhánh main. Phải tạo PR và chờ được review duyệt mới gộp mã.
 - LUÔN commit và push lên Git TRƯỚC KHI rời khỏi workspace.
@@ -338,12 +326,12 @@ observe()
 - CHỈ làm việc trong thư mục /home/ubuntu/hrc2026_team3/.
 - KHÔNG thay đổi các file trong /workspace/ (do sẽ bị mất dữ liệu khi khởi động lại).
 - KHÔNG tắt (stop) workspace khi chưa có sự đồng ý của cả đội.
-- Tuân thủ quy tắc thông báo trên Zalo: [VÀO], [RA], [PR], [MERGED], [LỖI].
+- Tuân thủ quy tắc thông báo trên Zalo: [PR], [MERGED], [LỖI], [HỎI], [BLOCK].
 - Mọi PR bắt buộc phải có approval từ mentor, teacher và đảm bảo chạy test PM trước khi merge.
 - Ghi chú commit (Commit message) phải đúng định dạng: type(scope): mô tả.
 - KHÔNG tự ý sửa đổi file do thành viên khác phụ trách nếu chưa thảo luận trước.
 
-## 12. Liên Kết Hữu Ích (Links)
+## 11. Liên Kết Hữu Ích (Links)
 
 | Tài Nguyên | Liên Kết (URL) |
 | --- | --- |
@@ -353,5 +341,4 @@ observe()
 | Tài Liệu Isaac Sim | https://docs.isaacsim.omniverse.nvidia.com/5.1.0/ |
 | Tài Liệu LeRobot | https://huggingface.co/docs/lerobot |
 
-Cập nhật: 18/05/2026 | Quản lý dự án: Gia | Cố vấn: Hoàng Anh | Giảng viên: Thầy Hải
-Tên Container: teleop-team3-hrc2026-team3-6bbbdf8f7d-d68bs
+Cập nhật: 18/05/2026
