@@ -1,0 +1,12 @@
+__pycache__/
+*.pyc
+.cache/
+.nv/
+*.hdf5
+*.mp4
+.vscode*/
+.cursor-server/
+.windsurf-server/
+assets
+lerobot
+Ubtech_sim_ref
