@@ -1,0 +1,121 @@
+diff --git a/.gitmodules b/.gitmodules
+index 9701e3c..02a1ef1 100755
+--- a/.gitmodules
++++ b/.gitmodules
+@@ -1,3 +1,3 @@
+ [submodule "assets"]
+ 	path = assets
+-	url = git@hf.co:UBTECH-Robotics/challenge2026_assets.git
++	url = https://huggingface.co/UBTECH-Robotics/challenge2026_assets
+diff --git a/Ubtech_sim/config/Conveyor_Sorting.yaml b/Ubtech_sim/config/Conveyor_Sorting.yaml
+index 5174087..f7235e4 100755
+--- a/Ubtech_sim/config/Conveyor_Sorting.yaml
++++ b/Ubtech_sim/config/Conveyor_Sorting.yaml
+@@ -7,11 +7,15 @@ timelimit: 100
+ 
+ task_number: 2
+ 
++# + part_a: Loại vật thể thứ nhất
++#     -> Đây là Part B (hộp nhỏ) có màu sắc gốc hoặc được tô màu
++# + part_b: Loại vật thể thứ hai  
++#     -> Đây là Task2_Part_A (bộ phận) cần phân loại từ băng tải
+ part:
+-  part_a_usd: "Collected_Part_B_ori_color/Part_B.usd"
+-  part_b_usd: "Collected_Task2_Part_A/Task2_Part_A.usd"
+-  num_parts: 4
+-  part_distance: 0.4
++  part_a_usd: "Collected_Part_B_ori_color/Part_B.usd"  # Part B (Original color)
++  part_b_usd: "Collected_Task2_Part_A/Task2_Part_A.usd"  # Task2 Part A
++  num_parts: 4  # Tổng 4 vật thể (2 loại, mỗi loại 2 cái)
++  part_distance: 0.4  # Khoảng cách giữa các vật thể trên băng tải (m)
+ 
+ plane:
+   plane_position: 
+diff --git a/Ubtech_sim/main.py b/Ubtech_sim/main.py
+index 39aa667..d1a1990 100755
+--- a/Ubtech_sim/main.py
++++ b/Ubtech_sim/main.py
+@@ -23,11 +23,11 @@ from source.config_loader import load_config, apply_scatter_config
+ from source.SceneBuilder import SceneBuilder
+ from source.RobotArticulation import RobotArticulation
+ from source.DataLogger import DataLogger
+-from source.coordinate_utils_v2 import CoordinateTransform
++from source.coordinate_utils import CoordinateTransform
+ from source.grasp_planner import GraspPlanner
+ 
+ # ── 1. Configuration ─────────────────────────────────────────────────
+-config_path = os.path.join(os.path.dirname(__file__), "config/task1.yaml")
++config_path = os.path.join(os.path.dirname(__file__), "config/Part_Sorting.yaml")
+ cfg = load_config(config_path)
+ grasp_cfg = cfg.get("grasp", {})
+ 
+@@ -52,7 +52,7 @@ data_logger = DataLogger(
+ )
+ 
+ # ── 4. Scene (scatter area → build → physics settle) ────────────────
+-scene = SceneBuilder(cfg, data_logger=data_logger, world=world)
++scene = SceneBuilder(cfg, data_logger=data_logger)
+ apply_scatter_config(cfg)
+ 
+ scene.build_all()
+@@ -98,7 +98,7 @@ compensation_matrix = np.array([
+     [0.00000e+00,  0.00000e+00,  0.00000e+00,  1.00000e+00]
+ ], dtype=np.float64)
+ 
+-coord_transform = CoordinateTransform.from_torso_link(ik_solver=robot.ik_solver,compensation_matrix=compensation_matrix)
++coord_transform = CoordinateTransform.from_torso_link(ik_solver=robot.ik_solver)
+ for _ in range(10):
+     coord_transform.verify_ee_alignment(robot.ik_solver)
+ 
+diff --git a/Ubtech_sim/source/SceneBuilder.py b/Ubtech_sim/source/SceneBuilder.py
+index 63067f0..348bf0c 100755
+--- a/Ubtech_sim/source/SceneBuilder.py
++++ b/Ubtech_sim/source/SceneBuilder.py
+@@ -47,8 +47,8 @@ class SceneBuilder:
+         self.table_cfg = self.cfg['table']
+         self.table = rep.create.from_usd(
+             self._usd_path(self.table_cfg['table_usd']),
+-            position=rep.distribution.choice(self.table_cfg['table_position'], with_replacements=False),
+-            scale=rep.distribution.choice(self.table_cfg['table_scale'], with_replacements=False),
++            position=(self.table_cfg['table_position'][0] if len(self.table_cfg['table_position'])==1 else rep.distribution.choice(self.table_cfg['table_position'], with_replacements=False)),
++            scale=(self.table_cfg['table_scale'][0] if len(self.table_cfg['table_scale'])==1 else rep.distribution.choice(self.table_cfg['table_scale'], with_replacements=False)),
+             count=len(self.table_cfg['table_position']),
+         )
+         # 保存prim路径
+diff --git a/assets b/assets
+--- a/assets
++++ b/assets
+@@ -1 +1 @@
+-Subproject commit 798c0d8973172866a25bcd53ad73950c403be837
++Subproject commit 798c0d8973172866a25bcd53ad73950c403be837-dirty
+diff --git a/lerobot/common/robot_devices/robots/isaac_sim_robot_interface.py b/lerobot/common/robot_devices/robots/isaac_sim_robot_interface.py
+index 1df5b57..ac87822 100755
+--- a/lerobot/common/robot_devices/robots/isaac_sim_robot_interface.py
++++ b/lerobot/common/robot_devices/robots/isaac_sim_robot_interface.py
+@@ -245,7 +245,7 @@ class IsaacSimRobotInterface:
+             try:
+                 self.cameras[cam_name] = Camera(prim_path=prim_path, resolution=(640, 480))
+                 self.cameras[cam_name].initialize()
+-                self.cameras[cam_name].add_distance_to_image_plane_to_frame()
++                # DISABLED (Replicator dtype bug, depth not needed for IL): self.cameras[cam_name].add_distance_to_image_plane_to_frame()
+                 logger.info(f"Camera {cam_name} initialized successfully")
+             except Exception as e:
+                 logger.warning(f"Camera {cam_name} 初始化failed: {e}")
+@@ -256,7 +256,7 @@ class IsaacSimRobotInterface:
+             orientation=[0.942732, -0.008441, 0.333388, 0.006151]
+         )
+         self.cameras['dummy_camera_top'].initialize()
+-        self.cameras['dummy_camera_top'].add_distance_to_image_plane_to_frame()
++        # DISABLED (Replicator dtype bug, depth not needed for IL): self.cameras['dummy_camera_top'].add_distance_to_image_plane_to_frame()
+ 
+         self.cameras['dummy_camera_side'] = Camera(
+             prim_path="/Replicator/Ref_Xform/Ref/dummy_camera_side",
+@@ -264,7 +264,7 @@ class IsaacSimRobotInterface:
+             orientation=[-5.94300e-03, -3.24760e-02, -2.01000e-04, 9.99455e-01]
+         )
+         self.cameras['dummy_camera_side'].initialize()
+-        self.cameras['dummy_camera_side'].add_distance_to_image_plane_to_frame()
++        # DISABLED (Replicator dtype bug, depth not needed for IL): self.cameras['dummy_camera_side'].add_distance_to_image_plane_to_frame()
+ 
+     def reinitialize_articulation(self):
+         """Rebuild Articulation object after scene reset to restore _physics_view.
