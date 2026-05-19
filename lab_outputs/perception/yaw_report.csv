@@ -1,0 +1,4 @@
+object_id,class_id,yaw_rad,grasp_width_m,approach_axis,failure_reason
+obj_001,part_A,,,,INVALID_DEPTH
+obj_002,part_A,,,,INVALID_DEPTH
+obj_003,part_B,,,,INVALID_DEPTH

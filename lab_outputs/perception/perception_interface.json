@@ -1,0 +1,69 @@
+{
+  "frame_id": 1,
+  "timestamp": 0.05,
+  "camera_name": "head_left",
+  "objects": [
+    {
+      "object_id": "obj_001",
+      "class_id": "part_A",
+      "confidence": 0.1,
+      "bbox_xyxy": [
+        85,
+        0,
+        115,
+        22
+      ],
+      "centroid_px": [
+        98.45644891122278,
+        9.926298157453935
+      ],
+      "centroid_camera_m": null,
+      "pose_base": null,
+      "grasp_hint": null,
+      "failure_reason": "INVALID_DEPTH"
+    },
+    {
+      "object_id": "obj_002",
+      "class_id": "part_A",
+      "confidence": 0.1,
+      "bbox_xyxy": [
+        0,
+        0,
+        45,
+        22
+      ],
+      "centroid_px": [
+        17.82591493570722,
+        11.90108803165183
+      ],
+      "centroid_camera_m": null,
+      "pose_base": null,
+      "grasp_hint": null,
+      "failure_reason": "INVALID_DEPTH"
+    },
+    {
+      "object_id": "obj_003",
+      "class_id": "part_B",
+      "confidence": 0.1,
+      "bbox_xyxy": [
+        0,
+        38,
+        22,
+        52
+      ],
+      "centroid_px": [
+        9.761020881670534,
+        44.559164733178655
+      ],
+      "centroid_camera_m": null,
+      "pose_base": null,
+      "grasp_hint": null,
+      "failure_reason": "INVALID_DEPTH"
+    }
+  ],
+  "summary": {
+    "num_objects": 3,
+    "num_valid_objects": 0,
+    "num_invalid_depth": 3
+  }
+}

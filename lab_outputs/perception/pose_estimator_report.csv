@@ -1,0 +1,4 @@
+object_id,class_id,u,v,depth_m,x_cam,y_cam,z_cam,x_base,y_base,z_base,status
+obj_001,part_A,98.5,9.9,,,,,,,,INVALID_DEPTH
+obj_002,part_A,17.8,11.9,,,,,,,,INVALID_DEPTH
+obj_003,part_B,9.8,44.6,,,,,,,,INVALID_DEPTH
