@@ -1,279 +1,494 @@
 """
-perception.py — Task 1 Perception Module
+perception.py — End-to-end perception pipeline for HRC2026 Task 1.
+
+Pipeline:  RGB-D → detect → classify A/B → centroid/yaw → camera-to-base → ObjectState JSON
+
 Author: Thanh Tai (N1)
-Chạy: /isaac-sim/python.sh src/task1/perception.py
 """
-from isaacsim import SimulationApp
-CONFIG = {"width": 1280, "height": 720, "headless": False}
-kit = SimulationApp(launch_config=CONFIG)
 
-import os, sys, json, csv, numpy as np, cv2 as cv
-sys.path.insert(0, "/home/ubuntu/tai/src")
-sys.path.insert(0, "/home/ubuntu/tai/src/baseline_source")
+import cv2 as cv
+import numpy as np
+import json
+import csv
+import time
 
-from isaacsim.core.api import World
-import omni, omni.replicator.core as rep
-from baseline_source.config_loader import load_config, apply_scatter_config
-from baseline_source.SceneBuilder import SceneBuilder
-from baseline_source.RobotArticulation import RobotArticulation
-from baseline_source.DataLogger import DataLogger
-from baseline_source.coordinate_utils import CoordinateTransform
-
-OUT = "/home/ubuntu/tai/lab_outputs/perception"
-os.makedirs(OUT, exist_ok=True)
-
-# ── Config ────────────────────────────────────────────────────
-cfg = load_config("/home/ubuntu/tai/configs/Part_Sorting.yaml")
-cfg["root_path"] = "/home/ubuntu/tai/assets/resources/"
-grasp_cfg = cfg.get("grasp", {})
-
-# Intrinsics hardcoded head_left 128x128
-FX = FY = (5.0 / 2.0955) * 128
-CX, CY = 64.0, 64.0
-CONF_THRESH = 0.60
-MIN_AREA = 15
-
-# HSV ranges
-PART_A_RED_L1 = np.array([  0, 120, 50])
-PART_A_RED_U1 = np.array([  8, 255, 255])
-PART_A_RED_L2 = np.array([155, 120, 50])
-PART_A_RED_U2 = np.array([179, 255, 255])
-PART_A_ORI_L  = np.array([  5, 150, 30])
-PART_A_ORI_U  = np.array([ 22, 255, 200])
-PART_B_BLUE_L = np.array([ 90,  80, 30])
-PART_B_BLUE_U = np.array([130, 255, 255])
-
-# ── Scene ─────────────────────────────────────────────────────
-omni.usd.get_context().open_stage(
-    os.path.join(cfg["root_path"], cfg["scene_usd"])
+from .camera_utils import (
+    CameraIntrinsics,
+    pixel_to_camera_point,
+    robust_depth_from_patch,
+    robust_depth_from_mask,
 )
-world = World(stage_units_in_meters=1.0, physics_dt=1/60, rendering_dt=1/20)
-world.initialize_physics()
-
-logger = DataLogger(enabled=False, csv_path=f"{OUT}/poses.csv",
-                    camera_enabled=False, camera_hdf5_path=f"{OUT}/cam.hdf5")
-scene = SceneBuilder(cfg, data_logger=logger)
-apply_scatter_config(cfg)
-scene.build_all()
-rep.orchestrator.step()
-
-world.play()
-settle_steps = int(grasp_cfg.get("settle_time", 2.0) / world.get_physics_dt())
-for _ in range(settle_steps):
-    world.step(render=False)
-print("[Init] Physics settled")
-
-world.pause()
-scene.build_robot()
-robot = RobotArticulation(prim_path="/Root/Ref_Xform/Ref", name="walkerS2")
-robot.initialize()
-world.play()
-for _ in range(30):
-    world.step(render=True)
-print("[Init] Robot ready")
-
-# ── Transform ─────────────────────────────────────────────────
-urdf_path = os.path.join(cfg["root_path"], "s2.urdf")
-robot.initialize_ik(urdf_path)
-js = robot.get_joint_states()
-if js:
-    robot.ik_solver.sync_joint_positions(js["names"], js["positions"][0])
-coord = CoordinateTransform.from_torso_link(ik_solver=robot.ik_solver)
-
-from pxr import UsdGeom
-import omni.usd as ousd
-stage = ousd.get_context().get_stage()
-xc = UsdGeom.XformCache()
-cam_prim = stage.GetPrimAtPath(
-    "/Root/Ref_Xform/Ref/head_pitch_link/head_stereo_left/head_stereo_left_Camera_01"
+from .transform_utils import (
+    transform_point,
+    rotation_matrix_to_quaternion,
 )
-if cam_prim.IsValid():
-    tf = xc.GetLocalToWorldTransform(cam_prim)
-    t_cw = np.array(tf.ExtractTranslation())
-    R_gf = tf.ExtractRotationMatrix()
-    R_cw = np.array([[R_gf[i][j] for j in range(3)] for i in range(3)]).T
-    T_world_cam = np.eye(4)
-    T_world_cam[:3, :3] = R_cw
-    T_world_cam[:3, 3]  = t_cw
-    R_bw = coord.robot_world_R_inv
-    T_base_world = np.eye(4)
-    T_base_world[:3, :3] = R_bw
-    T_base_world[:3, 3]  = -R_bw @ coord.robot_world_pos
-    T_BASE_CAM = T_base_world @ T_world_cam
-    print(f"[Transform] OK. Camera world={t_cw.round(3)}")
-else:
-    T_BASE_CAM = np.eye(4)
-    print("[Transform] WARNING: identity")
 
-# ── Helper functions ───────────────────────────────────────────
-def robust_depth(depth, u, v, mask=None, radius=4):
-    if mask is not None:
-        vals = depth[(mask > 0) & np.isfinite(depth) & (depth > 0) & (depth < 3.0)]
-        if len(vals) > 0:
-            return float(np.median(vals))
-    h, w = depth.shape
-    u, v = int(round(u)), int(round(v))
-    x1,x2 = max(0,u-radius), min(w,u+radius+1)
-    y1,y2 = max(0,v-radius), min(h,v+radius+1)
-    patch = depth[y1:y2, x1:x2]
-    vals = patch[np.isfinite(patch) & (patch > 0) & (patch < 3.0)]
-    return float(np.median(vals)) if len(vals) > 0 else None
 
-def pixel_to_base(u, v, z):
-    x = (u - CX) * z / FX
-    y = (v - CY) * z / FY
-    p_h = np.array([x, y, z, 1.0])
-    return (T_BASE_CAM @ p_h)[:3], np.array([x, y, z])
+# ═══════════════════════════════════════════════════════════════════════════
+# 1. Detection — colour-based
+# ═══════════════════════════════════════════════════════════════════════════
+def detect_by_color(rgb_bgr: np.ndarray,
+                    lower_hsv: list | np.ndarray,
+                    upper_hsv: list | np.ndarray,
+                    min_area: int = 100) -> tuple[list[dict], np.ndarray]:
+    """
+    Detect objects via HSV colour thresholding + morphology + contour analysis.
 
-def detect_hsv(bgr, lower, upper, lower2=None, upper2=None):
-    hsv = cv.cvtColor(bgr, cv.COLOR_BGR2HSV)
-    mask = cv.inRange(hsv, lower, upper)
-    if lower2 is not None:
-        mask = cv.bitwise_or(mask, cv.inRange(hsv, lower2, upper2))
-    k = np.ones((3,3), np.uint8)
-    mask = cv.morphologyEx(mask, cv.MORPH_OPEN, k)
-    mask = cv.morphologyEx(mask, cv.MORPH_CLOSE, k)
-    cnts, _ = cv.findContours(mask, cv.RETR_EXTERNAL, cv.CHAIN_APPROX_SIMPLE)
-    dets = []
-    for c in cnts:
-        area = cv.contourArea(c)
-        if area < MIN_AREA:
+    Returns
+    -------
+    detections : list of dicts with bbox_xyxy, centroid_px, area_px, contour
+    mask       : binary mask after morphology
+    """
+    hsv = cv.cvtColor(rgb_bgr, cv.COLOR_BGR2HSV)
+    mask = cv.inRange(hsv, np.array(lower_hsv, dtype=np.uint8),
+                      np.array(upper_hsv, dtype=np.uint8))
+
+    kernel = np.ones((5, 5), np.uint8)
+    mask = cv.morphologyEx(mask, cv.MORPH_OPEN, kernel)
+    mask = cv.morphologyEx(mask, cv.MORPH_CLOSE, kernel)
+
+    contours, _ = cv.findContours(mask, cv.RETR_EXTERNAL, cv.CHAIN_APPROX_SIMPLE)
+
+    detections = []
+    for cnt in contours:
+        area = cv.contourArea(cnt)
+        if area < min_area:
             continue
-        x, y, w, h = cv.boundingRect(c)
-        m = cv.moments(c)
+        x, y, w, h = cv.boundingRect(cnt)
+        m = cv.moments(cnt)
         if m["m00"] == 0:
             continue
-        obj_mask = np.zeros(mask.shape, np.uint8)
-        cv.drawContours(obj_mask, [c], -1, 255, -1)
-        dets.append({
-            "bbox": [int(x), int(y), int(x+w), int(y+h)],
-            "centroid": [float(m["m10"]/m["m00"]), float(m["m01"]/m["m00"])],
-            "area": float(area),
-            "contour": c,
-            "mask": obj_mask,
+        cx = m["m10"] / m["m00"]
+        cy = m["m01"] / m["m00"]
+        detections.append({
+            "bbox_xyxy": [int(x), int(y), int(x + w), int(y + h)],
+            "centroid_px": [float(cx), float(cy)],
+            "area_px": float(area),
+            "contour": cnt,
         })
-    return dets, mask
+    return detections, mask
 
-def make_state(det, class_id, depth, idx):
-    u, v = det["centroid"]
-    z = robust_depth(depth, u, v, mask=det["mask"])
-    if z is None:
-        return {"object_id": f"obj_{idx:03d}", "class_id": class_id,
-                "confidence": 0.1, "bbox_xyxy": det["bbox"],
-                "centroid_px": det["centroid"], "centroid_camera_m": None,
-                "pose_base": None, "grasp_hint": None,
-                "failure_reason": "INVALID_DEPTH"}
-    p_base, p_cam = pixel_to_base(u, v, z)
-    x_ok = 0.2 <= p_base[0] <= 1.3
-    y_ok = -0.2 <= p_base[1] <= 0.7
-    z_ok = 0.7 <= p_base[2] <= 1.4
-    fail = None if (x_ok and y_ok and z_ok) else "POSE_OUT_OF_RANGE"
-    conf = 0.85 if fail is None else 0.35
-    if det["area"] < MIN_AREA * 2:
-        conf -= 0.1
-    yaw = float(np.deg2rad(cv.minAreaRect(det["contour"])[-1]))
-    x1,y1,x2,y2 = det["bbox"]
-    gw = float(np.clip((x2-x1)/FX*z*0.7, 0.02, 0.08))
-    return {"object_id": f"obj_{idx:03d}", "class_id": class_id,
-            "confidence": round(conf,3), "bbox_xyxy": det["bbox"],
-            "centroid_px": [round(u,2), round(v,2)],
-            "centroid_camera_m": [round(x,4) for x in p_cam.tolist()],
-            "pose_base": {"position_m": [round(x,4) for x in p_base.tolist()],
-                          "quaternion_xyzw": [0.0, 0.0, 0.0, 1.0]},
-            "grasp_hint": {"approach_axis": "z_down",
-                           "yaw_rad": round(yaw,4),
-                           "grasp_width_m": round(gw,4)},
-            "failure_reason": fail}
 
-# ── Capture — dùng baseline method ────────────────────────────
-print("\n[Perception] Capturing...")
-rgbd  = robot.get_camera_rgbd("head_left")
-rgb   = rgbd["rgb"]
-depth = rgbd["depth"]
-if depth is not None:
-    depth = np.array(depth, dtype=np.float32)
-    if depth.ndim == 3:
-        depth = depth[:,:,0]
-bgr = cv.cvtColor(rgb, cv.COLOR_RGB2BGR)
-print(f"[Capture] RGB={rgb.shape} depth={depth.shape if depth is not None else None}")
+# ═══════════════════════════════════════════════════════════════════════════
+# 1b. Detection — depth foreground (recommended for Task 1)
+# ═══════════════════════════════════════════════════════════════════════════
+def detect_by_depth_foreground(depth: np.ndarray,
+                               fg_threshold_m: float = 0.02,
+                               min_area: int = 100) -> tuple[list[dict], np.ndarray]:
+    """
+    Detect objects above the table surface using depth.
 
-# Save samples
-cv.imwrite(f"{OUT}/sample_rgb.png", bgr)
-if depth is not None:
-    np.save(f"{OUT}/sample_depth.npy", depth)
+    Foreground = pixels significantly closer than the background median.
+    """
     valid = np.isfinite(depth) & (depth > 0)
-    print(f"[Depth] valid={valid.mean():.3f} min={depth[valid].min():.3f} "
-          f"median={np.median(depth[valid]):.3f} max={depth[valid].max():.3f}")
-    d_vis = depth.copy(); d_vis[~valid] = 0
-    d_norm = cv.normalize(d_vis, None, 0, 255, cv.NORM_MINMAX)
-    cv.imwrite(f"{OUT}/sample_depth_preview.png",
-               cv.applyColorMap(d_norm.astype(np.uint8), cv.COLORMAP_JET))
+    if valid.sum() == 0:
+        return [], np.zeros(depth.shape[:2], dtype=np.uint8)
 
-# ── Detect ────────────────────────────────────────────────────
-dets_A_red, mask_ar = detect_hsv(bgr, PART_A_RED_L1, PART_A_RED_U1,
-                                  PART_A_RED_L2, PART_A_RED_U2)
-dets_A_ori, mask_ao = detect_hsv(bgr, PART_A_ORI_L, PART_A_ORI_U)
-dets_B,     mask_b  = detect_hsv(bgr, PART_B_BLUE_L, PART_B_BLUE_U)
-dets_A = dets_A_red + dets_A_ori
-print(f"[Detect] A={len(dets_A)} (red={len(dets_A_red)} ori={len(dets_A_ori)}) "
-      f"B={len(dets_B)}")
+    median_depth = np.median(depth[valid])
 
-# ── Build states ───────────────────────────────────────────────
-objects, idx = [], 1
-for d in dets_A:
-    objects.append(make_state(d, "part_A", depth, idx)); idx += 1
-for d in dets_B:
-    objects.append(make_state(d, "part_B", depth, idx)); idx += 1
+    fg_mask = np.zeros(depth.shape[:2], dtype=np.uint8)
+    fg_mask[valid & (depth < median_depth - fg_threshold_m)] = 255
 
-valid_objs = [o for o in objects
-              if o["confidence"] >= CONF_THRESH and o["failure_reason"] is None]
-print(f"[Result] Total={len(objects)} Valid={len(valid_objs)}")
-for o in objects:
-    pos = o["pose_base"]["position_m"] if o["pose_base"] else None
-    print(f"  {o['object_id']} {o['class_id']} conf={o['confidence']} "
-          f"fail={o['failure_reason']} pos={pos}")
+    kernel = np.ones((5, 5), np.uint8)
+    fg_mask = cv.morphologyEx(fg_mask, cv.MORPH_OPEN, kernel)
+    fg_mask = cv.morphologyEx(fg_mask, cv.MORPH_CLOSE, kernel)
 
-# ── Overlay ────────────────────────────────────────────────────
-overlay = bgr.copy()
-for o in objects:
-    if not o["bbox_xyxy"]: continue
-    x1,y1,x2,y2 = o["bbox_xyxy"]
-    u,v = int(o["centroid_px"][0]), int(o["centroid_px"][1])
-    col = (0,255,0) if o["class_id"]=="part_A" else (255,128,0)
-    cv.rectangle(overlay,(x1,y1),(x2,y2),col,1)
-    cv.circle(overlay,(u,v),3,(0,0,255),-1)
-    cv.putText(overlay,f"{o['class_id'][-1]}{o['confidence']:.2f}",
-               (x1,max(0,y1-4)),cv.FONT_HERSHEY_SIMPLEX,0.3,(255,255,255),1)
-cv.imwrite(f"{OUT}/overlay_detection.png", overlay)
-mask_all = cv.bitwise_or(cv.bitwise_or(mask_ar,mask_ao),mask_b)
-cv.imwrite(f"{OUT}/overlay_mask.png", mask_all)
+    contours, _ = cv.findContours(fg_mask, cv.RETR_EXTERNAL, cv.CHAIN_APPROX_SIMPLE)
 
-# ── Save JSON ──────────────────────────────────────────────────
-result = {"frame_id":1,"timestamp":0.05,"camera_name":"head_left",
-          "objects":objects,
-          "summary":{"num_objects":len(objects),
-                     "num_valid_objects":len(valid_objs),
-                     "num_invalid_depth":sum(1 for o in objects
-                                              if o.get("failure_reason")=="INVALID_DEPTH")}}
-with open(f"{OUT}/perception_interface.json","w") as f:
-    json.dump(result,f,indent=2)
+    detections = []
+    for cnt in contours:
+        area = cv.contourArea(cnt)
+        if area < min_area:
+            continue
+        x, y, w, h = cv.boundingRect(cnt)
+        m = cv.moments(cnt)
+        if m["m00"] == 0:
+            continue
+        cx = m["m10"] / m["m00"]
+        cy = m["m01"] / m["m00"]
+        detections.append({
+            "bbox_xyxy": [int(x), int(y), int(x + w), int(y + h)],
+            "centroid_px": [float(cx), float(cy)],
+            "area_px": float(area),
+            "contour": cnt,
+        })
+    return detections, fg_mask
 
-# pose_estimator_report.csv
-with open(f"{OUT}/pose_estimator_report.csv","w",newline="") as f:
-    w=csv.writer(f)
-    w.writerow(["object_id","class_id","u","v","depth_m",
-                "x_cam","y_cam","z_cam","x_base","y_base","z_base","status"])
+
+# ═══════════════════════════════════════════════════════════════════════════
+# 2. Shape features + classification
+# ═══════════════════════════════════════════════════════════════════════════
+def extract_shape_features(contour: np.ndarray) -> dict:
+    """Extract shape features from a contour for A/B classification."""
+    area = cv.contourArea(contour)
+    perimeter = cv.arcLength(contour, True)
+    x, y, w, h = cv.boundingRect(contour)
+    hull = cv.convexHull(contour)
+    hull_area = cv.contourArea(hull) if len(hull) >= 3 else area
+
+    aspect_ratio = float(w) / h if h > 0 else 0.0
+    solidity = area / hull_area if hull_area > 0 else 0.0
+    circularity = (4 * np.pi * area) / (perimeter * perimeter) if perimeter > 0 else 0.0
+
+    moments = cv.moments(contour)
+    hu = cv.HuMoments(moments).flatten()
+    hu_log = np.array([-np.sign(h_) * np.log10(abs(h_) + 1e-20) for h_ in hu])
+
+    rect = cv.minAreaRect(contour)
+    rect_w, rect_h = rect[1]
+    min_rect_aspect = min(rect_w, rect_h) / max(rect_w, rect_h) if max(rect_w, rect_h) > 0 else 0
+
+    return {
+        "area_px": float(area),
+        "perimeter_px": float(perimeter),
+        "bbox_aspect_ratio": round(aspect_ratio, 3),
+        "min_rect_aspect": round(min_rect_aspect, 3),
+        "solidity": round(solidity, 3),
+        "circularity": round(circularity, 3),
+        "hu_moments": hu_log.tolist(),
+    }
+
+
+def classify_by_color_hint(rgb_bgr: np.ndarray,
+                           contour: np.ndarray,
+                           hsv_ranges: dict) -> tuple[str | None, float]:
+    """
+    Try to classify using colour. Returns (class_id, confidence).
+    Returns (None, 0.0) if colour is ambiguous.
+
+    hsv_ranges format:
+      red:   {lower, upper, lower2, upper2, implies_class: "part_A"}
+      blue:  {lower, upper, implies_class: "part_B"}
+    """
+    hsv = cv.cvtColor(rgb_bgr, cv.COLOR_BGR2HSV)
+    mask_contour = np.zeros(rgb_bgr.shape[:2], dtype=np.uint8)
+    cv.drawContours(mask_contour, [contour], -1, 255, -1)
+
+    for color_name, cfg in hsv_ranges.items():
+        if cfg.get("implies_class") is None:
+            continue
+
+        m1 = cv.inRange(hsv, np.array(cfg["lower"]), np.array(cfg["upper"]))
+        if "lower2" in cfg:
+            m2 = cv.inRange(hsv, np.array(cfg["lower2"]), np.array(cfg["upper2"]))
+            m1 = m1 | m2
+
+        overlap = cv.bitwise_and(m1, mask_contour)
+        overlap_ratio = overlap.sum() / (mask_contour.sum() + 1e-8)
+
+        if overlap_ratio > 0.3:
+            return cfg["implies_class"], min(0.95, 0.7 + overlap_ratio * 0.3)
+
+    return None, 0.0
+
+
+def classify_by_shape(features: dict,
+                      part_A_aspect_range: tuple = (0.0, 999.0),
+                      part_B_aspect_range: tuple = (0.0, 999.0)) -> tuple[str, float]:
+    """
+    Classify using shape when colour is ambiguous.
+    TODO: measure real Part A / Part B aspect ratios and fill in thresholds.
+    """
+    ar = features["min_rect_aspect"]
+    if part_A_aspect_range[0] <= ar <= part_A_aspect_range[1]:
+        return "part_A", 0.65
+    if part_B_aspect_range[0] <= ar <= part_B_aspect_range[1]:
+        return "part_B", 0.65
+    return "unknown", 0.40
+
+
+def classify_detections(detections_A: list[dict],
+                        detections_B: list[dict],
+                        base_confidence: float = 0.85) -> list[dict]:
+    """Tag each detection with class_id and initial confidence."""
+    all_dets = []
+    for d in detections_A:
+        d["class_id"] = "part_A"
+        d["confidence"] = base_confidence
+        all_dets.append(d)
+    for d in detections_B:
+        d["class_id"] = "part_B"
+        d["confidence"] = base_confidence
+        all_dets.append(d)
+    return all_dets
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+# 3. Yaw / grasp direction
+# ═══════════════════════════════════════════════════════════════════════════
+def estimate_yaw_minrect(contour: np.ndarray) -> float:
+    """Yaw from minAreaRect (radians). Quick MVP approach."""
+    rect = cv.minAreaRect(contour)
+    return float(np.deg2rad(rect[-1]))
+
+
+def estimate_yaw_pca(contour: np.ndarray) -> float:
+    """Yaw from PCA on contour points (more stable for elongated objects)."""
+    pts = contour.reshape(-1, 2).astype(np.float64)
+    mean = pts.mean(axis=0)
+    pts_c = pts - mean
+    cov = np.cov(pts_c, rowvar=False)
+    eigvals, eigvecs = np.linalg.eigh(cov)
+    principal = eigvecs[:, -1]
+    return float(np.arctan2(principal[1], principal[0]))
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+# 4. Confidence scoring
+# ═══════════════════════════════════════════════════════════════════════════
+def compute_confidence(area_px: float,
+                       depth_valid: bool,
+                       mask_quality: float = 1.0,
+                       class_ambiguous: bool = False,
+                       min_area: float = 200) -> float:
+    """Rule-based confidence in [0, 1]. Start at 1.0 and subtract penalties."""
+    conf = 1.0
+    if area_px < min_area:
+        conf -= 0.30
+    if not depth_valid:
+        conf -= 0.40
+    if mask_quality < 0.5:
+        conf -= 0.20
+    if class_ambiguous:
+        conf -= 0.20
+    return max(0.0, min(1.0, conf))
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+# 5. Full object state builder
+# ═══════════════════════════════════════════════════════════════════════════
+FAILURE_REASONS = [
+    "NO_OBJECT_DETECTED",
+    "LOW_CONFIDENCE",
+    "INVALID_DEPTH",
+    "CLASS_AMBIGUOUS",
+    "MASK_TOO_SMALL",
+    "MASK_FRAGMENTED",
+    "POSE_OUT_OF_RANGE",
+    "TRANSFORM_NOT_AVAILABLE",
+    "GRASP_HINT_UNSTABLE",
+]
+
+
+def make_object_state(det: dict,
+                      depth: np.ndarray,
+                      intr: CameraIntrinsics,
+                      T_base_camera: np.ndarray | None,
+                      object_id: str = "obj_000",
+                      yaw_method: str = "minrect",
+                      default_grasp_width: float = 0.045,
+                      confidence_threshold: float = 0.50) -> dict:
+    """Build a single ObjectState dict from a detection + depth + transforms."""
+    u, v = det["centroid_px"]
+    class_id = det.get("class_id", "unknown")
+    contour = det.get("contour")
+
+    z = robust_depth_from_patch(depth, u, v, radius=3)
+    depth_valid = z is not None
+
+    conf = compute_confidence(
+        area_px=det.get("area_px", 0),
+        depth_valid=depth_valid,
+    )
+
+    failure = None
+    if not depth_valid:
+        failure = "INVALID_DEPTH"
+    elif conf < confidence_threshold:
+        failure = "LOW_CONFIDENCE"
+    elif T_base_camera is None:
+        failure = "TRANSFORM_NOT_AVAILABLE"
+
+    centroid_camera = None
+    if depth_valid:
+        z_m = z * intr.depth_scale()
+        centroid_camera = pixel_to_camera_point(u, v, z_m, intr)
+
+    pose_base = None
+    if centroid_camera is not None and T_base_camera is not None:
+        p_base = transform_point(T_base_camera, centroid_camera)
+        pose_base = {
+            "position_m": p_base.tolist(),
+            "quaternion_xyzw": [0.0, 0.0, 0.0, 1.0],
+        }
+
+    yaw = 0.0
+    if contour is not None and len(contour) >= 5:
+        if yaw_method == "pca":
+            yaw = estimate_yaw_pca(contour)
+        else:
+            yaw = estimate_yaw_minrect(contour)
+
+    return {
+        "object_id": object_id,
+        "class_id": class_id,
+        "confidence": round(conf, 3),
+        "bbox_xyxy": det["bbox_xyxy"],
+        "centroid_px": det["centroid_px"],
+        "centroid_camera_m": centroid_camera.tolist() if centroid_camera is not None else None,
+        "pose_base": pose_base,
+        "grasp_hint": {
+            "approach_axis": "z_down",
+            "yaw_rad": round(yaw, 4),
+            "grasp_width_m": default_grasp_width,
+        },
+        "failure_reason": failure,
+    }
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+# 6. Full-frame perception
+# ═══════════════════════════════════════════════════════════════════════════
+def run_perception(rgb_bgr: np.ndarray,
+                   depth: np.ndarray,
+                   intr: CameraIntrinsics,
+                   T_base_camera: np.ndarray | None,
+                   hsv_ranges: dict,
+                   frame_id: int = 0,
+                   camera_name: str = "head_stereo_left",
+                   detection_method: str = "color") -> dict:
+    """
+    Run full perception pipeline on one RGB-D frame.
+
+    Parameters
+    ----------
+    rgb_bgr          : BGR image (H, W, 3)
+    depth            : depth map (H, W), raw unit
+    intr             : CameraIntrinsics
+    T_base_camera    : 4×4 or None
+    hsv_ranges       : colour config from YAML
+    frame_id         : sequential frame number
+    camera_name      : identifier string
+    detection_method : "color" (legacy) or "depth_fg" (recommended for Task 1)
+
+    Returns
+    -------
+    dict matching perception_interface.json schema
+    """
+    timestamp = round(time.time(), 3)
+
+    if detection_method == "depth_fg":
+        all_dets, _ = detect_by_depth_foreground(depth)
+        for det in all_dets:
+            contour = det["contour"]
+            cls, cls_conf = classify_by_color_hint(rgb_bgr, contour, hsv_ranges)
+            if cls is not None:
+                det["class_id"] = cls
+                det["confidence"] = cls_conf
+            else:
+                features = extract_shape_features(contour)
+                det["shape_features"] = features
+                cls, cls_conf = classify_by_shape(features)
+                det["class_id"] = cls
+                det["confidence"] = cls_conf
+                if cls == "unknown":
+                    det["failure_reason_hint"] = "CLASS_AMBIGUOUS"
+    else:
+        # Legacy pure colour-based detection
+        dets_A, _ = detect_by_color(
+            rgb_bgr,
+            hsv_ranges.get("part_A", hsv_ranges.get("red", {})).get("lower", [0, 100, 100]),
+            hsv_ranges.get("part_A", hsv_ranges.get("red", {})).get("upper", [10, 255, 255]),
+        )
+        dets_B, _ = detect_by_color(
+            rgb_bgr,
+            hsv_ranges.get("part_B", hsv_ranges.get("blue", {})).get("lower", [100, 100, 100]),
+            hsv_ranges.get("part_B", hsv_ranges.get("blue", {})).get("upper", [130, 255, 255]),
+        )
+        all_dets = classify_detections(dets_A, dets_B)
+
+    objects = []
+    for idx, det in enumerate(all_dets):
+        obj = make_object_state(det, depth, intr, T_base_camera, object_id=f"obj_{idx:03d}")
+        objects.append(obj)
+
+    num_valid = sum(1 for o in objects if o["failure_reason"] is None)
+
+    return {
+        "frame_id": frame_id,
+        "timestamp": timestamp,
+        "camera_name": camera_name,
+        "objects": objects,
+        "summary": {
+            "num_objects": len(objects),
+            "num_valid_objects": num_valid,
+            "num_invalid_depth": sum(
+                1 for o in objects if o["failure_reason"] == "INVALID_DEPTH"
+            ),
+        },
+    }
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+# 7. Export helpers
+# ═══════════════════════════════════════════════════════════════════════════
+def save_perception_json(state: dict, path: str = "perception_interface.json"):
+    """Write perception output to JSON (strips non-serialisable contours)."""
+    clean = json.loads(json.dumps(state, default=str))
+    with open(path, "w") as f:
+        json.dump(clean, f, indent=2)
+    return path
+
+
+def save_pose_report_csv(objects: list[dict],
+                         path: str = "pose_estimator_report.csv"):
+    """Write per-object pose report CSV."""
+    header = ["object_id", "class_id", "u", "v",
+              "depth_m", "x_cam", "y_cam", "z_cam",
+              "x_base", "y_base", "z_base", "status"]
+    rows = []
     for o in objects:
-        u,v=o["centroid_px"]
-        cam=o.get("centroid_camera_m") or [None,None,None]
-        base=o["pose_base"]["position_m"] if o["pose_base"] else [None,None,None]
-        w.writerow([o["object_id"],o["class_id"],round(u,1),round(v,1),
-                    cam[2],cam[0],cam[1],cam[2],base[0],base[1],base[2],
-                    o.get("failure_reason") or "ok"])
+        u, v = o["centroid_px"]
+        cam = o["centroid_camera_m"]
+        base = o["pose_base"]["position_m"] if o["pose_base"] else [None] * 3
+        depth_m = cam[2] if cam else None
+        status = "ok" if o["failure_reason"] is None else o["failure_reason"]
+        rows.append([
+            o["object_id"], o["class_id"],
+            round(u, 1), round(v, 1),
+            round(depth_m, 4) if depth_m else None,
+            round(cam[0], 4) if cam else None,
+            round(cam[1], 4) if cam else None,
+            round(cam[2], 4) if cam else None,
+            round(base[0], 4) if base[0] is not None else None,
+            round(base[1], 4) if base[1] is not None else None,
+            round(base[2], 4) if base[2] is not None else None,
+            status,
+        ])
+    with open(path, "w", newline="") as f:
+        w = csv.writer(f)
+        w.writerow(header)
+        w.writerows(rows)
+    return path
 
-print(f"\n[Done] lab_outputs/perception/")
-print(f"  overlay_detection.png")
-print(f"  perception_interface.json")
 
-logger.close()
-kit.close()
+def save_yaw_report_csv(objects: list[dict],
+                        path: str = "yaw_report.csv"):
+    """Write per-object yaw/grasp direction report."""
+    header = ["object_id", "class_id", "yaw_rad", "yaw_deg",
+              "grasp_width_m", "approach_axis"]
+    rows = []
+    for o in objects:
+        gh = o.get("grasp_hint", {})
+        yaw_r = gh.get("yaw_rad", 0)
+        rows.append([
+            o["object_id"], o["class_id"],
+            round(yaw_r, 4), round(np.degrees(yaw_r), 2),
+            gh.get("grasp_width_m"), gh.get("approach_axis"),
+        ])
+    with open(path, "w", newline="") as f:
+        w = csv.writer(f)
+        w.writerow(header)
+        w.writerows(rows)
+    return path
+
+
+def save_failure_cases_jsonl(objects: list[dict],
+                             path: str = "failure_cases_perception.jsonl"):
+    """Append failed objects to a JSONL log."""
+    with open(path, "a") as f:
+        for o in objects:
+            if o["failure_reason"] is not None:
+                line = {k: v for k, v in o.items() if k != "contour"}
+                f.write(json.dumps(line, default=str) + "\n")
+    return path
