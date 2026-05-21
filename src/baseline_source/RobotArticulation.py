@@ -48,6 +48,18 @@ class RobotArticulation:
         self._ik_warn_counter = 0
         self._smooth_alpha = 0.3  # EMA smoothing: 0=no change, 1=instant
         self._last_arm_positions = {}  # side -> np.array of last sent positions
+
+        # Gripper configuration variables added from interface
+        self.gripper_close_width = 0.01
+        self.gripper_open_width = -0.0215
+        self.finger_joint_names = [
+            "L_finger1_joint",
+            "L_finger2_joint",
+            "R_finger1_joint",
+            "R_finger2_joint",
+        ]
+        self.finger_joint_indices = []
+
     def initialize(self):
         """初始化articulation用于仿真"""
         self._articulation = Articulation(
@@ -84,6 +96,14 @@ class RobotArticulation:
         self._articulation.set_joint_positions(torch.tensor(self.inital_joint_positions), joint_indices=torch.tensor(s2_joint_indices))
     
         self._setup_cameras()
+
+        # Populate finger joint indices
+        self.finger_joint_indices = []
+        for finger_joint in self.finger_joint_names:
+            if finger_joint in s2_joint_names:
+                idx = self._articulation.get_dof_index(finger_joint)
+                self.finger_joint_indices.append(idx)
+
     def _setup_cameras(self):
         """Setup cameras with fixed prim paths"""
         # Head cameras
@@ -108,6 +128,7 @@ class RobotArticulation:
         )
         self.cameras['wrist_right'].initialize()
         self.cameras['wrist_right'].add_distance_to_image_plane_to_frame()
+
     def cleanup(self):
         """清理资源"""
         if self._articulation is not None:
@@ -232,7 +253,7 @@ class RobotArticulation:
             # 锁定到当前姿态，避免每步被强拉回 0 导致抖动
             self._waist_legs_init_positions.append(float(0.0))
 
-        # 先将腰部腿部关节设为目标值，再同步到 pinocchio
+        # 先将腰部腿部关节设为目标值，再同步 to pinocchio
         if self._waist_legs_isaac_indices:
             self._articulation.set_joint_positions(
                 torch.tensor(self._waist_legs_init_positions, dtype=torch.float32),
@@ -385,3 +406,79 @@ class RobotArticulation:
         sixforces = self.get_sixforce()
 
         target_positions = []
+
+    def set_finger_positions(self, target_fingers, side: Optional[str] = None, task_num: int = None):
+        """Set gripper target positions.
+
+        side semantics:
+        - None: expects 4D [L_f1, L_f2, R_f1, R_f2]
+        - "left"/"right": expects 2D
+        """
+        from isaacsim.core.utils.types import ArticulationActions
+
+        if self._articulation is None:
+            raise RuntimeError("Articulation uninitialized")
+
+        if not isinstance(target_fingers, torch.Tensor):
+            target_fingers = torch.tensor(target_fingers, dtype=torch.float32)
+        target_fingers = target_fingers.flatten()
+
+        if side == "left":
+            if target_fingers.shape[0] != 2:
+                raise ValueError(f"left GripperExpected2joint positions，got {target_fingers.shape[0]} ")
+            control_indices = torch.tensor(self.finger_joint_indices[:2], dtype=torch.int32)
+        elif side == "right":
+            if target_fingers.shape[0] != 2:
+                raise ValueError(f"right GripperExpected2joint positions，got {target_fingers.shape[0]} ")
+            control_indices = torch.tensor(self.finger_joint_indices[2:4], dtype=torch.int32)
+        else:
+            if target_fingers.shape[0] != 4:
+                raise ValueError(f"机器人接口Expected4Finger joint位置，got {target_fingers.shape[0]} ")
+            control_indices = torch.tensor(self.finger_joint_indices, dtype=torch.int32)
+
+        self._articulation.apply_action(
+            ArticulationActions(
+                joint_positions=target_fingers.unsqueeze(0),
+                joint_indices=control_indices
+            )
+        )
+
+    def close_gripper(self, side: Optional[str] = None, task_name: Optional[str] = None):
+        """Close gripper on specified side (without world.step, safe to call in callback)"""
+        from isaacsim.core.utils.types import ArticulationActions
+        target_pos = [self.gripper_close_width] * 2
+
+        if side == "left":
+            control_finger_indices = torch.tensor(self.finger_joint_indices[:2], dtype=torch.int32)
+        elif side == "right":
+            control_finger_indices = torch.tensor(self.finger_joint_indices[2:4], dtype=torch.int32)
+        else:
+            control_finger_indices = torch.tensor(self.finger_joint_indices, dtype=torch.int32)
+            target_pos = target_pos * 2
+
+        self._articulation.apply_action(
+            ArticulationActions(
+                joint_positions=torch.tensor([target_pos], dtype=torch.float32),
+                joint_indices=control_finger_indices,
+            )
+        )
+
+    def open_gripper(self, side: Optional[str] = None, task_name: Optional[str] = None):
+        """Open gripper on specified side (without world.step, safe to call in callback)"""
+        from isaacsim.core.utils.types import ArticulationActions
+        target_pos = [self.gripper_open_width] * 2
+
+        if side == "left":
+            control_finger_indices = torch.tensor(self.finger_joint_indices[:2], dtype=torch.int32)
+        elif side == "right":
+            control_finger_indices = torch.tensor(self.finger_joint_indices[2:4], dtype=torch.int32)
+        else:
+            control_finger_indices = torch.tensor(self.finger_joint_indices, dtype=torch.int32)
+            target_pos = target_pos * 2
+
+        self._articulation.apply_action(
+            ArticulationActions(
+                joint_positions=torch.tensor([target_pos], dtype=torch.float32),
+                joint_indices=control_finger_indices,
+            )
+        )
