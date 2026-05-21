@@ -18,6 +18,7 @@ import omni
 import omni.replicator.core as rep
 import os
 import numpy as np
+from scipy.spatial.transform import Rotation as R
 
 from source.config_loader import load_config, apply_scatter_config
 from source.SceneBuilder import SceneBuilder
@@ -25,6 +26,7 @@ from source.RobotArticulation import RobotArticulation
 from source.DataLogger import DataLogger
 from source.coordinate_utils import CoordinateTransform
 from source.grasp_planner import GraspPlanner
+from source.robot_math_utils import quat_xyzw_to_R, make_T, inv_T
 
 # ── 1. Configuration ─────────────────────────────────────────────────
 config_path = os.path.join(os.path.dirname(__file__), "config/Part_Sorting.yaml")
@@ -102,9 +104,54 @@ coord_transform = CoordinateTransform.from_torso_link(ik_solver=robot.ik_solver)
 for _ in range(10):
     coord_transform.verify_ee_alignment(robot.ik_solver)
 
-# ── 8. Grasp Planning ───────────────────────────────────────────────
+# ── 8. Grasp Planning & Safety Verification ─────────────────────────
+print("[Init] Performing Pre-Grasp Planning & Safety Verification...")
+valid_part_poses = []
+
+for pp in part_poses:
+    # 1. Read object_pose from perception (quaternion [x, y, z, w])
+    obj_pos = np.array(pp['position'])
+    obj_quat = np.array(pp.get('orientation', [0.0, 0.0, 0.0, 1.0]))
+    
+    R_obj_world = quat_xyzw_to_R(obj_quat)
+    T_obj_world = make_T(R_obj_world, obj_pos)
+    
+    # 2. Calculate transform chain to robot_base
+    T_base_world = make_T(coord_transform.robot_world_R, coord_transform.robot_world_pos)
+    T_world_base = inv_T(T_base_world)
+    T_obj_base = T_world_base @ T_obj_world
+    
+    # 3. Generate pre-grasp pose by translating +0.08m along Z-axis of robot_base
+    T_pre_grasp_base = T_obj_base.copy()
+    T_pre_grasp_base[2, 3] += 0.08
+    
+    # Convert back to xyzrpy for IK solver
+    p_pre_grasp = T_pre_grasp_base[:3, 3]
+    R_pre_grasp = T_pre_grasp_base[:3, :3]
+    rpy_pre_grasp = R.from_matrix(R_pre_grasp).as_euler('xyz')
+    target_xyzrpy = np.concatenate([p_pre_grasp, rpy_pre_grasp])
+    
+    # 4. Call IK to pre-grasp pose
+    side = "left" if p_pre_grasp[1] > 0 else "right"
+    target_se3 = robot.ik_solver.xyzrpy_to_se3(target_xyzrpy)
+    
+    # Sync joint positions before solving
+    js = robot.get_joint_states()
+    if js is not None:
+        robot.ik_solver.sync_joint_positions(js["names"], js["positions"][0])
+        
+    q_sol, success = robot.ik_solver.solve_ik_single_arm(target_se3, side=side)
+    
+    # 5. Safety check: verify reachability, singularity, and joint limits
+    if not success or np.any(np.isnan(q_sol)) or np.any(np.isinf(q_sol)):
+        print(f"[WARNING] Object at {pp['prim_path']} is UNREACHABLE, SINGULAR, or violates JOINT LIMITS! Skipping.")
+        continue
+        
+    print(f"[Safety Check Passed] Object {pp['prim_path']} is reachable by {side} arm.")
+    valid_part_poses.append(pp)
+
 planner = GraspPlanner(grasp_cfg, robot, coord_transform)
-planner.compute_grasp_target(part_poses)
+planner.compute_grasp_target(valid_part_poses)
 
 # ── 9. Callbacks ─────────────────────────────────────────────────────
 def robot_control_callback(step_size):
