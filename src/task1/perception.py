@@ -420,7 +420,85 @@ def run_perception(rgb_bgr: np.ndarray,
 
 
 # ═══════════════════════════════════════════════════════════════════════════
-# 7. Export helpers
+# 7. Public interface for task1_runner (N2 calls this)
+# ═══════════════════════════════════════════════════════════════════════════
+
+# Default HSV ranges — có thể override khi gọi detect_parts()
+_DEFAULT_HSV_RANGES = {
+    "red": {
+        "lower": [0, 100, 100], "upper": [10, 255, 255],
+        "lower2": [170, 100, 100], "upper2": [179, 255, 255],
+        "implies_class": "part_A",
+    },
+    "blue": {
+        "lower": [100, 100, 100], "upper": [130, 255, 255],
+        "implies_class": "part_B",
+    },
+    "ori_color": {
+        "lower": [0, 0, 50], "upper": [179, 60, 200],
+        "implies_class": None,
+    },
+}
+
+
+def detect_parts(rgb: np.ndarray,
+                 depth: np.ndarray,
+                 intr: "CameraIntrinsics",
+                 T_base_camera: np.ndarray,
+                 confidence_threshold: float = 0.60,
+                 detection_method: str = "depth_fg",
+                 hsv_ranges: dict = None) -> list[dict]:
+    """
+    Interface chính cho task1_runner — N2 gọi hàm này.
+
+    Parameters
+    ----------
+    rgb               : RGB image từ robot.get_camera_rgbd() (H, W, 3)
+    depth             : depth map (H, W) float32, đơn vị metre
+    intr              : CameraIntrinsics của head_left
+    T_base_camera     : 4×4 transform camera → robot base
+    confidence_threshold : lọc vật có confidence thấp
+    detection_method  : "depth_fg" (recommended) | "color"
+    hsv_ranges        : override HSV config nếu cần
+
+    Returns
+    -------
+    list[dict] — chỉ những vật hợp lệ, mỗi vật có:
+        object_id    : "obj_000"
+        class_id     : "part_A" | "part_B"
+        confidence   : float
+        pose_base    : {"position_m": [x, y, z], "quaternion_xyzw": [...]}
+        grasp_hint   : {"yaw_rad": float, "grasp_width_m": float, ...}
+        failure_reason: None
+    """
+    import cv2 as cv
+
+    # RGB → BGR cho OpenCV
+    if rgb.shape[2] == 4:
+        bgr = cv.cvtColor(rgb[:, :, :3], cv.COLOR_RGB2BGR)
+    else:
+        bgr = cv.cvtColor(rgb, cv.COLOR_RGB2BGR)
+
+    # Normalise depth
+    depth = np.array(depth, dtype=np.float32)
+    if depth.ndim == 3:
+        depth = depth[:, :, 0]
+
+    state = run_perception(
+        bgr, depth, intr, T_base_camera,
+        hsv_ranges=hsv_ranges or _DEFAULT_HSV_RANGES,
+        detection_method=detection_method,
+    )
+
+    return [
+        o for o in state["objects"]
+        if o["failure_reason"] is None
+        and o["confidence"] >= confidence_threshold
+    ]
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+# 8. Export helpers
 # ═══════════════════════════════════════════════════════════════════════════
 def save_perception_json(state: dict, path: str = "perception_interface.json"):
     """Write perception output to JSON (strips non-serialisable contours)."""
