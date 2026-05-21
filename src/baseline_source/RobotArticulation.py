@@ -4,7 +4,7 @@ from isaacsim.core.utils.types import ArticulationActions
 import torch
 import numpy as np
 from isaacsim.sensors.camera import Camera
-from .DualArmIK import DualArmIK
+from DualArmIK import DualArmIK
 
 class RobotArticulation:
     """具有articulation属性的机器人类，提供控制接口"""
@@ -217,7 +217,7 @@ class RobotArticulation:
             if jname in dof_names:
                 self._right_arm_isaac_indices.append(self._articulation.get_dof_index(jname))
 
-        # 腰部腿部关节：运行时锁定到初始位置，防止晃动
+        # 腰部腿部关节：运行时锁定 to 初始位置，防止晃动
         WAIST_LEGS_JOINTS = ["waist_yaw_joint", "waist_pitch_joint",
                              "L_hip_pitch_joint", "L_hip_roll_joint", "L_hip_yaw_joint",
                              "R_hip_pitch_joint", "R_hip_roll_joint", "R_hip_yaw_joint",
@@ -385,4 +385,3 @@ class RobotArticulation:
         sixforces = self.get_sixforce()
 
         target_positions = []
-        
