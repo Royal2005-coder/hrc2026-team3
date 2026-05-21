@@ -2,6 +2,12 @@
 
 Launch Isaac Sim, load task config, build scene, and run the grasp control loop.
 """
+import os
+import sys
+
+# Ensure the local directory is in sys.path so local modules can be imported directly
+sys.path.append(os.path.dirname(os.path.abspath(__file__)))
+
 from isaacsim import SimulationApp
 
 CONFIG = {
@@ -16,17 +22,16 @@ kit = SimulationApp(launch_config=CONFIG)
 from isaacsim.core.api import World
 import omni
 import omni.replicator.core as rep
-import os
 import numpy as np
 from scipy.spatial.transform import Rotation as R
 
-from source.config_loader import load_config, apply_scatter_config
-from source.SceneBuilder import SceneBuilder
-from source.RobotArticulation import RobotArticulation
-from source.DataLogger import DataLogger
-from source.coordinate_utils import CoordinateTransform
-from source.grasp_planner import GraspPlanner
-from source.robot_math_utils import quat_xyzw_to_R, make_T, inv_T
+from config_loader import load_config, apply_scatter_config
+from SceneBuilder import SceneBuilder
+from RobotArticulation import RobotArticulation
+from DataLogger import DataLogger
+from coordinate_utils import CoordinateTransform
+from grasp_planner import GraspPlanner
+from robot_math_utils import quat_xyzw_to_R, make_T, inv_T
 
 # ── 1. Configuration ─────────────────────────────────────────────────
 config_path = os.path.join(os.path.dirname(__file__), "config/Part_Sorting.yaml")
