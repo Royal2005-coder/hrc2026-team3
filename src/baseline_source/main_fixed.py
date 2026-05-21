@@ -159,16 +159,39 @@ planner = GraspPlanner(grasp_cfg, robot, coord_transform)
 planner.compute_grasp_target(valid_part_poses)
 
 # ── 9. Callbacks ─────────────────────────────────────────────────────
+sm_timer = 0.0
+sm_state = "APPROACH"
+
 def robot_control_callback(step_size):
+    global sm_timer, sm_state
+    sm_timer += step_size
+    
     planner.update_active_target()
     left_target, right_target, rot_weight = planner.get_control_targets()
+    
+    if sm_timer < 5.0:
+        sm_state = "APPROACH"
+    elif 5.0 <= sm_timer < 6.0:
+        sm_state = "GRASP"
+        robot.close_gripper()
+    else:
+        sm_state = "LIFT"
+        if left_target is not None:
+            left_target = left_target.copy()
+            left_target[2] += 0.15
+        if right_target is not None:
+            right_target = right_target.copy()
+            right_target[2] += 0.15
+
     robot.control_dual_arm_ik(
         step_size,
         left_target_xyzrpy=left_target,
         right_target_xyzrpy=right_target,
         rot_weight=rot_weight,
     )
-    # planner.log_debug()
+    
+    if int(sm_timer * 100) % 50 == 0:
+        print(f"[StateMachine] State: {sm_state}, Timer: {sm_timer:.2f}s")
 
 
 def score_input_record_callback(step_size):
