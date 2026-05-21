@@ -34,7 +34,7 @@ from grasp_planner import GraspPlanner
 from robot_math_utils import quat_xyzw_to_R, make_T, inv_T
 
 # ── 1. Configuration ─────────────────────────────────────────────────
-config_path = os.path.join(os.path.dirname(__file__), "config/Part_Sorting.yaml")
+config_path = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(__file__))), "configs", "Part_Sorting.yaml")
 cfg = load_config(config_path)
 grasp_cfg = cfg.get("grasp", {})
 
