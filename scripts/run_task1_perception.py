@@ -259,11 +259,45 @@ if args.save_params:
 # ═══════════════════════════════════════════════════════════════════════
 # 5b. Stage-based detection — reads prim positions from USD
 # ═══════════════════════════════════════════════════════════════════════
-def get_parts_from_stage(T_base_camera, intr, depth, cfg_parts=None):
+def _yaw_from_local_mask(bgr, u, v, radius=24):
+    """
+    Sample a square patch around (u,v), threshold any saturated colour,
+    find the largest contour and return yaw from minAreaRect.
+    Returns 0.0 if no contour found.
+    """
+    h, w = bgr.shape[:2]
+    x1 = max(0, int(u) - radius)
+    y1 = max(0, int(v) - radius)
+    x2 = min(w, int(u) + radius)
+    y2 = min(h, int(v) + radius)
+    patch = bgr[y1:y2, x1:x2]
+    if patch.size == 0:
+        return 0.0
+    hsv = cv2.cvtColor(patch, cv2.COLOR_BGR2HSV)
+    # Any non-grey pixel with reasonable saturation
+    mask = cv2.inRange(hsv,
+                       np.array([0,  40, 40], dtype=np.uint8),
+                       np.array([179, 255, 255], dtype=np.uint8))
+    kernel = np.ones((3, 3), np.uint8)
+    mask = cv2.morphologyEx(mask, cv2.MORPH_OPEN, kernel)
+    contours, _ = cv2.findContours(mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+    if not contours:
+        return 0.0
+    cnt = max(contours, key=cv2.contourArea)
+    if cv2.contourArea(cnt) < 9:
+        return 0.0
+    rect = cv2.minAreaRect(cnt)
+    return float(np.deg2rad(rect[-1]))
+
+
+def get_parts_from_stage(T_base_camera, intr, depth, bgr=None):
     """
     Detect parts by reading their world positions from the USD stage.
     Projects world pos → base frame → camera frame → pixel.
-    Returns list of detection dicts compatible with run_perception().
+
+    pose_base is computed directly from the exact stage world position,
+    bypassing the noisy depth pipeline — gives accurate 3D coords for N2.
+    Yaw is estimated from a local colour mask in the RGB image when bgr given.
     """
     from pxr import UsdGeom
     import omni.usd
@@ -275,14 +309,11 @@ def get_parts_from_stage(T_base_camera, intr, depth, cfg_parts=None):
         [("/Root/Part_B_" + str(i), "part_B") for i in range(num_parts)]
     )
 
-    # T_camera_base = inv(T_base_camera)
     T_cb = np.linalg.inv(T_base_camera)
 
-    # T_world_base: we need world → base transform
     base_prim = stage.GetPrimAtPath("/Root/Ref_Xform/Ref/base_link")
     if base_prim.IsValid():
-        mat_wb = UsdGeom.Xformable(base_prim).ComputeLocalToWorldTransform(0)
-        T_wb = np.array(mat_wb).T
+        T_wb = np.array(UsdGeom.Xformable(base_prim).ComputeLocalToWorldTransform(0)).T
         T_bw = np.linalg.inv(T_wb)
     else:
         T_bw = np.eye(4)
@@ -291,24 +322,20 @@ def get_parts_from_stage(T_base_camera, intr, depth, cfg_parts=None):
     for prim_path, class_id in part_prims:
         prim = stage.GetPrimAtPath(prim_path)
         if not prim.IsValid():
-            # Try Replicator-created paths
-            for suffix in ["", "/mesh", "/geometry"]:
+            for suffix in ["/mesh", "/geometry"]:
                 prim = stage.GetPrimAtPath(prim_path + suffix)
                 if prim.IsValid():
                     break
         if not prim.IsValid():
             continue
 
-        mat_wobj = UsdGeom.Xformable(prim).ComputeLocalToWorldTransform(0)
-        T_wobj   = np.array(mat_wobj).T
+        T_wobj    = np.array(UsdGeom.Xformable(prim).ComputeLocalToWorldTransform(0)).T
         pos_world = T_wobj[:3, 3]
 
-        # world → base → camera
-        p_h   = np.array([pos_world[0], pos_world[1], pos_world[2], 1.0])
-        p_base= (T_bw @ p_h)[:3]
-        p_cam = (T_cb @ np.r_[p_base, 1.0])[:3]
+        p_base = (T_bw @ np.r_[pos_world, 1.0])[:3]
+        p_cam  = (T_cb @ np.r_[p_base,  1.0])[:3]
 
-        # OpenGL convention: camera looks down -Z
+        # OpenGL: camera looks down -Z
         z = -p_cam[2]
         if z <= 0.05:
             continue
@@ -319,21 +346,31 @@ def get_parts_from_stage(T_base_camera, intr, depth, cfg_parts=None):
         if not (0 <= u < intr.width and 0 <= v < intr.height):
             continue
 
-        # Estimate bbox from depth neighbourhood
         bbox_half = 20
         x1 = max(0, int(u) - bbox_half)
         y1 = max(0, int(v) - bbox_half)
         x2 = min(intr.width - 1,  int(u) + bbox_half)
         y2 = min(intr.height - 1, int(v) + bbox_half)
 
+        yaw = _yaw_from_local_mask(bgr, u, v) if bgr is not None else 0.0
+
+        # Build pose_base directly from exact stage position — no depth noise
+        pose_base = {
+            "position_m": p_base.tolist(),
+            "quaternion_xyzw": [0.0, 0.0, 0.0, 1.0],
+        }
+
         detections.append({
             "bbox_xyxy":   [x1, y1, x2, y2],
             "centroid_px": [float(u), float(v)],
-            "area_px":     float((x2-x1)*(y2-y1)),
+            "area_px":     float((x2 - x1) * (y2 - y1)),
             "class_id":    class_id,
             "confidence":  0.99,
             "contour":     None,
-            "_pos_world":  pos_world.tolist(),
+            # Pre-computed accurate fields — make_object_state will use these
+            "_pose_base_exact": pose_base,
+            "_yaw_rad":         yaw,
+            "_pos_world":       pos_world.tolist(),
         })
 
     return detections
@@ -487,20 +524,31 @@ try:
             print(f"  [DEBUG] wide color red={len(dets_r)+len(dets_r2)} blue={len(dets_b)}")
 
         if args.method == "annotation":
-            # Get ground-truth detections from USD stage, build state manually
-            stage_dets = get_parts_from_stage(T_base_camera, intr, depth)
+            # Get ground-truth detections from USD stage (exact positions + yaw from image)
+            stage_dets = get_parts_from_stage(T_base_camera, intr, depth, bgr=bgr)
             if fid == 1:
                 print(f"  [STAGE] found {len(stage_dets)} parts: "
                       f"{[d['class_id'] for d in stage_dets]}")
-            # Build state via run_perception with pre-computed detections passed
-            # through color path (dets_A/dets_B already tagged)
-            from task1.perception import run_perception as _rp_fn, make_object_state, save_perception_json
+                for d in stage_dets:
+                    pb = d.get("_pose_base_exact", {})
+                    print(f"    {d['class_id']}  px=({d['centroid_px'][0]:.0f},{d['centroid_px'][1]:.0f})"
+                          f"  pos_base={[round(x,3) for x in pb.get('position_m',[])]}  yaw={d['_yaw_rad']:.3f}rad")
+
             import time as _time
             objects = []
             for idx, det in enumerate(stage_dets):
+                # Build object state, then override pose_base + yaw with exact values
+                from task1.perception import make_object_state
                 obj = make_object_state(det, depth, intr, T_base_camera,
                                         object_id=f"obj_{idx:03d}")
+                # Override with accurate stage-derived pose (no depth noise)
+                if "_pose_base_exact" in det:
+                    obj["pose_base"] = det["_pose_base_exact"]
+                    obj["failure_reason"] = None  # pose is always valid from stage
+                if "_yaw_rad" in det:
+                    obj["grasp_hint"]["yaw_rad"] = round(det["_yaw_rad"], 4)
                 objects.append(obj)
+
             num_valid = sum(1 for o in objects if o["failure_reason"] is None)
             state = {
                 "frame_id": fid,
@@ -514,6 +562,8 @@ try:
                                              if o["failure_reason"] == "INVALID_DEPTH"),
                 },
             }
+            if num_valid < 4:
+                print(f"  [WARN] Only {num_valid}/4 parts valid — check prim paths")
         else:
             state = run_perception(
                 bgr, depth, intr, T_base_camera,
