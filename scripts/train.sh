@@ -2,7 +2,10 @@
 # Wrapper: fix LD_LIBRARY_PATH for libnvrtc-builtins before launching Python.
 # Usage: bash scripts/train.sh [--epochs N] [--data /path/to.yaml] ...
 
-NVRTC_SO=$(find /usr/local/cuda* /usr/lib/x86_64-linux-gnu -name "libnvrtc-builtins.so*" 2>/dev/null | sort -rV | head -1)
+NVRTC_SO=$(find /isaac-sim/exts/omni.isaac.ml_archive/pip_prebundle/nvidia/cuda_nvrtc/lib \
+               /opt/gstreamer/lib/x86_64-linux-gnu \
+               /usr/local/cuda* /usr/lib/x86_64-linux-gnu \
+               -name "libnvrtc-builtins.so.12*" 2>/dev/null | sort -rV | head -1)
 if [ -n "$NVRTC_SO" ]; then
     NVRTC_DIR=$(dirname "$NVRTC_SO")
     export LD_LIBRARY_PATH="$NVRTC_DIR${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
