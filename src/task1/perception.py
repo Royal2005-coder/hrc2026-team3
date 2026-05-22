@@ -43,7 +43,11 @@ def detect_by_color(rgb_bgr: np.ndarray,
     mask = cv.inRange(hsv, np.array(lower_hsv, dtype=np.uint8),
                       np.array(upper_hsv, dtype=np.uint8))
 
-    kernel = np.ones((5, 5), np.uint8)
+    # Restrict to lower 60% of image — parts only on table, not walls/ceiling
+    h_img = mask.shape[0]
+    mask[:int(h_img * 0.40), :] = 0
+
+    kernel = np.ones((3, 3), np.uint8)
     mask = cv.morphologyEx(mask, cv.MORPH_OPEN, kernel)
     mask = cv.morphologyEx(mask, cv.MORPH_CLOSE, kernel)
 
