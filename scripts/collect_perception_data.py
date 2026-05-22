@@ -304,11 +304,11 @@ for frame_idx in range(N_FRAMES):
             print(f"    prim={p.get('prim_path','?')}  pos={p.get('position','?')}")
 
     # ── Tạo YOLO labels ─────────────────────────────────────────────────
+    num_per_class = cfg["part"].get("num_parts", 2)
     yolo_lines = []
-    for part in gt_poses:
-        class_name = get_class_from_prim(part["prim_path"])
-        if class_name is None:
-            continue
+    for i, part in enumerate(gt_poses):
+        # Class xác định bằng index (không dùng màu — màu không đáng tin)
+        class_name = "part_a" if i < num_per_class else "part_b"
 
         result = world_to_pixel(part["position"], T_cw, fx, fy, cx, cy)
         if result is None:
@@ -323,10 +323,6 @@ for frame_idx in range(N_FRAMES):
             if frame_idx == 0:
                 print(f"  [DEBUG] out of frame: u={u:.1f} v={v:.1f} ({IMG_W}x{IMG_H})")
             continue
-
-        # Xác định class bằng màu nếu là Replicator prim
-        if class_name == "unknown":
-            class_name = classify_part_by_color(bgr, u, v)
 
         # Lấy depth thật tại centroid (nếu có) để bbox chính xác hơn
         u_int, v_int = int(round(u)), int(round(v))
