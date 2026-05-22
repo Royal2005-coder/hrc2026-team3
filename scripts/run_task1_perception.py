@@ -131,6 +131,17 @@ for _ in range(30):
 print("[2/5] Robot + cameras initialized")
 print(f"      Available cameras: {list(robot.cameras.keys())}")
 
+# Override camera resolution — baseline init không truyền resolution nên default 128×128
+_CAM_W, _CAM_H = 640, 480
+for _cam_name in ("head_left", "head_right"):
+    if _cam_name in robot.cameras:
+        robot.cameras[_cam_name].set_resolution((_CAM_W, _CAM_H))
+        print(f"      [{_cam_name}] resolution set to {_CAM_W}×{_CAM_H}")
+
+# Vài step để resolution kick in
+for _ in range(5):
+    world.step(render=True)
+
 
 # ═══════════════════════════════════════════════════════════════════════
 # 3. Camera intrinsics
