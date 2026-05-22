@@ -320,7 +320,7 @@ def robot_control_callback(step_size):
         step_size,
         left_target_xyzrpy=left_t,
         right_target_xyzrpy=right_t,
-        rot_weight=grasp_cfg.get("ik_rot_weight", 1.0),
+        rot_weight=grasp_cfg.get("ik_rot_weight", 0.1),
     )
 
 world.add_physics_callback("task1_fsm", robot_control_callback)
