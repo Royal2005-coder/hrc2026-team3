@@ -110,6 +110,17 @@ for _ in range(30):
     world.step(render=True)
 print("[2/4] Robot + cameras ready")
 
+# Render product 640×480 — bypass baseline 128×128
+_CAM_W, _CAM_H = 640, 480
+_rp = rep.create.render_product(CAMERA_PRIM, (_CAM_W, _CAM_H))
+_rgb_ann   = rep.AnnotatorRegistry.get_annotator("rgb")
+_depth_ann = rep.AnnotatorRegistry.get_annotator("distance_to_image_plane")
+_rgb_ann.attach(_rp)
+_depth_ann.attach(_rp)
+for _ in range(5):
+    world.step(render=True)
+print(f"      Render product: {_CAM_W}x{_CAM_H}")
+
 # ═══════════════════════════════════════════════════════════════════════════
 # 2. Camera intrinsics + T_camera_world
 # ═══════════════════════════════════════════════════════════════════════════
@@ -141,7 +152,7 @@ def get_T_world_camera(camera_prim_path):
     mat = UsdGeom.Xformable(prim).ComputeLocalToWorldTransform(0)
     return np.array(mat).T
 
-fx, fy, cx, cy, IMG_W, IMG_H = get_intrinsics(robot.cameras[CAMERA_NAME])
+fx, fy, cx, cy, IMG_W, IMG_H = get_intrinsics(robot.cameras[CAMERA_NAME], width=640, height=480)
 T_wc = get_T_world_camera(CAMERA_PRIM)
 T_cw = np.linalg.inv(T_wc)  # T_camera_world: world → camera frame
 print(f"[3/4] Intrinsics: fx={fx:.1f} fy={fy:.1f} cx={cx:.1f} cy={cy:.1f} res={IMG_W}x{IMG_H}")
@@ -234,10 +245,10 @@ for frame_idx in range(N_FRAMES):
         world.step(render=False)
     world.step(render=True)  # 1 frame render để camera update
 
-    # ── Lấy ảnh từ head_left ────────────────────────────────────────────
-    rgbd  = robot.get_camera_rgbd(CAMERA_NAME)
-    rgb   = rgbd.get("rgb")
-    depth = rgbd.get("depth")
+    # ── Lấy ảnh từ Replicator annotators ───────────────────────────────
+    world.step(render=True)
+    rgb   = _rgb_ann.get_data()
+    depth = _depth_ann.get_data()
 
     if rgb is None:
         skipped += 1
@@ -247,8 +258,7 @@ for frame_idx in range(N_FRAMES):
     if depth.ndim == 3:
         depth = depth[:, :, 0]
 
-    bgr = cv2.cvtColor(rgb, cv2.COLOR_RGB2BGR) if rgb.shape[2] == 3 else \
-          cv2.cvtColor(rgb[:, :, :3], cv2.COLOR_RGB2BGR)
+    bgr = cv2.cvtColor(rgb[:, :, :3], cv2.COLOR_RGB2BGR)
 
     # ── Lấy GT poses từ scene ───────────────────────────────────────────
     try:
