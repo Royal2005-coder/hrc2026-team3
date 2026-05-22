@@ -39,7 +39,7 @@ grasp_cfg = cfg.get("grasp", {})
 BIN_A_WORLD = np.array([1.15, 0.15, 1.15])   # TODO: N2 đo vị trí thực
 BIN_B_WORLD = np.array([1.15, 0.45, 1.15])   # TODO: N2 đo vị trí thực
 LIFT_HEIGHT  = grasp_cfg.get("lift_height", 0.17)   # 17cm — đủ >10cm để tính điểm
-APPROACH_OFFSET_Z = 0.12                             # tiếp cận từ trên xuống 12cm
+APPROACH_OFFSET_Z = 0.05                             # tiếp cận từ trên xuống 5cm
 
 # ═══════════════════════════════════════════════════════════════════════
 # Scene + World
@@ -121,6 +121,9 @@ T_wb = _world_tf("/Root/Ref_Xform/Ref/base_link")
 T_base_camera = np.linalg.inv(T_wb) @ T_wc
 
 coord_transform = CoordinateTransform.from_torso_link(ik_solver=robot.ik_solver)
+print(f"[Coord] R_base=\n{coord_transform.robot_world_R.round(3)}")
+_ee_init = robot.get_ee_poses()
+print(f"[Coord] EE_init left={np.array(_ee_init['left'][:3]).round(3)}  right={np.array(_ee_init['right'][:3]).round(3)}")
 print("[4/5] Transforms ready")
 
 # ═══════════════════════════════════════════════════════════════════════
