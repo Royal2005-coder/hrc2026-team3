@@ -268,21 +268,32 @@ for frame_idx in range(N_FRAMES):
         skipped += 1
         continue
 
+    if frame_idx == 0:
+        print(f"  [DEBUG] gt_poses count={len(gt_poses)}")
+        for p in gt_poses[:4]:
+            print(f"    prim={p.get('prim_path','?')}  pos={p.get('position','?')}")
+
     # ── Tạo YOLO labels ─────────────────────────────────────────────────
     yolo_lines = []
     for part in gt_poses:
         class_name = get_class_from_prim(part["prim_path"])
         if class_name is None:
+            if frame_idx == 0:
+                print(f"  [DEBUG] no class for prim: {part.get('prim_path','?')}")
             continue
 
         result = world_to_pixel(part["position"], T_cw, fx, fy, cx, cy)
         if result is None:
+            if frame_idx == 0:
+                print(f"  [DEBUG] behind camera: {part.get('prim_path','?')}")
             continue
 
         u, v, z = result
 
         # Bỏ qua nếu centroid ngoài ảnh
         if not (0 <= u < IMG_W and 0 <= v < IMG_H):
+            if frame_idx == 0:
+                print(f"  [DEBUG] out of frame: u={u:.1f} v={v:.1f} ({IMG_W}x{IMG_H})")
             continue
 
         # Lấy depth thật tại centroid (nếu có) để bbox chính xác hơn
