@@ -36,14 +36,21 @@ if bad:
     raise RuntimeError(f"Found {len(bad)} files with class != 0 after relabeling: {bad[:5]}")
 print("Verification OK — all labels are class 0")
 
-# ── Step 3: dataset stats ─────────────────────────────────────────────────────
+# ── Step 3: delete YOLO label cache (stale cache causes class OOB crash) ──────
+for split in ("train", "val"):
+    cache = f"{DATASET_DIR}/labels/{split}.cache"
+    if os.path.exists(cache):
+        os.remove(cache)
+        print(f"  deleted cache: {cache}")
+
+# ── Step 4: dataset stats ─────────────────────────────────────────────────────
 train_imgs = glob.glob(f"{DATASET_DIR}/images/train/*.jpg") + glob.glob(f"{DATASET_DIR}/images/train/*.png")
 val_imgs   = glob.glob(f"{DATASET_DIR}/images/val/*.jpg")   + glob.glob(f"{DATASET_DIR}/images/val/*.png")
 train_lbls = glob.glob(f"{DATASET_DIR}/labels/train/*.txt")
 print(f"train: {len(train_imgs)} images, {len(train_lbls)} labels")
 print(f"val  : {len(val_imgs)} images")
 
-# ── Step 4: train ─────────────────────────────────────────────────────────────
+# ── Step 5: train ─────────────────────────────────────────────────────────────
 os.environ["CUDA_LAUNCH_BLOCKING"] = "1"   # clearer CUDA errors if any
 
 from ultralytics import YOLO
