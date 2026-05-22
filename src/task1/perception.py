@@ -435,13 +435,20 @@ def run_perception(rgb_bgr: np.ndarray,
         ori = hsv_ranges.get("ori_color", {})
         dets_ori, _ = detect_by_color(rgb_bgr, ori.get("lower", [10,80,80]),
                                        ori.get("upper", [35,255,255]))
+        ori_class = ori.get("implies_class", "part_B")
         for d in dets_ori:
-            features = extract_shape_features(d["contour"])
-            cls, conf = classify_by_shape(features)
-            d["class_id"] = cls
-            d["confidence"] = conf
+            d["class_id"] = ori_class
+            d["confidence"] = 0.85
 
-        all_dets = dets_A + dets_B + dets_ori
+        # copper-colored part_A (brownish metallic)
+        cop = hsv_ranges.get("copper", {})
+        dets_cop, _ = detect_by_color(rgb_bgr, cop.get("lower", [8,80,60]),
+                                       cop.get("upper", [20,200,200]))
+        for d in dets_cop:
+            d["class_id"] = cop.get("implies_class", "part_A")
+            d["confidence"] = 0.85
+
+        all_dets = dets_A + dets_B + dets_ori + dets_cop
 
     objects = []
     for idx, det in enumerate(all_dets):
@@ -476,13 +483,19 @@ _DEFAULT_HSV_RANGES = {
         "lower2": [170, 100, 100], "upper2": [179, 255, 255],
         "implies_class": "part_A",
     },
+    "copper": {
+        # brownish-metallic copper colour in Isaac Sim
+        "lower": [8, 80, 60], "upper": [20, 200, 200],
+        "implies_class": "part_A",
+    },
     "blue": {
         "lower": [100, 100, 100], "upper": [130, 255, 255],
         "implies_class": "part_B",
     },
     "ori_color": {
-        "lower": [0, 0, 50], "upper": [179, 60, 200],
-        "implies_class": None,
+        # orange/beige part_B variant
+        "lower": [10, 80, 80], "upper": [35, 255, 255],
+        "implies_class": "part_B",
     },
 }
 
@@ -492,7 +505,7 @@ def detect_parts(rgb: np.ndarray,
                  intr: "CameraIntrinsics",
                  T_base_camera: np.ndarray,
                  confidence_threshold: float = 0.60,
-                 detection_method: str = "depth_fg",
+                 detection_method: str = "color",
                  hsv_ranges: dict = None) -> list[dict]:
     """
     Interface chính cho task1_runner — N2 gọi hàm này.
