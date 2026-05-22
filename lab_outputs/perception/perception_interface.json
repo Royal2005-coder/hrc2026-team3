@@ -1,6 +1,6 @@
 {
   "frame_id": 1,
-  "timestamp": 1779438127.453,
+  "timestamp": 1779438540.859,
   "camera_name": "head_left",
   "objects": [
     {
@@ -8,25 +8,25 @@
       "class_id": "part_A",
       "confidence": 1.0,
       "bbox_xyxy": [
-        0,
-        196,
-        640,
+        128,
+        383,
+        512,
         480
       ],
       "centroid_px": [
-        325.43077698369063,
-        392.44487688873335
+        319.4627493675413,
+        437.5903350847573
       ],
       "centroid_camera_m": [
-        0.011993104144341668,
-        0.448870647248333,
-        0.5721143484115601
+        -0.0010413260508408183,
+        0.5106392954227819,
+        0.5021378993988037
       ],
       "pose_base": {
         "position_m": [
-          -0.059277726709544176,
-          0.019994565777518906,
-          1.3945645269320315
+          0.03336658373376761,
+          0.03302671501191586,
+          1.405929407620473
         ],
         "quaternion_xyzw": [
           0.0,
@@ -37,15 +37,93 @@
       },
       "grasp_hint": {
         "approach_axis": "z_down",
-        "yaw_rad": 0.0,
+        "yaw_rad": 1.5708,
+        "grasp_width_m": 0.045
+      },
+      "failure_reason": null
+    },
+    {
+      "object_id": "obj_001",
+      "class_id": "part_A",
+      "confidence": 1.0,
+      "bbox_xyxy": [
+        128,
+        197,
+        212,
+        333
+      ],
+      "centroid_px": [
+        157.43556119571346,
+        258.8519106034969
+      ],
+      "centroid_camera_m": [
+        -0.23588036926397668,
+        0.03647206541350149,
+        0.37590616941452026
+      ],
+      "pose_base": {
+        "position_m": [
+          -0.1306951950425727,
+          0.26787135942986046,
+          0.9434900995813398
+        ],
+        "quaternion_xyzw": [
+          0.0,
+          0.0,
+          0.0,
+          1.0
+        ]
+      },
+      "grasp_hint": {
+        "approach_axis": "z_down",
+        "yaw_rad": 0.5846,
+        "grasp_width_m": 0.045
+      },
+      "failure_reason": null
+    },
+    {
+      "object_id": "obj_002",
+      "class_id": "part_A",
+      "confidence": 1.0,
+      "bbox_xyxy": [
+        462,
+        196,
+        512,
+        277
+      ],
+      "centroid_px": [
+        494.06531729735013,
+        233.26244255402366
+      ],
+      "centroid_camera_m": [
+        1.975185163817018,
+        -0.10193815911011415,
+        2.9397389888763428
+      ],
+      "pose_base": {
+        "position_m": [
+          -2.323434454645929,
+          -1.9431458543606608,
+          2.2793435075932797
+        ],
+        "quaternion_xyzw": [
+          0.0,
+          0.0,
+          0.0,
+          1.0
+        ]
+      },
+      "grasp_hint": {
+        "approach_axis": "z_down",
+        "yaw_rad": 0.9209,
         "grasp_width_m": 0.045
       },
       "failure_reason": null
     }
   ],
   "summary": {
-    "num_objects": 1,
-    "num_valid_objects": 1,
+    "num_objects": 3,
+    "num_valid_objects": 3,
     "num_invalid_depth": 0
   }
 }
