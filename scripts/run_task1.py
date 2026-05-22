@@ -9,7 +9,7 @@ Luồng:
 """
 
 from isaacsim import SimulationApp
-kit = SimulationApp(launch_config={"width": 1280, "height": 720, "headless": True})
+kit = SimulationApp(launch_config={"width": 1280, "height": 720, "headless": False})
 
 from isaacsim.core.api import World
 import omni
