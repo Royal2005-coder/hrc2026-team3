@@ -160,11 +160,11 @@ def get_intrinsics(camera_obj, width=640, height=480) -> CameraIntrinsics:
             cx, cy = width / 2.0, height / 2.0
             print(f"      Computed: fx={fx:.2f} fy={fy:.2f}")
         else:
-            # Last resort: head_stereo_left 128×128 hardcoded
-            fx = fy = (5.0 / 2.0955) * 128
-            cx = cy = 64.0
-            width = height = 128
-            print(f"      [WARN] Using hardcoded placeholder: fx={fx:.2f}")
+            # Last resort: head_stereo_left known specs from extracted_camera_params.yaml
+            fx, fy = 259.07, 194.30
+            cx, cy = 320.0, 240.0
+            width, height = 640, 480
+            print(f"      [WARN] Using known camera specs fallback: fx={fx:.2f}")
     return CameraIntrinsics(fx=fx, fy=fy, cx=cx, cy=cy,
                             width=width, height=height, depth_unit="meter")
 
