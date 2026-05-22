@@ -19,6 +19,9 @@ parser.add_argument("--project", default="/home/ubuntu/tai/runs/detect")
 parser.add_argument("--name",   default="task1")
 args = parser.parse_args()
 
+import torch
+torch.backends.cudnn.enabled = False  # workaround: PyTorch 2.7 + CUDA 12.8 cuDNN graph crash
+
 from ultralytics import YOLO
 
 model = YOLO(args.model)
