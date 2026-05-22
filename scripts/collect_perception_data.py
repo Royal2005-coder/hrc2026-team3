@@ -166,13 +166,41 @@ CLASS_MAP = {
 }
 
 def get_class_from_prim(prim_path: str) -> str | None:
-    """Xác định class từ prim path (chứa 'PartA' hoặc 'Part_B')."""
+    """Xác định class từ prim path."""
     p = prim_path.lower()
     if "parta" in p or "part_a" in p:
         return "part_a"
     if "partb" in p or "part_b" in p:
         return "part_b"
+    # Replicator prims (Ref_Xform_XX) — class được xác định sau bằng màu
+    if "ref_xform" in p or "replicator" in p:
+        return "unknown"
     return None
+
+
+def classify_part_by_color(bgr: np.ndarray, u: float, v: float,
+                            patch_r: int = 8) -> str:
+    """
+    Sample màu tại (u,v) ± patch_r px để xác định class.
+    Part A (red/copper): H 0-20 hoặc 155-179, S>60
+    Part B (blue/ori):   H 85-135, S>60
+    Fallback → part_a (prefer not skipping)
+    """
+    h, w = bgr.shape[:2]
+    y1 = max(0, int(v) - patch_r);  y2 = min(h, int(v) + patch_r)
+    x1 = max(0, int(u) - patch_r);  x2 = min(w, int(u) + patch_r)
+    patch = bgr[y1:y2, x1:x2]
+    if patch.size == 0:
+        return "part_a"
+    hsv = cv2.cvtColor(patch, cv2.COLOR_BGR2HSV)
+    h_ch, s_ch = hsv[:,:,0], hsv[:,:,1]
+    sat_mask = s_ch > 60
+    if sat_mask.sum() == 0:
+        return "part_a"
+    h_vals = h_ch[sat_mask].astype(float)
+    red_px  = ((h_vals <= 20) | (h_vals >= 155)).sum()
+    blue_px = ((h_vals >= 85) & (h_vals <= 135)).sum()
+    return "part_b" if blue_px > red_px else "part_a"
 
 
 def world_to_pixel(pos_world: list, T_cw: np.ndarray,
@@ -278,8 +306,6 @@ for frame_idx in range(N_FRAMES):
     for part in gt_poses:
         class_name = get_class_from_prim(part["prim_path"])
         if class_name is None:
-            if frame_idx == 0:
-                print(f"  [DEBUG] no class for prim: {part.get('prim_path','?')}")
             continue
 
         result = world_to_pixel(part["position"], T_cw, fx, fy, cx, cy)
@@ -295,6 +321,10 @@ for frame_idx in range(N_FRAMES):
             if frame_idx == 0:
                 print(f"  [DEBUG] out of frame: u={u:.1f} v={v:.1f} ({IMG_W}x{IMG_H})")
             continue
+
+        # Xác định class bằng màu nếu là Replicator prim
+        if class_name == "unknown":
+            class_name = classify_part_by_color(bgr, u, v)
 
         # Lấy depth thật tại centroid (nếu có) để bbox chính xác hơn
         u_int, v_int = int(round(u)), int(round(v))
