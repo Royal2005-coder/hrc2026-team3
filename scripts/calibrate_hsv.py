@@ -95,12 +95,43 @@ T_bc = np.linalg.inv(T_wb) @ T_wc
 T_cb = np.linalg.inv(T_bc)
 T_bw = np.linalg.inv(T_wb)
 
-part_prims = [
-    ("/Root/Part_A_0", "part_A"),
-    ("/Root/Part_A_1", "part_A"),
-    ("/Root/Part_B_0", "part_B"),
-    ("/Root/Part_B_1", "part_B"),
-]
+# ── Dump all prim paths to find actual part paths ─────────────────────────────
+print("\n=== Searching stage for part prims ===")
+found_parts = []
+for prim in stage.TraverseAll():
+    path_str = str(prim.GetPath())
+    name_lower = path_str.lower()
+    if "part" in name_lower or "workpiece" in name_lower or "sorting" in name_lower:
+        xformable = UsdGeom.Xformable(prim)
+        try:
+            T = np.array(xformable.ComputeLocalToWorldTransform(0)).T
+            pos = T[:3, 3]
+            print(f"  {path_str}  pos=({pos[0]:.3f},{pos[1]:.3f},{pos[2]:.3f})")
+            found_parts.append(path_str)
+        except Exception:
+            print(f"  {path_str}  (no transform)")
+
+print(f"  Total found: {len(found_parts)}")
+
+# Auto-detect part_A and part_B paths from stage
+import re
+part_prims = []
+for path in found_parts:
+    low = path.lower()
+    if re.search(r'part.?a', low) or re.search(r'part_a', low):
+        part_prims.append((path, "part_A"))
+    elif re.search(r'part.?b', low) or re.search(r'part_b', low):
+        part_prims.append((path, "part_B"))
+
+# Fallback: use first 2 and second 2 found if labels not in name
+if not part_prims and len(found_parts) >= 4:
+    for i, path in enumerate(found_parts[:4]):
+        cid = "part_A" if i < 2 else "part_B"
+        part_prims.append((path, cid))
+
+print(f"\n  Using {len(part_prims)} parts for HSV sampling:")
+for pp, cid in part_prims:
+    print(f"    {pp} → {cid}")
 
 # ── Sample HSV at each part centroid ─────────────────────────────────────────
 RADIUS = 8   # sample patch radius (pixels)
