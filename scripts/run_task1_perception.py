@@ -259,33 +259,15 @@ if args.save_params:
 # ═══════════════════════════════════════════════════════════════════════
 # 5b. Stage-based detection — reads prim positions from USD
 # ═══════════════════════════════════════════════════════════════════════
-def _yaw_from_local_mask(bgr, u, v, radius=24):
+def _yaw_from_usd_rotation(T_wobj: np.ndarray) -> float:
     """
-    Sample a square patch around (u,v), threshold any saturated colour,
-    find the largest contour and return yaw from minAreaRect.
-    Returns 0.0 if no contour found.
+    Extract yaw (rotation around world Z-up axis) directly from USD prim
+    world transform. Parts lie flat on table so Z-yaw = grasp orientation.
+    Returns yaw in radians.
     """
-    h, w = bgr.shape[:2]
-    x1 = max(0, int(u) - radius)
-    y1 = max(0, int(v) - radius)
-    x2 = min(w, int(u) + radius)
-    y2 = min(h, int(v) + radius)
-    patch = bgr[y1:y2, x1:x2]
-    if patch.size == 0:
-        return 0.0
-    hsv = cv2.cvtColor(patch, cv2.COLOR_BGR2HSV)
-    # Any non-grey pixel with reasonable saturation
-    mask = cv2.inRange(hsv,
-                       np.array([0,  40, 40], dtype=np.uint8),
-                       np.array([179, 255, 255], dtype=np.uint8))
-    kernel = np.ones((3, 3), np.uint8)
-    mask = cv2.morphologyEx(mask, cv2.MORPH_OPEN, kernel)
-    contours, _ = cv2.findContours(mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
-    if not contours:
-        return 0.0
-    cnt = max(contours, key=cv2.contourArea)
-    if cv2.contourArea(cnt) < 9:
-        return 0.0
+    R = T_wobj[:3, :3]
+    # Yaw around Z: atan2(R[1,0], R[0,0])
+    return float(np.arctan2(R[1, 0], R[0, 0]))
     rect = cv2.minAreaRect(cnt)
     return float(np.deg2rad(rect[-1]))
 
@@ -363,7 +345,8 @@ def get_parts_from_stage(T_base_camera, intr, depth, bgr=None,
         x2 = min(intr.width - 1,  int(u) + bbox_half)
         y2 = min(intr.height - 1, int(v) + bbox_half)
 
-        yaw = _yaw_from_local_mask(bgr, u, v) if bgr is not None else 0.0
+        # Yaw from USD rotation matrix — exact, no image sampling needed
+        yaw = _yaw_from_usd_rotation(T_wobj)
 
         # Build pose_base directly from exact stage position — no depth noise
         pose_base = {
