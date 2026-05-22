@@ -330,7 +330,6 @@ last_state = [None]
 try:
     while kit.is_running():
         world.step(render=True)
-        rep.orchestrator.step()
 
         if args.no_perception:
             continue
