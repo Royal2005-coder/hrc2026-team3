@@ -264,14 +264,9 @@ collected = 0
 skipped   = 0
 
 for frame_idx in range(N_FRAMES):
-    # ── Re-randomize màu + vị trí ──────────────────────────────────────
+    # ── Re-scatter vị trí ──────────────────────────────────────────────
     try:
-        scene._randomize_task1_assets()   # đổi màu (re-create USD prims)
-    except Exception as e:
-        print(f"  [WARN] _randomize_task1_assets failed: {e}")
-
-    try:
-        scene._scatter_parts_direct(plane_index=0)   # đổi vị trí
+        scene._scatter_parts_direct(plane_index=0)
     except Exception as e:
         print(f"  [WARN] scatter failed: {e}")
 
