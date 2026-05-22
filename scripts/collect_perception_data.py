@@ -110,6 +110,12 @@ for _ in range(30):
     world.step(render=True)
 print("[2/4] Robot + cameras ready")
 
+# ═══════════════════════════════════════════════════════════════════════════
+# 2. Camera intrinsics + T_camera_world
+# ═══════════════════════════════════════════════════════════════════════════
+CAMERA_NAME = "head_left"
+CAMERA_PRIM = "/Root/Ref_Xform/Ref/head_pitch_link/head_stereo_left/head_stereo_left_Camera_01"
+
 # Render product 640×480 — bypass baseline 128×128
 _CAM_W, _CAM_H = 640, 480
 _rp = rep.create.render_product(CAMERA_PRIM, (_CAM_W, _CAM_H))
@@ -120,12 +126,6 @@ _depth_ann.attach(_rp)
 for _ in range(5):
     world.step(render=True)
 print(f"      Render product: {_CAM_W}x{_CAM_H}")
-
-# ═══════════════════════════════════════════════════════════════════════════
-# 2. Camera intrinsics + T_camera_world
-# ═══════════════════════════════════════════════════════════════════════════
-CAMERA_NAME = "head_left"
-CAMERA_PRIM = "/Root/Ref_Xform/Ref/head_pitch_link/head_stereo_left/head_stereo_left_Camera_01"
 
 def get_intrinsics(camera_obj, width=640, height=480):
     try:
