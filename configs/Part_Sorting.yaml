@@ -1,4 +1,4 @@
-root_path: "../../assets/resources/"
+root_path: "/home/ubuntu/tai/assets/resources/"
 
 scene_usd: 'Collected_Task4/SubUSDs/2_small_warehouse2.usd'
 

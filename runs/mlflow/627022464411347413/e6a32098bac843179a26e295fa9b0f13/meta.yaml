@@ -1,0 +1,14 @@
+artifact_uri: /home/ubuntu/tai/runs/mlflow/627022464411347413/e6a32098bac843179a26e295fa9b0f13/artifacts
+end_time: 1779447789402
+entry_point_name: ''
+experiment_id: '627022464411347413'
+lifecycle_stage: active
+run_id: e6a32098bac843179a26e295fa9b0f13
+run_name: task1_single-2
+source_name: ''
+source_type: 4
+source_version: ''
+start_time: 1779447787360
+status: 3
+tags: []
+user_id: team3

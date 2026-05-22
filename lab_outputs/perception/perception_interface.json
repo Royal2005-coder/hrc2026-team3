@@ -1,51 +1,11 @@
 {
   "frame_id": 1,
-  "timestamp": 1779439344.798,
+  "timestamp": 1779467776.915,
   "camera_name": "head_left",
-  "objects": [
-    {
-      "object_id": "obj_000",
-      "class_id": "part_A",
-      "confidence": 0.7,
-      "bbox_xyxy": [
-        331,
-        379,
-        346,
-        392
-      ],
-      "centroid_px": [
-        336.71014492753625,
-        385.08856682769726
-      ],
-      "centroid_camera_m": [
-        0.03592088973413883,
-        0.4158520015477699,
-        0.5569036602973938
-      ],
-      "pose_base": {
-        "position_m": [
-          -0.06540809537479236,
-          -0.0039329450123508775,
-          1.3587311943007248
-        ],
-        "quaternion_xyzw": [
-          0.0,
-          0.0,
-          0.0,
-          1.0
-        ]
-      },
-      "grasp_hint": {
-        "approach_axis": "z_down",
-        "yaw_rad": 0.4182,
-        "grasp_width_m": 0.045
-      },
-      "failure_reason": null
-    }
-  ],
+  "objects": [],
   "summary": {
-    "num_objects": 1,
-    "num_valid_objects": 1,
+    "num_objects": 0,
+    "num_valid_objects": 0,
     "num_invalid_depth": 0
   }
 }
