@@ -1,31 +1,50 @@
-"""Train YOLOv8n on collected synthetic dataset — single class 'part'.
-Color classification (part_A vs part_B) is done at inference, not here."""
+"""Train YOLOv8n — single class 'part'. Color classifies part_A/B at inference."""
 import os
 import glob
 
 DATASET_DIR = "/home/ubuntu/tai/dataset"
 YAML_PATH   = f"{DATASET_DIR}/task1_single.yaml"
 
-# Sanity check
+# ── Step 1: force all labels to class 0 ──────────────────────────────────────
+print("Re-labeling all label files to class 0 ...")
+for split in ("train", "val"):
+    label_dir = f"{DATASET_DIR}/labels/{split}"
+    files = glob.glob(f"{label_dir}/*.txt")
+    for fpath in files:
+        with open(fpath) as f:
+            lines = f.readlines()
+        new_lines = []
+        for line in lines:
+            parts = line.strip().split()
+            if len(parts) == 5:
+                parts[0] = "0"
+                new_lines.append(" ".join(parts) + "\n")
+        with open(fpath, "w") as f:
+            f.writelines(new_lines)
+    print(f"  [{split}] {len(files)} files re-labeled")
+
+# ── Step 2: verify no stray class IDs ────────────────────────────────────────
+bad = []
+for split in ("train", "val"):
+    for fpath in glob.glob(f"{DATASET_DIR}/labels/{split}/*.txt"):
+        for line in open(fpath):
+            parts = line.strip().split()
+            if len(parts) == 5 and int(parts[0]) != 0:
+                bad.append(fpath)
+                break
+if bad:
+    raise RuntimeError(f"Found {len(bad)} files with class != 0 after relabeling: {bad[:5]}")
+print("Verification OK — all labels are class 0")
+
+# ── Step 3: dataset stats ─────────────────────────────────────────────────────
 train_imgs = glob.glob(f"{DATASET_DIR}/images/train/*.jpg") + glob.glob(f"{DATASET_DIR}/images/train/*.png")
-train_lbls = glob.glob(f"{DATASET_DIR}/labels/train/*.txt")
 val_imgs   = glob.glob(f"{DATASET_DIR}/images/val/*.jpg")   + glob.glob(f"{DATASET_DIR}/images/val/*.png")
+train_lbls = glob.glob(f"{DATASET_DIR}/labels/train/*.txt")
+print(f"train: {len(train_imgs)} images, {len(train_lbls)} labels")
+print(f"val  : {len(val_imgs)} images")
 
-print("Dataset check:")
-print(f"  train images : {len(train_imgs)}")
-print(f"  train labels : {len(train_lbls)}")
-print(f"  val   images : {len(val_imgs)}")
-
-empty = sum(1 for f in train_lbls[:20] if os.path.getsize(f) == 0)
-print(f"  empty labels (first 20): {empty}")
-
-# Check class distribution in a few labels
-counts = {0: 0, 1: 0}
-for f in train_lbls[:50]:
-    for line in open(f):
-        cls = int(line.split()[0])
-        counts[cls] = counts.get(cls, 0) + 1
-print(f"  class dist (first 50 files): {counts}")
+# ── Step 4: train ─────────────────────────────────────────────────────────────
+os.environ["CUDA_LAUNCH_BLOCKING"] = "1"   # clearer CUDA errors if any
 
 from ultralytics import YOLO
 
