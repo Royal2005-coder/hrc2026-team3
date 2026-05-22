@@ -96,74 +96,16 @@ T_bc = np.linalg.inv(T_wb) @ T_wc
 T_cb = np.linalg.inv(T_bc)
 T_bw = np.linalg.inv(T_wb)
 
-# ── Dump ALL top-level prims to find actual part paths ────────────────────────
-print("\n=== ALL stage prims (top 2 levels) ===")
-all_paths = []
-for prim in stage.TraverseAll():
-    path_str = str(prim.GetPath())
-    depth = path_str.count("/")
-    if depth > 3:
-        continue  # skip deep children, only show top structure
-    all_paths.append(path_str)
-    print(f"  {path_str}  type={prim.GetTypeName()}")
+# ── Get part prim paths from SceneBuilder (Replicator creates them) ───────────
+# SceneBuilder.parts_prim_paths: first num_parts = Part A, next num_parts = Part B
+num_parts = cfg["part"].get("num_parts", 2)
+raw_paths  = scene.parts_prim_paths
+print(f"\n[SceneBuilder] parts_prim_paths ({len(raw_paths)}): {raw_paths}")
 
-print(f"\n  Total top-level prims: {len(all_paths)}")
-
-# Also dump ROOT children specifically
-print("\n=== /Root children ===")
-root_prim = stage.GetPrimAtPath("/Root")
-if root_prim.IsValid():
-    for child in root_prim.GetChildren():
-        path_str = str(child.GetPath())
-        xf = UsdGeom.Xformable(child)
-        try:
-            T = np.array(xf.ComputeLocalToWorldTransform(0)).T
-            pos = T[:3, 3]
-            print(f"  {path_str}  type={child.GetTypeName()}  pos=({pos[0]:.3f},{pos[1]:.3f},{pos[2]:.3f})")
-        except Exception:
-            print(f"  {path_str}  type={child.GetTypeName()}")
-else:
-    print("  /Root not found — trying /World")
-    world_prim = stage.GetPrimAtPath("/World")
-    if world_prim.IsValid():
-        for child in world_prim.GetChildren():
-            print(f"  /World/{child.GetName()}  type={child.GetTypeName()}")
-
-print("\n=== Searching stage for part prims (broad) ===")
-found_parts = []
-for prim in stage.TraverseAll():
-    path_str = str(prim.GetPath())
-    name_lower = path_str.lower()
-    # broad match — any object that might be a workpiece
-    if any(kw in name_lower for kw in ["part", "workpiece", "sorting", "obj", "cylinder", "box", "item"]):
-        xf = UsdGeom.Xformable(prim)
-        try:
-            T = np.array(xf.ComputeLocalToWorldTransform(0)).T
-            pos = T[:3, 3]
-            # Only include prims that are off the origin (likely scattered objects)
-            if abs(pos[0]) + abs(pos[1]) + abs(pos[2]) > 0.01:
-                print(f"  {path_str}  pos=({pos[0]:.3f},{pos[1]:.3f},{pos[2]:.3f})")
-                found_parts.append(path_str)
-        except Exception:
-            pass
-
-print(f"  Total found: {len(found_parts)}")
-
-# Auto-detect part_A and part_B paths from stage
-import re
 part_prims = []
-for path in found_parts:
-    low = path.lower()
-    if re.search(r'part.?a', low) or re.search(r'part_a', low):
-        part_prims.append((path, "part_A"))
-    elif re.search(r'part.?b', low) or re.search(r'part_b', low):
-        part_prims.append((path, "part_B"))
-
-# Fallback: use first 2 and second 2 found if labels not in name
-if not part_prims and len(found_parts) >= 4:
-    for i, path in enumerate(found_parts[:4]):
-        cid = "part_A" if i < 2 else "part_B"
-        part_prims.append((path, cid))
+for i, path in enumerate(raw_paths):
+    cid = "part_A" if i < num_parts else "part_B"
+    part_prims.append((path, cid))
 
 print(f"\n  Using {len(part_prims)} parts for HSV sampling:")
 for pp, cid in part_prims:

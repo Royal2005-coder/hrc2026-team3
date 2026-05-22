@@ -290,7 +290,8 @@ def _yaw_from_local_mask(bgr, u, v, radius=24):
     return float(np.deg2rad(rect[-1]))
 
 
-def get_parts_from_stage(T_base_camera, intr, depth, bgr=None):
+def get_parts_from_stage(T_base_camera, intr, depth, bgr=None,
+                         parts_prim_paths=None, num_parts_per_class=2):
     """
     Detect parts by reading their world positions from the USD stage.
     Projects world pos → base frame → camera frame → pixel.
@@ -298,16 +299,26 @@ def get_parts_from_stage(T_base_camera, intr, depth, bgr=None):
     pose_base is computed directly from the exact stage world position,
     bypassing the noisy depth pipeline — gives accurate 3D coords for N2.
     Yaw is estimated from a local colour mask in the RGB image when bgr given.
+
+    parts_prim_paths: list from scene.parts_prim_paths (first N = part_A, next N = part_B)
     """
     from pxr import UsdGeom
     import omni.usd
     stage = omni.usd.get_context().get_stage()
 
-    num_parts = 2
-    part_prims = (
-        [("/Root/Part_A_" + str(i), "part_A") for i in range(num_parts)] +
-        [("/Root/Part_B_" + str(i), "part_B") for i in range(num_parts)]
-    )
+    # Build (prim_path, class_id) list from SceneBuilder paths
+    if parts_prim_paths:
+        part_prims = [
+            (p, "part_A" if i < num_parts_per_class else "part_B")
+            for i, p in enumerate(parts_prim_paths)
+        ]
+    else:
+        # Fallback hardcoded (Task 2 style — wrong for Task 1 but kept as safety net)
+        part_prims = (
+            [("/Root/Part_A_" + str(i), "part_A") for i in range(num_parts_per_class)] +
+            [("/Root/Part_B_" + str(i), "part_B") for i in range(num_parts_per_class)]
+        )
+        print("  [WARN] parts_prim_paths not provided — using fallback hardcoded paths")
 
     T_cb = np.linalg.inv(T_base_camera)
 
@@ -525,7 +536,12 @@ try:
 
         if args.method == "annotation":
             # Get ground-truth detections from USD stage (exact positions + yaw from image)
-            stage_dets = get_parts_from_stage(T_base_camera, intr, depth, bgr=bgr)
+            _num_per_class = cfg["part"].get("num_parts", 2)
+            stage_dets = get_parts_from_stage(
+                T_base_camera, intr, depth, bgr=bgr,
+                parts_prim_paths=scene.parts_prim_paths,
+                num_parts_per_class=_num_per_class,
+            )
             if fid == 1:
                 print(f"  [STAGE] found {len(stage_dets)} parts: "
                       f"{[d['class_id'] for d in stage_dets]}")
