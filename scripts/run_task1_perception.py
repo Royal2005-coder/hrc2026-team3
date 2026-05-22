@@ -142,14 +142,9 @@ _CAM_W, _CAM_H = 640, 480
 _rp = rep.create.render_product(CAMERA_PRIM, (_CAM_W, _CAM_H))
 _rgb_ann   = rep.AnnotatorRegistry.get_annotator("rgb")
 _depth_ann = rep.AnnotatorRegistry.get_annotator("distance_to_image_plane")
-_sem_ann   = rep.AnnotatorRegistry.get_annotator(
-    "semantic_segmentation",
-    init_params={"colorize": False, "semanticTypes": ["class"]},
-)
 _rgb_ann.attach(_rp)
 _depth_ann.attach(_rp)
-_sem_ann.attach(_rp)
-print(f"      Render product created: {_CAM_W}×{_CAM_H} (+ semantic annotator)")
+print(f"      Render product created: {_CAM_W}×{_CAM_H}")
 
 # Vài step để render product warm up
 for _ in range(5):
@@ -256,6 +251,89 @@ if args.save_params:
     print(f"\n[SAVED] Camera params → {out_yaml}")
     print("  → Copy vào configs/task1_perception.yaml nếu cần")
 
+# ═══════════════════════════════════════════════════════════════════════
+# 5b. Stage-based detection — reads prim positions from USD
+# ═══════════════════════════════════════════════════════════════════════
+def get_parts_from_stage(T_base_camera, intr, depth, cfg_parts=None):
+    """
+    Detect parts by reading their world positions from the USD stage.
+    Projects world pos → base frame → camera frame → pixel.
+    Returns list of detection dicts compatible with run_perception().
+    """
+    from pxr import UsdGeom
+    import omni.usd
+    stage = omni.usd.get_context().get_stage()
+
+    num_parts = 2
+    part_prims = (
+        [("/Root/Part_A_" + str(i), "part_A") for i in range(num_parts)] +
+        [("/Root/Part_B_" + str(i), "part_B") for i in range(num_parts)]
+    )
+
+    # T_camera_base = inv(T_base_camera)
+    T_cb = np.linalg.inv(T_base_camera)
+
+    # T_world_base: we need world → base transform
+    base_prim = stage.GetPrimAtPath("/Root/Ref_Xform/Ref/base_link")
+    if base_prim.IsValid():
+        mat_wb = UsdGeom.Xformable(base_prim).ComputeLocalToWorldTransform(0)
+        T_wb = np.array(mat_wb).T
+        T_bw = np.linalg.inv(T_wb)
+    else:
+        T_bw = np.eye(4)
+
+    detections = []
+    for prim_path, class_id in part_prims:
+        prim = stage.GetPrimAtPath(prim_path)
+        if not prim.IsValid():
+            # Try Replicator-created paths
+            for suffix in ["", "/mesh", "/geometry"]:
+                prim = stage.GetPrimAtPath(prim_path + suffix)
+                if prim.IsValid():
+                    break
+        if not prim.IsValid():
+            continue
+
+        mat_wobj = UsdGeom.Xformable(prim).ComputeLocalToWorldTransform(0)
+        T_wobj   = np.array(mat_wobj).T
+        pos_world = T_wobj[:3, 3]
+
+        # world → base → camera
+        p_h   = np.array([pos_world[0], pos_world[1], pos_world[2], 1.0])
+        p_base= (T_bw @ p_h)[:3]
+        p_cam = (T_cb @ np.r_[p_base, 1.0])[:3]
+
+        # OpenGL convention: camera looks down -Z
+        z = -p_cam[2]
+        if z <= 0.05:
+            continue
+
+        u = intr.fx * p_cam[0] / z + intr.cx
+        v = intr.fy * (-p_cam[1]) / z + intr.cy
+
+        if not (0 <= u < intr.width and 0 <= v < intr.height):
+            continue
+
+        # Estimate bbox from depth neighbourhood
+        bbox_half = 20
+        x1 = max(0, int(u) - bbox_half)
+        y1 = max(0, int(v) - bbox_half)
+        x2 = min(intr.width - 1,  int(u) + bbox_half)
+        y2 = min(intr.height - 1, int(v) + bbox_half)
+
+        detections.append({
+            "bbox_xyxy":   [x1, y1, x2, y2],
+            "centroid_px": [float(u), float(v)],
+            "area_px":     float((x2-x1)*(y2-y1)),
+            "class_id":    class_id,
+            "confidence":  0.99,
+            "contour":     None,
+            "_pos_world":  pos_world.tolist(),
+        })
+
+    return detections
+
+
 # HSV config
 HSV_RANGES = {
     "red": {
@@ -339,23 +417,11 @@ try:
         if args.no_perception:
             continue
 
-        rgb      = _rgb_ann.get_data()
-        depth    = _depth_ann.get_data()
-        sem_data = None
-        try:
-            sem_data = _sem_ann.get_data()
-        except Exception as e:
-            if fid == 1:
-                print(f"  [WARN] semantic annotator failed: {e}")
+        rgb   = _rgb_ann.get_data()
+        depth = _depth_ann.get_data()
 
         if rgb is None or depth is None:
             continue
-
-        if fid == 1 and args.method == "annotation":
-            id_to_labels = (sem_data or {}).get("info", {}).get("idToLabels", {})
-            mask_shape = (sem_data or {}).get("data", np.array([])).shape if sem_data else None
-            print(f"  [ANN] sem_data keys={list((sem_data or {}).keys())}  "
-                  f"labels={id_to_labels}  mask_shape={mask_shape}")
 
         frame_count += 1
         fid = frame_count
@@ -400,16 +466,43 @@ try:
             cv2.imwrite(p("debug_mask_blue_f0001.png"), mask_b)
             print(f"  [DEBUG] wide color red={len(dets_r)+len(dets_r2)} blue={len(dets_b)}")
 
-        state = run_perception(
-            bgr, depth, intr, T_base_camera,
-            hsv_ranges=HSV_RANGES,
-            frame_id=fid,
-            camera_name=CAMERA_NAME,
-            detection_method=args.method,
-            reference_depth=table_depth,
-            bbox_ann_data=None,
-            sem_ann_data=sem_data,
-        )
+        if args.method == "annotation":
+            # Get ground-truth detections from USD stage, build state manually
+            stage_dets = get_parts_from_stage(T_base_camera, intr, depth)
+            if fid == 1:
+                print(f"  [STAGE] found {len(stage_dets)} parts: "
+                      f"{[d['class_id'] for d in stage_dets]}")
+            # Build state via run_perception with pre-computed detections passed
+            # through color path (dets_A/dets_B already tagged)
+            from task1.perception import run_perception as _rp_fn, make_object_state, save_perception_json
+            import time as _time
+            objects = []
+            for idx, det in enumerate(stage_dets):
+                obj = make_object_state(det, depth, intr, T_base_camera,
+                                        object_id=f"obj_{idx:03d}")
+                objects.append(obj)
+            num_valid = sum(1 for o in objects if o["failure_reason"] is None)
+            state = {
+                "frame_id": fid,
+                "timestamp": round(_time.time(), 3),
+                "camera_name": CAMERA_NAME,
+                "objects": objects,
+                "summary": {
+                    "num_objects": len(objects),
+                    "num_valid_objects": num_valid,
+                    "num_invalid_depth": sum(1 for o in objects
+                                             if o["failure_reason"] == "INVALID_DEPTH"),
+                },
+            }
+        else:
+            state = run_perception(
+                bgr, depth, intr, T_base_camera,
+                hsv_ranges=HSV_RANGES,
+                frame_id=fid,
+                camera_name=CAMERA_NAME,
+                detection_method=args.method,
+                reference_depth=table_depth,
+            )
         last_state[0] = state
 
         s = state["summary"]
