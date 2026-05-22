@@ -264,20 +264,22 @@ collected = 0
 skipped   = 0
 
 for frame_idx in range(N_FRAMES):
-    # ── Re-scatter + re-randomize màu ──────────────────────────────────
+    # ── Re-randomize màu + vị trí ──────────────────────────────────────
     try:
-        apply_scatter_config(cfg)   # re-randomize cả vị trí lẫn màu
+        scene.reset()   # _randomize_task1_assets + scatter → đổi cả màu lẫn vị trí
     except Exception as e:
-        print(f"  [WARN] apply_scatter_config failed: {e}")
+        print(f"  [WARN] scene.reset() failed: {e}")
         try:
-            scene._scatter_parts_direct(plane_index=0)  # fallback vị trí only
+            scene._scatter_parts_direct(plane_index=0)
         except Exception as e2:
             print(f"  [WARN] scatter fallback failed: {e2}")
 
-    # ── Settle ngắn ─────────────────────────────────────────────────────
+    # ── Settle ──────────────────────────────────────────────────────────
+    world.reset()
+    scene.scatter_after_reset()
     for _ in range(args.settle_steps):
         world.step(render=False)
-    world.step(render=True)  # 1 frame render để camera update
+    world.step(render=True)
 
     # ── Lấy ảnh từ Replicator annotators ───────────────────────────────
     world.step(render=True)
