@@ -30,7 +30,7 @@ from .transform_utils import (
 def detect_by_color(rgb_bgr: np.ndarray,
                     lower_hsv: list | np.ndarray,
                     upper_hsv: list | np.ndarray,
-                    min_area: int = 100) -> tuple[list[dict], np.ndarray]:
+                    min_area: int = 15) -> tuple[list[dict], np.ndarray]:
     """
     Detect objects via HSV colour thresholding + morphology + contour analysis.
 
@@ -410,18 +410,34 @@ def run_perception(rgb_bgr: np.ndarray,
                 if cls == "unknown":
                     det["failure_reason_hint"] = "CLASS_AMBIGUOUS"
     else:
-        # Legacy pure colour-based detection
-        dets_A, _ = detect_by_color(
-            rgb_bgr,
-            hsv_ranges.get("part_A", hsv_ranges.get("red", {})).get("lower", [0, 100, 100]),
-            hsv_ranges.get("part_A", hsv_ranges.get("red", {})).get("upper", [10, 255, 255]),
-        )
-        dets_B, _ = detect_by_color(
-            rgb_bgr,
-            hsv_ranges.get("part_B", hsv_ranges.get("blue", {})).get("lower", [100, 100, 100]),
-            hsv_ranges.get("part_B", hsv_ranges.get("blue", {})).get("upper", [130, 255, 255]),
-        )
-        all_dets = classify_detections(dets_A, dets_B)
+        # Colour-based detection: red (with wrap-around), blue, ori
+        r = hsv_ranges.get("red", {})
+        dets_A, mask_r1 = detect_by_color(rgb_bgr, r.get("lower", [0,80,80]),
+                                           r.get("upper", [15,255,255]))
+        if "lower2" in r:
+            dets_A2, mask_r2 = detect_by_color(rgb_bgr, r["lower2"], r["upper2"])
+            dets_A = dets_A + dets_A2
+        for d in dets_A:
+            d["class_id"] = "part_A"
+            d["confidence"] = 0.9
+
+        b = hsv_ranges.get("blue", {})
+        dets_B, _ = detect_by_color(rgb_bgr, b.get("lower", [95,120,80]),
+                                     b.get("upper", [135,255,255]))
+        for d in dets_B:
+            d["class_id"] = "part_B"
+            d["confidence"] = 0.9
+
+        ori = hsv_ranges.get("ori_color", {})
+        dets_ori, _ = detect_by_color(rgb_bgr, ori.get("lower", [10,80,80]),
+                                       ori.get("upper", [35,255,255]))
+        for d in dets_ori:
+            features = extract_shape_features(d["contour"])
+            cls, conf = classify_by_shape(features)
+            d["class_id"] = cls
+            d["confidence"] = conf
+
+        all_dets = dets_A + dets_B + dets_ori
 
     objects = []
     for idx, det in enumerate(all_dets):

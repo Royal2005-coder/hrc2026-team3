@@ -27,9 +27,9 @@ def parse_args():
                         help="Số frame rồi thoát (0 = chạy mãi)")
     parser.add_argument("--save-params", action="store_true",
                         help="Lưu camera intrinsics + T_base_camera ra YAML")
-    parser.add_argument("--method", default="depth_fg",
+    parser.add_argument("--method", default="color",
                         choices=["color", "depth_fg"],
-                        help="Detection method: color (legacy) | depth_fg (recommended)")
+                        help="Detection method: color | depth_fg")
     parser.add_argument("--no-perception", action="store_true",
                         help="Chỉ build scene, không chạy perception")
     args, _ = parser.parse_known_args()
