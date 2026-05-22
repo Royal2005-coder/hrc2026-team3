@@ -264,11 +264,15 @@ collected = 0
 skipped   = 0
 
 for frame_idx in range(N_FRAMES):
-    # ── Re-scatter vật ──────────────────────────────────────────────────
+    # ── Re-scatter + re-randomize màu ──────────────────────────────────
     try:
-        scene._scatter_parts_direct(plane_index=0)
+        apply_scatter_config(cfg)   # re-randomize cả vị trí lẫn màu
     except Exception as e:
-        print(f"  [WARN] scatter failed: {e}")
+        print(f"  [WARN] apply_scatter_config failed: {e}")
+        try:
+            scene._scatter_parts_direct(plane_index=0)  # fallback vị trí only
+        except Exception as e2:
+            print(f"  [WARN] scatter fallback failed: {e2}")
 
     # ── Settle ngắn ─────────────────────────────────────────────────────
     for _ in range(args.settle_steps):
