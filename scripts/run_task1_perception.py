@@ -254,17 +254,17 @@ if args.save_params:
 # HSV config
 HSV_RANGES = {
     "red": {
-        "lower": [0, 100, 100], "upper": [10, 255, 255],
-        "lower2": [170, 100, 100], "upper2": [179, 255, 255],
+        "lower": [0, 80, 80], "upper": [15, 255, 255],
+        "lower2": [160, 80, 80], "upper2": [179, 255, 255],
         "implies_class": "part_A",
     },
     "blue": {
-        "lower": [100, 100, 100], "upper": [130, 255, 255],
+        "lower": [95, 120, 80], "upper": [135, 255, 255],
         "implies_class": "part_B",
     },
     "ori_color": {
-        "lower": [0, 0, 50], "upper": [179, 60, 200],
-        "implies_class": None,  # ambiguous — handled by shape classifier
+        "lower": [10, 80, 80], "upper": [35, 255, 255],
+        "implies_class": None,
     },
 }
 

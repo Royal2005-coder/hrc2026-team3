@@ -74,15 +74,16 @@ def detect_by_color(rgb_bgr: np.ndarray,
 # ═══════════════════════════════════════════════════════════════════════════
 def detect_by_depth_foreground(depth: np.ndarray,
                                fg_threshold_m: float = 0.015,
-                               min_area: int = 80,
-                               reference_depth: float | None = None) -> tuple[list[dict], np.ndarray]:
+                               min_area: int = 15,
+                               reference_depth: float | None = None,
+                               search_bbox: tuple | None = None) -> tuple[list[dict], np.ndarray]:
     """
     Detect objects above the table surface using depth.
 
     Foreground = pixels significantly closer than the table surface.
-    reference_depth: table depth in metres (computed from table ROI externally).
-                     If None, falls back to global median (unreliable when table
-                     dominates the lower frame).
+    reference_depth: table depth in metres (from table ROI externally).
+    search_bbox: (x1, y1, x2, y2) restrict detection to this region to exclude
+                 robot arms at image edges.
     """
     valid = np.isfinite(depth) & (depth > 0)
     if valid.sum() == 0:
@@ -91,7 +92,6 @@ def detect_by_depth_foreground(depth: np.ndarray,
     if reference_depth is not None:
         table_depth = reference_depth
     else:
-        # Fallback: use lower-centre ROI to estimate table depth
         h, w = depth.shape
         ry1, ry2 = int(h * 0.55), h
         rx1, rx2 = int(w * 0.15), int(w * 0.85)
@@ -102,6 +102,13 @@ def detect_by_depth_foreground(depth: np.ndarray,
 
     fg_mask = np.zeros(depth.shape[:2], dtype=np.uint8)
     fg_mask[valid & (depth < table_depth - fg_threshold_m)] = 255
+
+    # Mask out robot arms / edges — keep only search region
+    if search_bbox is not None:
+        x1, y1, x2, y2 = search_bbox
+        border_mask = np.zeros_like(fg_mask)
+        border_mask[y1:y2, x1:x2] = 255
+        fg_mask = cv.bitwise_and(fg_mask, border_mask)
 
     kernel = np.ones((5, 5), np.uint8)
     fg_mask = cv.morphologyEx(fg_mask, cv.MORPH_OPEN, kernel)
@@ -383,7 +390,11 @@ def run_perception(rgb_bgr: np.ndarray,
     timestamp = round(time.time(), 3)
 
     if detection_method == "depth_fg":
-        all_dets, _ = detect_by_depth_foreground(depth, reference_depth=reference_depth)
+        h, w = depth.shape[:2]
+        # Exclude robot arms at left/right edges — focus on centre table area
+        search_bbox = (int(w * 0.20), int(h * 0.40), int(w * 0.80), h)
+        all_dets, _ = detect_by_depth_foreground(
+            depth, reference_depth=reference_depth, search_bbox=search_bbox)
         for det in all_dets:
             contour = det["contour"]
             cls, cls_conf = classify_by_color_hint(rgb_bgr, contour, hsv_ranges)
