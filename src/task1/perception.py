@@ -102,75 +102,90 @@ def detect_by_annotation(bbox_data: dict,
                           depth: np.ndarray,
                           min_area: int = 4) -> list[dict]:
     """
-    Detect objects using Isaac Sim Replicator annotators.
+    Detect objects from Isaac Sim semantic_segmentation annotator.
+
+    Uses the semantic mask (H×W) + idToLabels to find part_A/part_B instances
+    via connected components — no bbox annotator needed.
 
     Parameters
     ----------
-    bbox_data : output of bounding_box_2d_tight.get_data()
+    bbox_data : ignored (kept for API compat)
     sem_data  : output of semantic_segmentation.get_data()
     depth     : (H, W) depth array in metres
-    min_area  : minimum bbox area in pixels to accept
+    min_area  : minimum contour area in pixels
 
     Returns
     -------
-    list of detection dicts (bbox_xyxy, centroid_px, area_px, class_id, confidence, contour=None)
+    list of detection dicts
     """
-    if bbox_data is None or sem_data is None:
+    if sem_data is None:
         return []
 
-    id_to_labels = {}
+    # Extract mask array and label map
     if isinstance(sem_data, dict):
-        info = sem_data.get("info", {})
-        id_to_labels = info.get("idToLabels", {})
+        mask_arr   = sem_data.get("data")
+        id_to_labels = sem_data.get("info", {}).get("idToLabels", {})
+    else:
+        return []
 
-    raw_bboxes = None
-    if isinstance(bbox_data, dict):
-        raw_bboxes = bbox_data.get("data")
-    elif hasattr(bbox_data, "dtype"):
-        raw_bboxes = bbox_data
+    if mask_arr is None or mask_arr.size == 0:
+        return []
 
-    if raw_bboxes is None or len(raw_bboxes) == 0:
+    # mask_arr may be (H, W) uint32 or (H, W, 4) RGBA — take first channel
+    if mask_arr.ndim == 3:
+        mask_arr = mask_arr[:, :, 0]
+    mask_arr = mask_arr.astype(np.int32)
+
+    # Build sem_id → class_id mapping
+    sem_class = {}
+    for key, val in id_to_labels.items():
+        cid = _parse_sem_label(val)
+        if cid is not None:
+            sem_class[int(key)] = cid
+
+    if not sem_class:
         return []
 
     detections = []
-    for bbox in raw_bboxes:
-        try:
-            sem_id = int(bbox["semanticId"])
-        except (KeyError, ValueError, IndexError):
-            continue
+    for sem_id, class_id in sem_class.items():
+        binary = np.uint8(mask_arr == sem_id) * 255
 
-        label_val = id_to_labels.get(str(sem_id)) or id_to_labels.get(sem_id)
-        class_id = _parse_sem_label(label_val) if label_val is not None else None
+        # Find connected components (each instance separately)
+        num_labels, labels_cc, stats, _ = cv.connectedComponentsWithStats(
+            binary, connectivity=8)
 
-        if class_id is None:
-            continue
+        for lbl in range(1, num_labels):
+            area = int(stats[lbl, cv.CC_STAT_AREA])
+            if area < min_area:
+                continue
 
-        try:
-            x1 = int(bbox["x_min"]); y1 = int(bbox["y_min"])
-            x2 = int(bbox["x_max"]); y2 = int(bbox["y_max"])
-        except (KeyError, ValueError):
-            continue
+            x1 = int(stats[lbl, cv.CC_STAT_LEFT])
+            y1 = int(stats[lbl, cv.CC_STAT_TOP])
+            w  = int(stats[lbl, cv.CC_STAT_WIDTH])
+            h  = int(stats[lbl, cv.CC_STAT_HEIGHT])
+            x2, y2 = x1 + w, y1 + h
 
-        # Clip to image bounds
-        h, w = depth.shape[:2]
-        x1, x2 = max(0, x1), min(w - 1, x2)
-        y1, y2 = max(0, y1), min(h - 1, y2)
+            component_mask = np.uint8(labels_cc == lbl) * 255
+            contours, _ = cv.findContours(component_mask,
+                                          cv.RETR_EXTERNAL,
+                                          cv.CHAIN_APPROX_SIMPLE)
+            contour = max(contours, key=cv.contourArea) if contours else None
 
-        area = (x2 - x1) * (y2 - y1)
-        if area < min_area:
-            continue
+            m = cv.moments(component_mask)
+            if m["m00"] > 0:
+                cx = m["m10"] / m["m00"]
+                cy = m["m01"] / m["m00"]
+            else:
+                cx, cy = (x1 + x2) / 2.0, (y1 + y2) / 2.0
 
-        cx = (x1 + x2) / 2.0
-        cy = (y1 + y2) / 2.0
-
-        detections.append({
-            "bbox_xyxy":   [x1, y1, x2, y2],
-            "centroid_px": [cx, cy],
-            "area_px":     float(area),
-            "class_id":    class_id,
-            "confidence":  0.99,
-            "contour":     None,
-        })
+            detections.append({
+                "bbox_xyxy":   [x1, y1, x2, y2],
+                "centroid_px": [cx, cy],
+                "area_px":     float(area),
+                "class_id":    class_id,
+                "confidence":  0.99,
+                "contour":     contour,
+            })
 
     return detections
 

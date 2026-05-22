@@ -142,13 +142,14 @@ _CAM_W, _CAM_H = 640, 480
 _rp = rep.create.render_product(CAMERA_PRIM, (_CAM_W, _CAM_H))
 _rgb_ann   = rep.AnnotatorRegistry.get_annotator("rgb")
 _depth_ann = rep.AnnotatorRegistry.get_annotator("distance_to_image_plane")
-_bbox_ann  = rep.AnnotatorRegistry.get_annotator("bounding_box_2d_tight")
-_sem_ann   = rep.AnnotatorRegistry.get_annotator("semantic_segmentation")
+_sem_ann   = rep.AnnotatorRegistry.get_annotator(
+    "semantic_segmentation",
+    init_params={"colorize": False, "semanticTypes": ["class"]},
+)
 _rgb_ann.attach(_rp)
 _depth_ann.attach(_rp)
-_bbox_ann.attach(_rp)
 _sem_ann.attach(_rp)
-print(f"      Render product created: {_CAM_W}×{_CAM_H} (+ bbox + semantic annotators)")
+print(f"      Render product created: {_CAM_W}×{_CAM_H} (+ semantic annotator)")
 
 # Vài step để render product warm up
 for _ in range(5):
@@ -338,18 +339,23 @@ try:
         if args.no_perception:
             continue
 
-        rgb        = _rgb_ann.get_data()
-        depth      = _depth_ann.get_data()
-        bbox_data  = _bbox_ann.get_data()
-        sem_data   = _sem_ann.get_data()
+        rgb      = _rgb_ann.get_data()
+        depth    = _depth_ann.get_data()
+        sem_data = None
+        try:
+            sem_data = _sem_ann.get_data()
+        except Exception as e:
+            if fid == 1:
+                print(f"  [WARN] semantic annotator failed: {e}")
 
         if rgb is None or depth is None:
             continue
 
         if fid == 1 and args.method == "annotation":
             id_to_labels = (sem_data or {}).get("info", {}).get("idToLabels", {})
-            n_boxes = len((bbox_data or {}).get("data", [])) if bbox_data else 0
-            print(f"  [ANN] bbox count={n_boxes}  labels={id_to_labels}")
+            mask_shape = (sem_data or {}).get("data", np.array([])).shape if sem_data else None
+            print(f"  [ANN] sem_data keys={list((sem_data or {}).keys())}  "
+                  f"labels={id_to_labels}  mask_shape={mask_shape}")
 
         frame_count += 1
         fid = frame_count
@@ -401,7 +407,7 @@ try:
             camera_name=CAMERA_NAME,
             detection_method=args.method,
             reference_depth=table_depth,
-            bbox_ann_data=bbox_data,
+            bbox_ann_data=None,
             sem_ann_data=sem_data,
         )
         last_state[0] = state
