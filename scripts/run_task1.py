@@ -183,13 +183,33 @@ class Task1FSM:
             return True
         return np.linalg.norm(self._ee_pos(side) - self.target_xyzrpy[:3]) < tol
 
-    def _world_to_6d(self, pos_world, yaw=0.0):
-        """Chuyển world position → [x,y,z,roll,pitch,yaw] trong pinocchio base frame."""
+    def _world_to_6d(self, pos_world):
+        """Chuyển world position → [x,y,z,roll,pitch,yaw] trong pinocchio base frame.
+
+        Rotation: Z-axis points world-down (same logic as GraspPlanner).
+        X-axis points from current EE toward target (projected to horizontal plane).
+        """
         import pinocchio as pin
         pos_base = coord_transform.world_to_robot(pos_world)
-        # Z-down approach: roll=π, pitch=0, yaw=yaw
-        R = pin.rpy.rpyToMatrix(np.pi, 0.0, yaw)
+
+        # Z-down direction in Pinocchio base frame
+        base_down = coord_transform.robot_world_R_inv @ np.array([0.0, 0.0, -1.0])
+
+        # X-axis: EE → target, projected perp to gravity
+        ee_pos = self._ee_pos(self.grasp_arm)
+        reach = pos_base - ee_pos
+        reach -= np.dot(reach, base_down) * base_down
+        if np.linalg.norm(reach) < 1e-6:
+            perp = np.array([1.0, 0.0, 0.0])
+            reach = perp - np.dot(perp, base_down) * base_down
+        x_g = reach / np.linalg.norm(reach)
+        y_g = np.cross(base_down, x_g)
+        y_g /= np.linalg.norm(y_g)
+        R = np.column_stack([x_g, y_g, base_down])
+
         rpy = pin.rpy.matrixToRpy(R)
+        print(f"[6D] pos_base={pos_base.round(3)}  ee={ee_pos.round(3)}"
+              f"  dist={np.linalg.norm(pos_base-ee_pos):.3f}m  rpy={rpy.round(3)}")
         return np.concatenate([pos_base, rpy])
 
     def _select_arm(self, pos_world):
@@ -235,12 +255,11 @@ class Task1FSM:
         # ── Lấy part hiện tại ─────────────────────────────────────────
         part = self.parts[self.part_idx]
         self.grasp_arm = self._select_arm(part["pos_world"])
-        yaw = part["yaw_rad"]
 
         # ── APPROACH — di chuyển tới vị trí trên part ─────────────────
         if self.state == "APPROACH":
             approach_world = part["pos_world"] + np.array([0, 0, APPROACH_OFFSET_Z])
-            self.target_xyzrpy = self._world_to_6d(approach_world, yaw)
+            self.target_xyzrpy = self._world_to_6d(approach_world)
             print(f"[FSM] APPROACH part {self.part_idx} ({part['class_id']}) "
                   f"arm={self.grasp_arm}")
             self.state = "GRASP_DOWN"
@@ -249,7 +268,7 @@ class Task1FSM:
         elif self.state == "GRASP_DOWN":
             if self._reached(self.grasp_arm, tol=0.02):
                 grasp_world = part["pos_world"].copy()
-                self.target_xyzrpy = self._world_to_6d(grasp_world, yaw)
+                self.target_xyzrpy = self._world_to_6d(grasp_world)
                 print(f"[FSM] GRASP_DOWN")
                 self.state = "CLOSE_GRIPPER"
 
@@ -266,7 +285,7 @@ class Task1FSM:
             self.hold_steps += 1
             if self.hold_steps > 30:    # chờ 30 steps (~0.5s) cho gripper đóng
                 lift_world = part["pos_world"] + np.array([0, 0, LIFT_HEIGHT])
-                self.target_xyzrpy = self._world_to_6d(lift_world, yaw)
+                self.target_xyzrpy = self._world_to_6d(lift_world)
                 print(f"[FSM] LIFT  height={LIFT_HEIGHT}m")
                 self.state = "MOVE_TO_BIN"
 
@@ -274,7 +293,7 @@ class Task1FSM:
         elif self.state == "MOVE_TO_BIN":
             if self._reached(self.grasp_arm, tol=0.03):
                 bin_world = BIN_A_WORLD if part["class_id"] == "part_A" else BIN_B_WORLD
-                self.target_xyzrpy = self._world_to_6d(bin_world, 0.0)
+                self.target_xyzrpy = self._world_to_6d(bin_world)
                 print(f"[FSM] MOVE_TO_BIN {part['class_id']} → {bin_world}")
                 self.state = "OPEN_GRIPPER"
 
