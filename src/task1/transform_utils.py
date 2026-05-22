@@ -94,6 +94,24 @@ def make_transform(R: np.ndarray, t: np.ndarray) -> np.ndarray:
 
 
 # ---------------------------------------------------------------------------
+# Transform validation (Module 4 spec)
+# ---------------------------------------------------------------------------
+def check_transform(T, atol: float = 1e-3) -> dict:
+    """
+    Validate a 4×4 homogeneous transform.
+
+    Returns dict with det_R, ortho_err, is_valid — mirrors Module 4 skeleton.
+    """
+    T = np.asarray(T, dtype=float)
+    assert T.shape == (4, 4), f"Expected 4×4, got {T.shape}"
+    R = T[:3, :3]
+    det_R = float(np.linalg.det(R))
+    ortho_err = float(np.linalg.norm(R.T @ R - np.eye(3)))
+    is_valid = abs(det_R - 1.0) < atol and ortho_err < atol
+    return {"det_R": det_R, "ortho_err": ortho_err, "is_valid": is_valid}
+
+
+# ---------------------------------------------------------------------------
 # Sanity tests
 # ---------------------------------------------------------------------------
 def sanity_identity(p: np.ndarray) -> bool:

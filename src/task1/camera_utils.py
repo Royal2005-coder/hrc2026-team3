@@ -73,6 +73,29 @@ def pixel_to_camera_point(u: float, v: float, depth_z: float,
 
 
 # ---------------------------------------------------------------------------
+# Depth validity helpers (Module 4 spec)
+# ---------------------------------------------------------------------------
+def valid_depth_mask(depth: np.ndarray,
+                     min_depth: float = 0.05,
+                     max_depth: float = 5.0) -> np.ndarray:
+    """Boolean mask: True where depth is finite and within [min_depth, max_depth]."""
+    depth = np.asarray(depth, dtype=float)
+    return np.isfinite(depth) & (depth >= min_depth) & (depth <= max_depth)
+
+
+def median_depth_in_mask(depth: np.ndarray,
+                         mask: np.ndarray,
+                         min_depth: float = 0.05,
+                         max_depth: float = 5.0) -> float | None:
+    """Median of valid depth values inside a binary mask."""
+    valid = valid_depth_mask(depth, min_depth, max_depth) & (mask.astype(bool))
+    values = depth[valid]
+    if values.size == 0:
+        return None
+    return float(np.median(values))
+
+
+# ---------------------------------------------------------------------------
 # Robust depth sampling
 # ---------------------------------------------------------------------------
 def robust_depth_from_patch(depth: np.ndarray, u: float, v: float,
@@ -85,13 +108,13 @@ def robust_depth_from_patch(depth: np.ndarray, u: float, v: float,
     y1, y2 = max(0, v_int - radius), min(h, v_int + radius + 1)
 
     patch = depth[y1:y2, x1:x2]
-    valid = patch[np.isfinite(patch) & (patch > 0)]
+    valid = patch[np.isfinite(patch) & (patch > 0.05) & (patch < 5.0)]
     return None if len(valid) == 0 else float(np.median(valid))
 
 
 def robust_depth_from_mask(depth: np.ndarray, mask: np.ndarray) -> float | None:
     """Median depth over a binary mask region."""
-    valid = depth[(mask > 0) & np.isfinite(depth) & (depth > 0)]
+    valid = depth[(mask > 0) & np.isfinite(depth) & (depth > 0.05) & (depth < 5.0)]
     return None if len(valid) == 0 else float(np.median(valid))
 
 

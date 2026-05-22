@@ -17,6 +17,8 @@ from .camera_utils import (
     pixel_to_camera_point,
     robust_depth_from_patch,
     robust_depth_from_mask,
+    median_depth_in_mask,
+    valid_depth_mask,
 )
 from .transform_utils import (
     transform_point,
@@ -308,12 +310,25 @@ def make_object_state(det: dict,
     class_id = det.get("class_id", "unknown")
     contour = det.get("contour")
 
-    z = robust_depth_from_patch(depth, u, v, radius=3)
-    depth_valid = z is not None
+    # Prefer mask-based depth (more robust) over patch if contour available
+    if contour is not None and len(contour) >= 3:
+        mask_tmp = np.zeros(depth.shape[:2], dtype=np.uint8)
+        cv.drawContours(mask_tmp, [contour], -1, 255, -1)
+        z = median_depth_in_mask(depth, mask_tmp)
+        mask_quality = float((mask_tmp > 0).sum()) / max(depth.shape[0] * depth.shape[1], 1)
+    else:
+        z = robust_depth_from_patch(depth, u, v, radius=3)
+        mask_quality = 0.5
+
+    if z is not None:
+        z = z * intr.depth_scale()
+
+    depth_valid = z is not None and z > 0
 
     conf = compute_confidence(
         area_px=det.get("area_px", 0),
         depth_valid=depth_valid,
+        mask_quality=mask_quality,
     )
 
     failure = None
@@ -326,8 +341,7 @@ def make_object_state(det: dict,
 
     centroid_camera = None
     if depth_valid:
-        z_m = z * intr.depth_scale()
-        centroid_camera = pixel_to_camera_point(u, v, z_m, intr)
+        centroid_camera = pixel_to_camera_point(u, v, z, intr)
 
     pose_base = None
     if centroid_camera is not None and T_base_camera is not None:
@@ -350,6 +364,7 @@ def make_object_state(det: dict,
         "confidence": round(conf, 3),
         "bbox_xyxy": det["bbox_xyxy"],
         "centroid_px": det["centroid_px"],
+        "mask_quality": round(mask_quality, 4),
         "centroid_camera_m": centroid_camera.tolist() if centroid_camera is not None else None,
         "pose_base": pose_base,
         "grasp_hint": {
