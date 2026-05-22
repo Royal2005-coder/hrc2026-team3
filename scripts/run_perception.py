@@ -220,7 +220,67 @@ for o in perc_state["objects"]:
     status = "OK" if o["failure_reason"] is None else o["failure_reason"]
     pose   = o["pose_base"]["position_m"] if o["pose_base"] else None
     print(f"  {o['object_id']}  {o['class_id']}  conf={o['confidence']:.2f}"
-          f"  pose={np.round(pose, 3).tolist() if pose else None}  [{status}]")
+          f"  pose_base={np.round(pose, 3).tolist() if pose else None}  [{status}]")
+
+# ═══════════════════════════════════════════════════════════════════════════
+# Step 7 — Verify: compare camera pose vs USD stage ground truth
+# ═══════════════════════════════════════════════════════════════════════════
+print("\n── Pose verification: camera vs stage ──────────────────────────────")
+
+# GT từ USD stage
+num_per_class = cfg["part"].get("num_parts", 2)
+gt_parts = []
+for i, prim_path in enumerate(scene.parts_prim_paths):
+    prim = stage.GetPrimAtPath(prim_path)
+    if not prim.IsValid():
+        continue
+    T_p = np.array(UsdGeom.Xformable(prim).ComputeLocalToWorldTransform(0)).T
+    gt_parts.append({
+        "class_id":  "part_A" if i < num_per_class else "part_B",
+        "pos_world": T_p[:3, 3],
+    })
+
+# Perception: convert pose_base → world qua T_wb
+perc_world = []
+for o in perc_state["objects"]:
+    if o["pose_base"] is None:
+        continue
+    pos_base  = np.array(o["pose_base"]["position_m"])
+    pos_world = (T_wb @ np.append(pos_base, 1.0))[:3]
+    perc_world.append({"class_id": o["class_id"], "pos_world": pos_world})
+
+print(f"  GT parts   ({len(gt_parts)}):")
+for p in gt_parts:
+    print(f"    {p['class_id']}  world={np.round(p['pos_world'], 3).tolist()}")
+
+print(f"  Cam parts  ({len(perc_world)}):")
+for p in perc_world:
+    print(f"    {p['class_id']}  world={np.round(p['pos_world'], 3).tolist()}")
+
+# Match nearest GT→perception và tính error
+if gt_parts and perc_world:
+    print("\n  Nearest-match errors (GT → best camera match):")
+    total_err = []
+    for gt in gt_parts:
+        best_err  = 999.0
+        best_perc = None
+        for pc in perc_world:
+            if pc["class_id"] != gt["class_id"]:
+                continue
+            err = float(np.linalg.norm(gt["pos_world"] - pc["pos_world"]))
+            if err < best_err:
+                best_err  = err
+                best_perc = pc
+        if best_perc is not None:
+            total_err.append(best_err)
+            print(f"    {gt['class_id']}  GT={np.round(gt['pos_world'],3).tolist()}"
+                  f"  cam={np.round(best_perc['pos_world'],3).tolist()}"
+                  f"  err={best_err:.4f}m")
+        else:
+            print(f"    {gt['class_id']}  NO MATCH")
+    if total_err:
+        print(f"\n  Mean position error: {np.mean(total_err):.4f}m"
+              f"  Max: {np.max(total_err):.4f}m")
 
 logger.close()
 kit.close()
