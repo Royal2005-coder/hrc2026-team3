@@ -73,6 +73,11 @@ from task1.perception import (
     save_yaw_report_csv,
     save_failure_cases_jsonl,
 )
+from task1.perception_debug import (
+    save_overlays,
+    save_confusion_matrix_csv,
+    validate_perception_output,
+)
 
 print("=" * 60)
 print("  HRC2026 Task 1 — Perception Runner")
@@ -399,6 +404,21 @@ def _save_artifacts(bgr, depth, state, fid):
     save_pose_report_csv(objects, p("pose_estimator_report.csv"))
     save_yaw_report_csv(objects, p("yaw_report.csv"))
     save_failure_cases_jsonl(objects, p("failure_cases_perception.jsonl"))
+
+    # Debug overlays (overlay_detection.png, overlay_mask.png, overlay_centroid.png)
+    save_overlays(bgr, state, output_dir=OUT, intr=intr)
+
+    # Confusion matrix CSV
+    save_confusion_matrix_csv(objects, path=p("confusion_matrix_task1.csv"))
+
+    # Validate schema
+    ok, errs = validate_perception_output(state)
+    if not ok:
+        for e in errs:
+            print(f"      [SCHEMA ERR] {e}")
+    else:
+        print(f"      Schema OK")
+
     print(f"      Artifacts saved → {OUT}/")
 
 
