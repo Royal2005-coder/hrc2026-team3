@@ -366,7 +366,9 @@ try:
                   f"global_median={np.median(depth[valid]):.3f} "
                   f"table_depth={table_depth:.3f}")
             from task1.perception import detect_by_depth_foreground, detect_by_color
-            dets_fg, fg_mask = detect_by_depth_foreground(depth, reference_depth=table_depth)
+            dets_fg, fg_mask = detect_by_depth_foreground(
+                depth, reference_depth=table_depth,
+                search_bbox=(int(_w*0.20), int(_h*0.40), int(_w*0.80), _h))
             cv2.imwrite(p("debug_fg_mask_f0001.png"), fg_mask)
             print(f"  [DEBUG] depth_fg detections={len(dets_fg)}")
             # Sample HSV tại vùng bàn để xem màu thật

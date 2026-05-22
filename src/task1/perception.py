@@ -74,16 +74,15 @@ def detect_by_color(rgb_bgr: np.ndarray,
 # ═══════════════════════════════════════════════════════════════════════════
 def detect_by_depth_foreground(depth: np.ndarray,
                                fg_threshold_m: float = 0.015,
+                               max_height_m: float = 0.12,
                                min_area: int = 15,
                                reference_depth: float | None = None,
                                search_bbox: tuple | None = None) -> tuple[list[dict], np.ndarray]:
     """
     Detect objects above the table surface using depth.
 
-    Foreground = pixels significantly closer than the table surface.
-    reference_depth: table depth in metres (from table ROI externally).
-    search_bbox: (x1, y1, x2, y2) restrict detection to this region to exclude
-                 robot arms at image edges.
+    Only pixels in the band (table_depth - max_height_m, table_depth - fg_threshold_m)
+    are foreground — this excludes robot arms which are much farther above the table.
     """
     valid = np.isfinite(depth) & (depth > 0)
     if valid.sum() == 0:
@@ -101,9 +100,10 @@ def detect_by_depth_foreground(depth: np.ndarray,
                       else float(np.median(depth[valid]))
 
     fg_mask = np.zeros(depth.shape[:2], dtype=np.uint8)
-    fg_mask[valid & (depth < table_depth - fg_threshold_m)] = 255
+    fg_mask[valid
+            & (depth < table_depth - fg_threshold_m)
+            & (depth > table_depth - max_height_m)] = 255
 
-    # Mask out robot arms / edges — keep only search region
     if search_bbox is not None:
         x1, y1, x2, y2 = search_bbox
         border_mask = np.zeros_like(fg_mask)
