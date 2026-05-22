@@ -176,6 +176,8 @@ class Task1FSM:
     def _ee_pos(self, side):
         """Vị trí end-effector hiện tại trong base frame."""
         js = robot.get_joint_states()
+        if js is None:
+            return np.array(self._arm_init.get(side, np.zeros(6))[:3])
         robot.ik_solver.sync_joint_positions(js["names"], js["positions"][0])
         se3 = robot.ik_solver.get_ee_pose(side)
         return np.array(se3.translation)
@@ -184,7 +186,9 @@ class Task1FSM:
         """Kiểm tra tay đã đến gần target chưa (tolerance mặc định 1.5cm)."""
         if self.target_xyzrpy is None:
             return True
-        return np.linalg.norm(self._ee_pos(side) - self.target_xyzrpy[:3]) < tol
+        err = np.linalg.norm(self._ee_pos(side) - self.target_xyzrpy[:3])
+        print(f"[reach] {side} err={err:.4f}m tol={tol}")
+        return err < tol
 
     def _world_to_6d(self, pos_world):
         """Chuyển world position → [x,y,z,roll,pitch,yaw] trong pinocchio base frame.
