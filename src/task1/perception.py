@@ -76,6 +76,106 @@ def detect_by_color(rgb_bgr: np.ndarray,
 
 
 # ═══════════════════════════════════════════════════════════════════════════
+# 1a. Detection — Isaac Sim annotators (best accuracy, sim-only)
+# ═══════════════════════════════════════════════════════════════════════════
+_LABEL_MAP = {
+    "part_a": "part_A",
+    "part_b": "part_B",
+    "parta":  "part_A",
+    "partb":  "part_B",
+    "part a": "part_A",
+    "part b": "part_B",
+}
+
+
+def _parse_sem_label(label_val) -> str | None:
+    """Normalise Isaac Sim semantic label (str or dict) to 'part_A'/'part_B'."""
+    if isinstance(label_val, dict):
+        raw = label_val.get("class", label_val.get("name", "")).lower().strip()
+    else:
+        raw = str(label_val).lower().strip()
+    return _LABEL_MAP.get(raw)
+
+
+def detect_by_annotation(bbox_data: dict,
+                          sem_data: dict,
+                          depth: np.ndarray,
+                          min_area: int = 4) -> list[dict]:
+    """
+    Detect objects using Isaac Sim Replicator annotators.
+
+    Parameters
+    ----------
+    bbox_data : output of bounding_box_2d_tight.get_data()
+    sem_data  : output of semantic_segmentation.get_data()
+    depth     : (H, W) depth array in metres
+    min_area  : minimum bbox area in pixels to accept
+
+    Returns
+    -------
+    list of detection dicts (bbox_xyxy, centroid_px, area_px, class_id, confidence, contour=None)
+    """
+    if bbox_data is None or sem_data is None:
+        return []
+
+    id_to_labels = {}
+    if isinstance(sem_data, dict):
+        info = sem_data.get("info", {})
+        id_to_labels = info.get("idToLabels", {})
+
+    raw_bboxes = None
+    if isinstance(bbox_data, dict):
+        raw_bboxes = bbox_data.get("data")
+    elif hasattr(bbox_data, "dtype"):
+        raw_bboxes = bbox_data
+
+    if raw_bboxes is None or len(raw_bboxes) == 0:
+        return []
+
+    detections = []
+    for bbox in raw_bboxes:
+        try:
+            sem_id = int(bbox["semanticId"])
+        except (KeyError, ValueError, IndexError):
+            continue
+
+        label_val = id_to_labels.get(str(sem_id)) or id_to_labels.get(sem_id)
+        class_id = _parse_sem_label(label_val) if label_val is not None else None
+
+        if class_id is None:
+            continue
+
+        try:
+            x1 = int(bbox["x_min"]); y1 = int(bbox["y_min"])
+            x2 = int(bbox["x_max"]); y2 = int(bbox["y_max"])
+        except (KeyError, ValueError):
+            continue
+
+        # Clip to image bounds
+        h, w = depth.shape[:2]
+        x1, x2 = max(0, x1), min(w - 1, x2)
+        y1, y2 = max(0, y1), min(h - 1, y2)
+
+        area = (x2 - x1) * (y2 - y1)
+        if area < min_area:
+            continue
+
+        cx = (x1 + x2) / 2.0
+        cy = (y1 + y2) / 2.0
+
+        detections.append({
+            "bbox_xyxy":   [x1, y1, x2, y2],
+            "centroid_px": [cx, cy],
+            "area_px":     float(area),
+            "class_id":    class_id,
+            "confidence":  0.99,
+            "contour":     None,
+        })
+
+    return detections
+
+
+# ═══════════════════════════════════════════════════════════════════════════
 # 1b. Detection — depth foreground (recommended for Task 1)
 # ═══════════════════════════════════════════════════════════════════════════
 def detect_by_depth_foreground(depth: np.ndarray,
@@ -387,7 +487,9 @@ def run_perception(rgb_bgr: np.ndarray,
                    frame_id: int = 0,
                    camera_name: str = "head_stereo_left",
                    detection_method: str = "color",
-                   reference_depth: float | None = None) -> dict:
+                   reference_depth: float | None = None,
+                   bbox_ann_data: dict | None = None,
+                   sem_ann_data: dict | None = None) -> dict:
     """
     Run full perception pipeline on one RGB-D frame.
 
@@ -408,7 +510,10 @@ def run_perception(rgb_bgr: np.ndarray,
     """
     timestamp = round(time.time(), 3)
 
-    if detection_method == "depth_fg":
+    if detection_method == "annotation":
+        all_dets = detect_by_annotation(bbox_ann_data, sem_ann_data, depth)
+
+    elif detection_method == "depth_fg":
         h, w = depth.shape[:2]
         # Exclude robot arms at left/right edges — focus on centre table area
         search_bbox = (int(w * 0.20), int(h * 0.40), int(w * 0.80), h)
@@ -520,8 +625,10 @@ def detect_parts(rgb: np.ndarray,
                  intr: "CameraIntrinsics",
                  T_base_camera: np.ndarray,
                  confidence_threshold: float = 0.60,
-                 detection_method: str = "color",
-                 hsv_ranges: dict = None) -> list[dict]:
+                 detection_method: str = "annotation",
+                 hsv_ranges: dict = None,
+                 bbox_ann_data: dict | None = None,
+                 sem_ann_data: dict | None = None) -> list[dict]:
     """
     Interface chính cho task1_runner — N2 gọi hàm này.
 
@@ -562,6 +669,8 @@ def detect_parts(rgb: np.ndarray,
         bgr, depth, intr, T_base_camera,
         hsv_ranges=hsv_ranges or _DEFAULT_HSV_RANGES,
         detection_method=detection_method,
+        bbox_ann_data=bbox_ann_data,
+        sem_ann_data=sem_ann_data,
     )
 
     return [

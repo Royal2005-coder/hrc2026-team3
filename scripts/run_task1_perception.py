@@ -27,9 +27,9 @@ def parse_args():
                         help="Số frame rồi thoát (0 = chạy mãi)")
     parser.add_argument("--save-params", action="store_true",
                         help="Lưu camera intrinsics + T_base_camera ra YAML")
-    parser.add_argument("--method", default="color",
-                        choices=["color", "depth_fg"],
-                        help="Detection method: color | depth_fg")
+    parser.add_argument("--method", default="annotation",
+                        choices=["annotation", "color", "depth_fg"],
+                        help="Detection method: annotation (default) | color | depth_fg")
     parser.add_argument("--no-perception", action="store_true",
                         help="Chỉ build scene, không chạy perception")
     args, _ = parser.parse_known_args()
@@ -142,9 +142,13 @@ _CAM_W, _CAM_H = 640, 480
 _rp = rep.create.render_product(CAMERA_PRIM, (_CAM_W, _CAM_H))
 _rgb_ann   = rep.AnnotatorRegistry.get_annotator("rgb")
 _depth_ann = rep.AnnotatorRegistry.get_annotator("distance_to_image_plane")
+_bbox_ann  = rep.AnnotatorRegistry.get_annotator("bounding_box_2d_tight")
+_sem_ann   = rep.AnnotatorRegistry.get_annotator("semantic_segmentation")
 _rgb_ann.attach(_rp)
 _depth_ann.attach(_rp)
-print(f"      Render product created: {_CAM_W}×{_CAM_H}")
+_bbox_ann.attach(_rp)
+_sem_ann.attach(_rp)
+print(f"      Render product created: {_CAM_W}×{_CAM_H} (+ bbox + semantic annotators)")
 
 # Vài step để render product warm up
 for _ in range(5):
@@ -334,11 +338,18 @@ try:
         if args.no_perception:
             continue
 
-        rgb   = _rgb_ann.get_data()
-        depth = _depth_ann.get_data()
+        rgb        = _rgb_ann.get_data()
+        depth      = _depth_ann.get_data()
+        bbox_data  = _bbox_ann.get_data()
+        sem_data   = _sem_ann.get_data()
 
         if rgb is None or depth is None:
             continue
+
+        if fid == 1 and args.method == "annotation":
+            id_to_labels = (sem_data or {}).get("info", {}).get("idToLabels", {})
+            n_boxes = len((bbox_data or {}).get("data", [])) if bbox_data else 0
+            print(f"  [ANN] bbox count={n_boxes}  labels={id_to_labels}")
 
         frame_count += 1
         fid = frame_count
@@ -390,6 +401,8 @@ try:
             camera_name=CAMERA_NAME,
             detection_method=args.method,
             reference_depth=table_depth,
+            bbox_ann_data=bbox_data,
+            sem_ann_data=sem_data,
         )
         last_state[0] = state
 
