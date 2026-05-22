@@ -189,31 +189,15 @@ class Task1FSM:
     def _world_to_6d(self, pos_world):
         """Chuyển world position → [x,y,z,roll,pitch,yaw] trong pinocchio base frame.
 
-        Rotation: Z-axis points world-down (same logic as GraspPlanner).
-        X-axis points from current EE toward target (projected to horizontal plane).
+        Giữ nguyên rotation ban đầu của tay — IK chỉ cần giải position,
+        tránh yêu cầu flip arm orientation làm Jacobian không hội tụ.
         """
-        import pinocchio as pin
         pos_base = coord_transform.world_to_robot(pos_world)
-
-        # Z-down direction in Pinocchio base frame
-        base_down = coord_transform.robot_world_R_inv @ np.array([0.0, 0.0, -1.0])
-
-        # X-axis: EE → target, projected perp to gravity
-        ee_pos = self._ee_pos(self.grasp_arm)
-        reach = pos_base - ee_pos
-        reach -= np.dot(reach, base_down) * base_down
-        if np.linalg.norm(reach) < 1e-6:
-            perp = np.array([1.0, 0.0, 0.0])
-            reach = perp - np.dot(perp, base_down) * base_down
-        x_g = reach / np.linalg.norm(reach)
-        y_g = np.cross(base_down, x_g)
-        y_g /= np.linalg.norm(y_g)
-        R = np.column_stack([x_g, y_g, base_down])
-
-        rpy = pin.rpy.matrixToRpy(R)
-        print(f"[6D] pos_base={pos_base.round(3)}  ee={ee_pos.round(3)}"
-              f"  dist={np.linalg.norm(pos_base-ee_pos):.3f}m  rpy={rpy.round(3)}")
-        return np.concatenate([pos_base, rpy])
+        init_rpy = np.array(self._arm_init[self.grasp_arm][3:])
+        ee_pos   = np.array(self._arm_init[self.grasp_arm][:3])
+        print(f"[6D] pos_base={pos_base.round(3)}  ee_init={ee_pos.round(3)}"
+              f"  dist={np.linalg.norm(pos_base-ee_pos):.3f}m")
+        return np.concatenate([pos_base, init_rpy])
 
     def _select_arm(self, pos_world):
         """Chọn tay dựa vào vị trí part (y > robot_center → left, ngược lại → right)."""
