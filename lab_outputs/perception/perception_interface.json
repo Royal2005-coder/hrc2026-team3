@@ -1,110 +1,32 @@
 {
   "frame_id": 1,
-  "timestamp": 1779439080.871,
+  "timestamp": 1779439344.798,
   "camera_name": "head_left",
   "objects": [
     {
       "object_id": "obj_000",
-      "class_id": "part_B",
-      "confidence": 0.7,
-      "bbox_xyxy": [
-        419,
-        361,
-        427,
-        369
-      ],
-      "centroid_px": [
-        422.5670498084291,
-        364.2337164750958
-      ],
-      "centroid_camera_m": [
-        0.23653849429018992,
-        0.38200775382191055,
-        0.5974577069282532
-      ],
-      "pose_base": {
-        "position_m": [
-          -0.11799913060137651,
-          -0.20454926001058804,
-          1.3537548271117363
-        ],
-        "quaternion_xyzw": [
-          0.0,
-          0.0,
-          0.0,
-          1.0
-        ]
-      },
-      "grasp_hint": {
-        "approach_axis": "z_down",
-        "yaw_rad": 1.5708,
-        "grasp_width_m": 0.045
-      },
-      "failure_reason": null
-    },
-    {
-      "object_id": "obj_001",
-      "class_id": "part_B",
-      "confidence": 0.7,
-      "bbox_xyxy": [
-        397,
-        359,
-        404,
-        369
-      ],
-      "centroid_px": [
-        399.8958333333333,
-        363.625
-      ],
-      "centroid_camera_m": [
-        0.1846116940694244,
-        0.38087293962901864,
-        0.5986159443855286
-      ],
-      "pose_base": {
-        "position_m": [
-          -0.11959488785319677,
-          -0.15262242018594357,
-          1.3534741795639018
-        ],
-        "quaternion_xyzw": [
-          0.0,
-          0.0,
-          0.0,
-          1.0
-        ]
-      },
-      "grasp_hint": {
-        "approach_axis": "z_down",
-        "yaw_rad": 1.5708,
-        "grasp_width_m": 0.045
-      },
-      "failure_reason": null
-    },
-    {
-      "object_id": "obj_002",
       "class_id": "part_A",
-      "confidence": 1.0,
+      "confidence": 0.7,
       "bbox_xyxy": [
-        0,
-        0,
-        604,
-        29
+        331,
+        379,
+        346,
+        392
       ],
       "centroid_px": [
-        293.35496729474943,
-        12.786345410028034
+        336.71014492753625,
+        385.08856682769726
       ],
       "centroid_camera_m": [
-        -1.4066381595573132,
-        -15.993344823617528,
-        13.676637649536133
+        0.03592088973413883,
+        0.4158520015477699,
+        0.5569036602973938
       ],
       "pose_base": {
         "position_m": [
-          -20.16571882845549,
-          1.439133865298658,
-          -4.75397717602694
+          -0.06540809537479236,
+          -0.0039329450123508775,
+          1.3587311943007248
         ],
         "quaternion_xyzw": [
           0.0,
@@ -115,15 +37,15 @@
       },
       "grasp_hint": {
         "approach_axis": "z_down",
-        "yaw_rad": 1.5708,
+        "yaw_rad": 0.4182,
         "grasp_width_m": 0.045
       },
       "failure_reason": null
     }
   ],
   "summary": {
-    "num_objects": 3,
-    "num_valid_objects": 3,
+    "num_objects": 1,
+    "num_valid_objects": 1,
     "num_invalid_depth": 0
   }
 }
