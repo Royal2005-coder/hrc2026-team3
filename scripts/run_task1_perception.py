@@ -195,9 +195,6 @@ def get_intrinsics(camera_obj, width=640, height=480) -> CameraIntrinsics:
     except Exception as e:
         print(f"      [WARN] get_intrinsics_matrix() failed: {e} → USD prim fallback")
         return get_intrinsics_from_prim(CAMERA_PRIM, width, height)
-            print(f"      [WARN] Using known camera specs fallback: fx={fx:.2f}")
-    return CameraIntrinsics(fx=fx, fy=fy, cx=cx, cy=cy,
-                            width=width, height=height, depth_unit="meter")
 
 
 print("[3/5] Getting camera intrinsics...")
