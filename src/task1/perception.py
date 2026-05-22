@@ -73,21 +73,35 @@ def detect_by_color(rgb_bgr: np.ndarray,
 # 1b. Detection — depth foreground (recommended for Task 1)
 # ═══════════════════════════════════════════════════════════════════════════
 def detect_by_depth_foreground(depth: np.ndarray,
-                               fg_threshold_m: float = 0.02,
-                               min_area: int = 100) -> tuple[list[dict], np.ndarray]:
+                               fg_threshold_m: float = 0.015,
+                               min_area: int = 80,
+                               reference_depth: float | None = None) -> tuple[list[dict], np.ndarray]:
     """
     Detect objects above the table surface using depth.
 
-    Foreground = pixels significantly closer than the background median.
+    Foreground = pixels significantly closer than the table surface.
+    reference_depth: table depth in metres (computed from table ROI externally).
+                     If None, falls back to global median (unreliable when table
+                     dominates the lower frame).
     """
     valid = np.isfinite(depth) & (depth > 0)
     if valid.sum() == 0:
         return [], np.zeros(depth.shape[:2], dtype=np.uint8)
 
-    median_depth = np.median(depth[valid])
+    if reference_depth is not None:
+        table_depth = reference_depth
+    else:
+        # Fallback: use lower-centre ROI to estimate table depth
+        h, w = depth.shape
+        ry1, ry2 = int(h * 0.55), h
+        rx1, rx2 = int(w * 0.15), int(w * 0.85)
+        roi = depth[ry1:ry2, rx1:rx2]
+        roi_valid = np.isfinite(roi) & (roi > 0)
+        table_depth = float(np.median(roi[roi_valid])) if roi_valid.sum() > 0 \
+                      else float(np.median(depth[valid]))
 
     fg_mask = np.zeros(depth.shape[:2], dtype=np.uint8)
-    fg_mask[valid & (depth < median_depth - fg_threshold_m)] = 255
+    fg_mask[valid & (depth < table_depth - fg_threshold_m)] = 255
 
     kernel = np.ones((5, 5), np.uint8)
     fg_mask = cv.morphologyEx(fg_mask, cv.MORPH_OPEN, kernel)
@@ -346,7 +360,8 @@ def run_perception(rgb_bgr: np.ndarray,
                    hsv_ranges: dict,
                    frame_id: int = 0,
                    camera_name: str = "head_stereo_left",
-                   detection_method: str = "color") -> dict:
+                   detection_method: str = "color",
+                   reference_depth: float | None = None) -> dict:
     """
     Run full perception pipeline on one RGB-D frame.
 
@@ -368,7 +383,7 @@ def run_perception(rgb_bgr: np.ndarray,
     timestamp = round(time.time(), 3)
 
     if detection_method == "depth_fg":
-        all_dets, _ = detect_by_depth_foreground(depth)
+        all_dets, _ = detect_by_depth_foreground(depth, reference_depth=reference_depth)
         for det in all_dets:
             contour = det["contour"]
             cls, cls_conf = classify_by_color_hint(rgb_bgr, contour, hsv_ranges)

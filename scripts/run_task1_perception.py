@@ -349,26 +349,37 @@ try:
 
         bgr = cv2.cvtColor(rgb[:, :, :3], cv2.COLOR_RGB2BGR)
 
-        # Debug frame 1: in stats để diagnose
+        # Tính table_depth từ ROI bàn (lower-centre), tránh tường/trần/tay robot
+        _h, _w = depth.shape
+        _ry1, _ry2 = int(_h * 0.55), _h
+        _rx1, _rx2 = int(_w * 0.15), int(_w * 0.85)
+        _roi = depth[_ry1:_ry2, _rx1:_rx2]
+        _roi_valid = np.isfinite(_roi) & (_roi > 0)
+        table_depth = float(np.median(_roi[_roi_valid])) if _roi_valid.sum() > 0 else None
+
+        # Debug frame 1
         if fid == 1:
             valid = np.isfinite(depth) & (depth > 0)
-            print(f"  [DEBUG] rgb shape={rgb.shape} bgr shape={bgr.shape}")
-            print(f"  [DEBUG] depth shape={depth.shape} dtype={depth.dtype}")
-            print(f"  [DEBUG] depth valid={valid.sum()} / {depth.size} "
+            print(f"  [DEBUG] bgr={bgr.shape}  depth={depth.shape}")
+            print(f"  [DEBUG] depth valid={valid.sum()}/{depth.size} "
                   f"min={depth[valid].min():.3f} max={depth[valid].max():.3f} "
-                  f"median={np.median(depth[valid]):.3f}")
-            print(f"  [DEBUG] rgb mean={rgb[:,:,:3].mean():.1f}  "
-                  f"bgr unique colors={len(np.unique(bgr.reshape(-1,3), axis=0))}")
-            # Lưu fg_mask để kiểm tra
+                  f"global_median={np.median(depth[valid]):.3f} "
+                  f"table_depth={table_depth:.3f}")
             from task1.perception import detect_by_depth_foreground, detect_by_color
-            dets_fg, fg_mask = detect_by_depth_foreground(depth)
+            dets_fg, fg_mask = detect_by_depth_foreground(depth, reference_depth=table_depth)
             cv2.imwrite(p("debug_fg_mask_f0001.png"), fg_mask)
             print(f"  [DEBUG] depth_fg detections={len(dets_fg)}")
-            dets_r, mask_r = detect_by_color(bgr, [0,100,100], [10,255,255])
-            dets_b, mask_b = detect_by_color(bgr, [100,100,100], [130,255,255])
+            # Sample HSV tại vùng bàn để xem màu thật
+            hsv_img = cv2.cvtColor(bgr, cv2.COLOR_BGR2HSV)
+            roi_hsv = hsv_img[_ry1:_ry2, _rx1:_rx2]
+            print(f"  [DEBUG] table ROI HSV mean={roi_hsv.mean(axis=(0,1)).round(1)}")
+            # Thử wide HSV ranges
+            dets_r, mask_r = detect_by_color(bgr, [0,50,50], [20,255,255])
+            dets_r2, mask_r2 = detect_by_color(bgr, [160,50,50], [179,255,255])
+            dets_b, mask_b = detect_by_color(bgr, [85,50,50], [135,255,255])
             cv2.imwrite(p("debug_mask_red_f0001.png"), mask_r)
             cv2.imwrite(p("debug_mask_blue_f0001.png"), mask_b)
-            print(f"  [DEBUG] color red={len(dets_r)} blue={len(dets_b)}")
+            print(f"  [DEBUG] wide color red={len(dets_r)+len(dets_r2)} blue={len(dets_b)}")
 
         state = run_perception(
             bgr, depth, intr, T_base_camera,
@@ -376,6 +387,7 @@ try:
             frame_id=fid,
             camera_name=CAMERA_NAME,
             detection_method=args.method,
+            reference_depth=table_depth,
         )
         last_state[0] = state
 
