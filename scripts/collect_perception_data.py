@@ -266,17 +266,16 @@ skipped   = 0
 for frame_idx in range(N_FRAMES):
     # ── Re-randomize màu + vị trí ──────────────────────────────────────
     try:
-        scene.reset()   # _randomize_task1_assets + scatter → đổi cả màu lẫn vị trí
+        scene._randomize_task1_assets()   # đổi màu (re-create USD prims)
     except Exception as e:
-        print(f"  [WARN] scene.reset() failed: {e}")
-        try:
-            scene._scatter_parts_direct(plane_index=0)
-        except Exception as e2:
-            print(f"  [WARN] scatter fallback failed: {e2}")
+        print(f"  [WARN] _randomize_task1_assets failed: {e}")
+
+    try:
+        scene._scatter_parts_direct(plane_index=0)   # đổi vị trí
+    except Exception as e:
+        print(f"  [WARN] scatter failed: {e}")
 
     # ── Settle ──────────────────────────────────────────────────────────
-    world.reset()
-    scene.scatter_after_reset()
     for _ in range(args.settle_steps):
         world.step(render=False)
     world.step(render=True)
