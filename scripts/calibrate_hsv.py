@@ -79,8 +79,16 @@ print(f"[SAVED] calib_rgb.png")
 from pxr import UsdGeom
 stage = omni.usd.get_context().get_stage()
 
-# Camera intrinsics
-intr = CameraIntrinsics(fx=259.07, fy=194.30, cx=320.0, cy=240.0,
+# Camera intrinsics — đọc từ USD prim, không hardcode
+_cam_prim = stage.GetPrimAtPath(CAMERA_PRIM)
+_fl = _cam_prim.GetAttribute("focalLength").Get()
+_ha = _cam_prim.GetAttribute("horizontalAperture").Get()
+_va = _cam_prim.GetAttribute("verticalAperture").Get()
+_fx = (_CAM_W * _fl) / _ha
+_fy = (_CAM_H * _fl) / _va
+print(f"[Intrinsics] fL={_fl:.3f} hA={_ha:.3f} vA={_va:.3f}")
+print(f"[Intrinsics] fx={_fx:.2f} fy={_fy:.2f} cx={_CAM_W/2:.1f} cy={_CAM_H/2:.1f}")
+intr = CameraIntrinsics(fx=_fx, fy=_fy, cx=_CAM_W/2.0, cy=_CAM_H/2.0,
                         width=_CAM_W, height=_CAM_H)
 
 # T_base_camera

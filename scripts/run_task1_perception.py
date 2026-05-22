@@ -156,31 +156,45 @@ for _ in range(5):
     world.step(render=True)
 
 
+def get_intrinsics_from_prim(cam_prim_path: str, width: int, height: int) -> CameraIntrinsics:
+    """
+    Compute camera intrinsics from USD prim focalLength + aperture attributes.
+    This is always accurate for our custom 640×480 render product.
+    """
+    stage = omni.usd.get_context().get_stage()
+    cam_prim = stage.GetPrimAtPath(cam_prim_path)
+    if not cam_prim.IsValid():
+        raise RuntimeError(f"Camera prim not found: {cam_prim_path}")
+
+    fl = cam_prim.GetAttribute("focalLength").Get()
+    ha = cam_prim.GetAttribute("horizontalAperture").Get()
+    va = cam_prim.GetAttribute("verticalAperture").Get()
+
+    if not all([fl, ha, va]):
+        raise RuntimeError(f"Camera prim missing focalLength/aperture attributes")
+
+    fx = (width  * fl) / ha
+    fy = (height * fl) / va
+    cx = width  / 2.0
+    cy = height / 2.0
+    print(f"      [Intrinsics] fL={fl:.3f} hA={ha:.3f} vA={va:.3f}")
+    print(f"      [Intrinsics] fx={fx:.2f} fy={fy:.2f} cx={cx:.2f} cy={cy:.2f}")
+    return CameraIntrinsics(fx=fx, fy=fy, cx=cx, cy=cy,
+                            width=width, height=height, depth_unit="meter")
+
+
 def get_intrinsics(camera_obj, width=640, height=480) -> CameraIntrinsics:
-    """Lấy intrinsics từ Isaac Sim Camera API, fallback về USD attributes."""
+    """Lấy intrinsics từ Isaac Sim Camera API, fallback về USD prim."""
     try:
         K = camera_obj.get_intrinsics_matrix()
         fx, fy = float(K[0, 0]), float(K[1, 1])
         cx, cy = float(K[0, 2]), float(K[1, 2])
-        print(f"      K: fx={fx:.2f} fy={fy:.2f} cx={cx:.2f} cy={cy:.2f}")
+        print(f"      [Intrinsics via API] fx={fx:.2f} fy={fy:.2f} cx={cx:.2f} cy={cy:.2f}")
+        return CameraIntrinsics(fx=fx, fy=fy, cx=cx, cy=cy,
+                                width=width, height=height, depth_unit="meter")
     except Exception as e:
-        print(f"      [WARN] get_intrinsics_matrix() failed: {e} → USD fallback")
-        from pxr import UsdGeom
-        stage = omni.usd.get_context().get_stage()
-        cam_prim = stage.GetPrimAtPath(camera_obj.prim_path)
-        fl = cam_prim.GetAttribute("focalLength").Get()
-        ha = cam_prim.GetAttribute("horizontalAperture").Get()
-        va = cam_prim.GetAttribute("verticalAperture").Get()
-        if fl and ha and va:
-            fx = (width * fl) / ha
-            fy = (height * fl) / va
-            cx, cy = width / 2.0, height / 2.0
-            print(f"      Computed: fx={fx:.2f} fy={fy:.2f}")
-        else:
-            # Last resort: head_stereo_left known specs from extracted_camera_params.yaml
-            fx, fy = 259.07, 194.30
-            cx, cy = 320.0, 240.0
-            width, height = 640, 480
+        print(f"      [WARN] get_intrinsics_matrix() failed: {e} → USD prim fallback")
+        return get_intrinsics_from_prim(CAMERA_PRIM, width, height)
             print(f"      [WARN] Using known camera specs fallback: fx={fx:.2f}")
     return CameraIntrinsics(fx=fx, fy=fy, cx=cx, cy=cy,
                             width=width, height=height, depth_unit="meter")
