@@ -1,69 +1,51 @@
 {
   "frame_id": 1,
-  "timestamp": 0.05,
+  "timestamp": 1779437827.649,
   "camera_name": "head_left",
   "objects": [
     {
-      "object_id": "obj_001",
+      "object_id": "obj_000",
       "class_id": "part_A",
-      "confidence": 0.1,
-      "bbox_xyxy": [
-        85,
-        0,
-        115,
-        22
-      ],
-      "centroid_px": [
-        98.45644891122278,
-        9.926298157453935
-      ],
-      "centroid_camera_m": null,
-      "pose_base": null,
-      "grasp_hint": null,
-      "failure_reason": "INVALID_DEPTH"
-    },
-    {
-      "object_id": "obj_002",
-      "class_id": "part_A",
-      "confidence": 0.1,
+      "confidence": 1.0,
       "bbox_xyxy": [
         0,
-        0,
-        45,
-        22
+        196,
+        640,
+        480
       ],
       "centroid_px": [
-        17.82591493570722,
-        11.90108803165183
+        320.5768601570086,
+        359.7023200188717
       ],
-      "centroid_camera_m": null,
-      "pose_base": null,
-      "grasp_hint": null,
-      "failure_reason": "INVALID_DEPTH"
-    },
-    {
-      "object_id": "obj_003",
-      "class_id": "part_B",
-      "confidence": 0.1,
-      "bbox_xyxy": [
-        0,
-        38,
-        22,
-        52
+      "centroid_camera_m": [
+        0.0014106724148857008,
+        0.39029854704960565,
+        0.6335324048995972
       ],
-      "centroid_px": [
-        9.761020881670534,
-        44.559164733178655
-      ],
-      "centroid_camera_m": null,
-      "pose_base": null,
-      "grasp_hint": null,
-      "failure_reason": "INVALID_DEPTH"
+      "pose_base": {
+        "position_m": [
+          -0.14305546659391466,
+          0.03057907179703979,
+          1.380995629483987
+        ],
+        "quaternion_xyzw": [
+          0.0,
+          0.0,
+          0.0,
+          1.0
+        ]
+      },
+      "grasp_hint": {
+        "approach_axis": "z_down",
+        "yaw_rad": 1.5708,
+        "grasp_width_m": 0.045
+      },
+      "failure_reason": null
     }
   ],
   "summary": {
-    "num_objects": 3,
-    "num_valid_objects": 0,
-    "num_invalid_depth": 3
+    "num_objects": 1,
+    "num_valid_objects": 1,
+    "num_invalid_depth": 0
   }
 }

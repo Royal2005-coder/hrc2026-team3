@@ -1,3 +1,0 @@
-{"frame_id": 1, "object_id": "obj_001", "class_id": "part_A", "confidence": 0.1, "failure_reason": "INVALID_DEPTH"}
-{"frame_id": 1, "object_id": "obj_002", "class_id": "part_A", "confidence": 0.1, "failure_reason": "INVALID_DEPTH"}
-{"frame_id": 1, "object_id": "obj_003", "class_id": "part_B", "confidence": 0.1, "failure_reason": "INVALID_DEPTH"}
