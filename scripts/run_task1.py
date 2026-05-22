@@ -331,6 +331,8 @@ def robot_control_callback(step_size):
         left_target_xyzrpy=left_t,
         right_target_xyzrpy=right_t,
         rot_weight=grasp_cfg.get("ik_rot_weight", 0.1),
+        null_weight=0.0,   # disable null-space pull toward neutral config
+        max_iter=300,      # more iterations to cross the full 30cm range
     )
 
 world.add_physics_callback("task1_fsm", robot_control_callback)
