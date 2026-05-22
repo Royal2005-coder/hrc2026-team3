@@ -26,6 +26,7 @@ from baseline_source.RobotArticulation import RobotArticulation
 from baseline_source.DataLogger import DataLogger
 from baseline_source.coordinate_utils import CoordinateTransform
 from task1.camera_utils import CameraIntrinsics
+from task1.perception import detect_parts as _detect_parts_rgbd
 
 # ═══════════════════════════════════════════════════════════════════════
 # Config
@@ -89,8 +90,11 @@ _CAM_W, _CAM_H = 640, 480
 _rp        = rep.create.render_product(CAMERA_PRIM, (_CAM_W, _CAM_H))
 _rgb_ann   = rep.AnnotatorRegistry.get_annotator("rgb")
 _depth_ann = rep.AnnotatorRegistry.get_annotator("distance_to_image_plane")
+_sem_ann   = rep.AnnotatorRegistry.get_annotator("semantic_segmentation",
+                                                  init_params={"colorize": False})
 _rgb_ann.attach(_rp)
 _depth_ann.attach(_rp)
+_sem_ann.attach(_rp)
 
 for _ in range(5):
     world.step(render=True)
@@ -127,8 +131,67 @@ print(f"[Coord] EE_init left={np.array(_ee_init['left'][:3]).round(3)}  right={n
 print("[4/5] Transforms ready")
 
 # ═══════════════════════════════════════════════════════════════════════
-# N1: Detect parts từ stage (class_id + exact pose)
+# N1: Detect parts từ RGB-D camera (perception pipeline)
 # ═══════════════════════════════════════════════════════════════════════
+def detect_parts_camera():
+    """
+    Detect parts từ camera RGB-D + semantic segmentation annotator.
+    Trả về list[dict]: class_id, pos_world, yaw_rad — cùng format với detect_parts_stage().
+    Fallback: depth_fg nếu semantic labels không có.
+    """
+    for _ in range(5):
+        world.step(render=True)
+    rep.orchestrator.step()
+
+    rgb_raw   = _rgb_ann.get_data()
+    depth_raw = _depth_ann.get_data()
+    sem_raw   = _sem_ann.get_data()
+
+    if rgb_raw is None or depth_raw is None:
+        print("[Detect] Camera data not ready")
+        return []
+
+    rgb   = np.array(rgb_raw,   dtype=np.uint8)
+    depth = np.array(depth_raw, dtype=np.float32)
+    if depth.ndim == 3:
+        depth = depth[:, :, 0]
+
+    # Thử annotation trước (dùng semantic mask từ camera — không phải USD stage)
+    has_sem = (sem_raw is not None
+               and isinstance(sem_raw, dict)
+               and sem_raw.get("info", {}).get("idToLabels"))
+    method = "annotation" if has_sem else "depth_fg"
+    print(f"[Detect] method={method}  sem_labels={bool(has_sem)}")
+
+    objects = _detect_parts_rgbd(
+        rgb=rgb,
+        depth=depth,
+        intr=intr,
+        T_base_camera=T_base_camera,
+        detection_method=method,
+        sem_ann_data=sem_raw,
+    )
+
+    # Chuyển pose_base → pos_world (T_wb: base → world)
+    parts = []
+    for obj in objects:
+        if obj.get("pose_base") is None:
+            continue
+        pos_base = np.array(obj["pose_base"]["position_m"])
+        pos_world = (T_wb @ np.append(pos_base, 1.0))[:3]
+        parts.append({
+            "class_id":  obj["class_id"],
+            "pos_world": pos_world,
+            "yaw_rad":   obj["grasp_hint"]["yaw_rad"],
+        })
+
+    print(f"[Detect] Camera: {len(parts)} parts: {[p['class_id'] for p in parts]}")
+    for p in parts:
+        print(f"  {p['class_id']}  world={p['pos_world'].round(3)}  yaw={p['yaw_rad']:.2f}rad")
+    return parts
+
+
+# N1: Detect từ USD stage (fallback / debug only)
 def detect_parts_stage():
     """
     Đọc vị trí + class_id từ USD stage.
@@ -231,7 +294,7 @@ class Task1FSM:
         if self.state == "DETECT":
             for _ in range(10):
                 world.step(render=True)     # warm up thêm vài frame
-            self.parts = detect_parts_stage()
+            self.parts = detect_parts_camera()
             if not self.parts:
                 print("[FSM] No parts found!")
                 self.state = "DONE"
