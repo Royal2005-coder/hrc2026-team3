@@ -270,57 +270,8 @@ HSV_RANGES = {
 
 
 # ═══════════════════════════════════════════════════════════════════════
-# 6. Perception callback
+# 6. Helpers
 # ═══════════════════════════════════════════════════════════════════════
-frame_count = [0]
-last_state = [None]
-
-
-def perception_callback(step_size):
-    frame_count[0] += 1
-    fid = frame_count[0]
-
-    rep.orchestrator.step()
-    rgb   = _rgb_ann.get_data()
-    depth = _depth_ann.get_data()
-
-    if rgb is None or depth is None:
-        print(f"[Frame {fid}] Camera data not ready")
-        return
-
-    # Normalise to float32 single-channel depth
-    depth = np.array(depth, dtype=np.float32)
-    if depth.ndim == 3:
-        depth = depth[:, :, 0]
-
-    # RGB → BGR for OpenCV
-    bgr = cv2.cvtColor(rgb, cv2.COLOR_RGB2BGR) if rgb.shape[2] == 3 else \
-          cv2.cvtColor(rgb[:, :, :3], cv2.COLOR_RGB2BGR)
-
-    state = run_perception(
-        bgr, depth, intr, T_base_camera,
-        hsv_ranges=HSV_RANGES,
-        frame_id=fid,
-        camera_name=CAMERA_NAME,
-        detection_method=args.method,
-    )
-    last_state[0] = state
-
-    s = state["summary"]
-    n_A = sum(1 for o in state["objects"] if o["class_id"] == "part_A")
-    n_B = sum(1 for o in state["objects"] if o["class_id"] == "part_B")
-    warn = "  ← expected 4!" if s["num_objects"] != 4 else ""
-    print(f"[Frame {fid:4d}] total={s['num_objects']} valid={s['num_valid_objects']} "
-          f"A={n_A} B={n_B}{warn}")
-
-    if fid == 1 or fid % 30 == 0:
-        _save_artifacts(bgr, depth, state, fid)
-
-    if args.frames > 0 and fid >= args.frames:
-        print(f"\n[Done] {args.frames} frames complete — shutting down")
-        kit.close()
-
-
 def _save_artifacts(bgr, depth, state, fid):
     objects = state["objects"]
 
@@ -373,12 +324,55 @@ def _save_artifacts(bgr, depth, state, fid):
 # ═══════════════════════════════════════════════════════════════════════
 print("[5/5] Starting main loop...")
 
-if not args.no_perception:
-    world.add_render_callback("perception", perception_callback)
+frame_count = 0
+last_state = [None]
 
 try:
     while kit.is_running():
-        world.step()
+        world.step(render=True)
+        rep.orchestrator.step()
+
+        if args.no_perception:
+            continue
+
+        rgb   = _rgb_ann.get_data()
+        depth = _depth_ann.get_data()
+
+        if rgb is None or depth is None:
+            continue
+
+        frame_count += 1
+        fid = frame_count
+
+        depth = np.array(depth, dtype=np.float32)
+        if depth.ndim == 3:
+            depth = depth[:, :, 0]
+
+        bgr = cv2.cvtColor(rgb[:, :, :3], cv2.COLOR_RGB2BGR)
+
+        state = run_perception(
+            bgr, depth, intr, T_base_camera,
+            hsv_ranges=HSV_RANGES,
+            frame_id=fid,
+            camera_name=CAMERA_NAME,
+            detection_method=args.method,
+        )
+        last_state[0] = state
+
+        s = state["summary"]
+        n_A = sum(1 for o in state["objects"] if o["class_id"] == "part_A")
+        n_B = sum(1 for o in state["objects"] if o["class_id"] == "part_B")
+        warn = "  ← expected 4!" if s["num_objects"] != 4 else ""
+        print(f"[Frame {fid:4d}] total={s['num_objects']} valid={s['num_valid_objects']} "
+              f"A={n_A} B={n_B}{warn}")
+
+        if fid == 1 or fid % 30 == 0:
+            _save_artifacts(bgr, depth, state, fid)
+
+        if args.frames > 0 and fid >= args.frames:
+            print(f"\n[Done] {args.frames} frames complete.")
+            break
+
 except KeyboardInterrupt:
     print("\n[Interrupted] Saving final state...")
     if last_state[0]:
