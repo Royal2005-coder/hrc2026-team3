@@ -207,15 +207,17 @@ def world_to_pixel(pos_world: list, T_cw: np.ndarray,
                    fx, fy, cx, cy) -> tuple[float, float, float] | None:
     """
     Chiếu điểm 3D world → pixel (u, v) và depth z_cam.
-    Returns None nếu vật nằm sau camera.
+    Isaac Sim USD dùng OpenGL convention (-Z forward),
+    cần convert sang OpenCV (+Z forward) trước khi project.
     """
     p_h = np.array([pos_world[0], pos_world[1], pos_world[2], 1.0])
     p_cam = T_cw @ p_h
-    z = p_cam[2]
-    if z <= 0.05:  # vật sau camera hoặc quá gần
+    # OpenGL → OpenCV: flip Y và Z
+    z = -p_cam[2]
+    if z <= 0.05:
         return None
     u = fx * p_cam[0] / z + cx
-    v = fy * p_cam[1] / z + cy
+    v = fy * (-p_cam[1]) / z + cy
     return float(u), float(v), float(z)
 
 
