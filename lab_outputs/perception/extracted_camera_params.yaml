@@ -1,0 +1,38 @@
+camera:
+  depth_unit: meter
+  name: head_left
+  prim_path: /Root/Ref_Xform/Ref/head_pitch_link/head_stereo_left/head_stereo_left_Camera_01
+  rgb_resolution:
+  - 640
+  - 480
+extrinsics:
+  T_base_camera:
+  - - -2.4187506818576918e-05
+    - 0.5655629440248584
+    - -0.8247051326146213
+    - 0.15868359820711647
+  - - -0.9999999997012484
+    - -1.6591620032866918e-05
+    - 1.7950538627473104e-05
+    - 0.03198484764879017
+  - - -3.53103472622565e-06
+    - 0.8247051328024174
+    - 0.5655629442572053
+    - 0.7008119671906206
+  - - 0.0
+    - 0.0
+    - 0.0
+    - 1.0
+  T_base_camera_source: computed_from_world_transforms
+  robot_base_prim: /Root/Ref_Xform/Ref/base_link
+intrinsics:
+  cx: 320.0
+  cy: 240.0
+  fx: 259.0677
+  fy: 194.3007
+sanity:
+  det_R: 1.0
+  translation:
+  - 0.15868359820711647
+  - 0.03198484764879017
+  - 0.7008119671906206
