@@ -131,23 +131,24 @@ for _ in range(30):
 print("[2/5] Robot + cameras initialized")
 print(f"      Available cameras: {list(robot.cameras.keys())}")
 
-# Override camera resolution — baseline init không truyền resolution nên default 128×128
-_CAM_W, _CAM_H = 640, 480
-for _cam_name in ("head_left", "head_right"):
-    if _cam_name in robot.cameras:
-        robot.cameras[_cam_name].set_resolution((_CAM_W, _CAM_H))
-        print(f"      [{_cam_name}] resolution set to {_CAM_W}×{_CAM_H}")
-
-# Vài step để resolution kick in
-for _ in range(5):
-    world.step(render=True)
-
-
 # ═══════════════════════════════════════════════════════════════════════
 # 3. Camera intrinsics
 # ═══════════════════════════════════════════════════════════════════════
 CAMERA_NAME = "head_left"
 CAMERA_PRIM = "/Root/Ref_Xform/Ref/head_pitch_link/head_stereo_left/head_stereo_left_Camera_01"
+
+# Tạo render product riêng ở 640×480 — bypass render product 128×128 của baseline
+_CAM_W, _CAM_H = 640, 480
+_rp = rep.create.render_product(CAMERA_PRIM, (_CAM_W, _CAM_H))
+_rgb_ann   = rep.AnnotatorRegistry.get_annotator("rgb")
+_depth_ann = rep.AnnotatorRegistry.get_annotator("distance_to_image_plane")
+_rgb_ann.attach(_rp)
+_depth_ann.attach(_rp)
+print(f"      Render product created: {_CAM_W}×{_CAM_H}")
+
+# Vài step để render product warm up
+for _ in range(5):
+    world.step(render=True)
 
 
 def get_intrinsics(camera_obj, width=640, height=480) -> CameraIntrinsics:
@@ -279,9 +280,9 @@ def perception_callback(step_size):
     frame_count[0] += 1
     fid = frame_count[0]
 
-    rgbd = robot.get_camera_rgbd(CAMERA_NAME)
-    rgb = rgbd.get("rgb")
-    depth = rgbd.get("depth")
+    rep.orchestrator.step()
+    rgb   = _rgb_ann.get_data()
+    depth = _depth_ann.get_data()
 
     if rgb is None or depth is None:
         print(f"[Frame {fid}] Camera data not ready")
