@@ -653,23 +653,26 @@ def run_perception(rgb_bgr: np.ndarray,
 
 # Default HSV ranges — có thể override khi gọi detect_parts()
 _DEFAULT_HSV_RANGES = {
-    "red": {
-        "lower": [0, 100, 100], "upper": [10, 255, 255],
-        "lower2": [170, 100, 100], "upper2": [179, 255, 255],
+    # Part A — dark red/maroon body (variant 2 in parts list)
+    "red_dark": {
+        "lower": [0, 100, 50], "upper": [10, 255, 170],
+        "lower2": [165, 100, 50], "upper2": [179, 255, 170],
         "implies_class": "part_A",
     },
-    "copper": {
-        # brownish-metallic copper colour in Isaac Sim
-        "lower": [8, 80, 60], "upper": [20, 200, 200],
+    # Part A — gold/copper screw on black body (variant 1 in parts list)
+    "gold": {
+        "lower": [15, 80, 120], "upper": [35, 255, 255],
         "implies_class": "part_A",
     },
+    # Part B — bright blue assembly (variant 1 in parts list)
     "blue": {
-        "lower": [100, 100, 100], "upper": [130, 255, 255],
+        "lower": [95, 80, 60], "upper": [135, 255, 255],
         "implies_class": "part_B",
     },
-    "ori_color": {
-        # orange/beige part_B variant
-        "lower": [10, 80, 80], "upper": [35, 255, 255],
+    # Part B — red/coral wheels on white body (variant 3 in parts list)
+    "red_coral": {
+        "lower": [0, 150, 150], "upper": [8, 255, 255],
+        "lower2": [170, 150, 150], "upper2": [179, 255, 255],
         "implies_class": "part_B",
     },
 }
