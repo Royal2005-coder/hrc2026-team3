@@ -197,6 +197,7 @@ def detect_by_depth_foreground(depth: np.ndarray,
                                fg_threshold_m: float = 0.015,
                                max_height_m: float = 0.12,
                                min_area: int = 15,
+                               max_area: int = 8000,
                                reference_depth: float | None = None,
                                search_bbox: tuple | None = None) -> tuple[list[dict], np.ndarray]:
     """
@@ -240,7 +241,7 @@ def detect_by_depth_foreground(depth: np.ndarray,
     detections = []
     for cnt in contours:
         area = cv.contourArea(cnt)
-        if area < min_area:
+        if area < min_area or area > max_area:
             continue
         x, y, w, h = cv.boundingRect(cnt)
         m = cv.moments(cnt)
