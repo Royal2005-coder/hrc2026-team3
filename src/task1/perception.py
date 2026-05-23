@@ -32,7 +32,7 @@ from .transform_utils import (
 def detect_by_color(rgb_bgr: np.ndarray,
                     lower_hsv: list | np.ndarray,
                     upper_hsv: list | np.ndarray,
-                    min_area: int = 15) -> tuple[list[dict], np.ndarray]:
+                    min_area: int = 100) -> tuple[list[dict], np.ndarray]:
     """
     Detect objects via HSV colour thresholding + morphology + contour analysis.
 
@@ -49,8 +49,9 @@ def detect_by_color(rgb_bgr: np.ndarray,
     h_img = mask.shape[0]
     mask[:int(h_img * 0.40), :] = 0
 
-    kernel = np.ones((3, 3), np.uint8)
+    kernel = np.ones((5, 5), np.uint8)
     mask = cv.morphologyEx(mask, cv.MORPH_OPEN, kernel)
+    mask = cv.morphologyEx(mask, cv.MORPH_CLOSE, kernel)
 
     contours, _ = cv.findContours(mask, cv.RETR_EXTERNAL, cv.CHAIN_APPROX_SIMPLE)
 
