@@ -258,6 +258,38 @@ def detect_by_depth_foreground(depth: np.ndarray,
 
 
 # ═══════════════════════════════════════════════════════════════════════════
+# 1c. NMS — deduplicate overlapping detections within same class
+# ═══════════════════════════════════════════════════════════════════════════
+def _iou(box1: list, box2: list) -> float:
+    x1, y1 = max(box1[0], box2[0]), max(box1[1], box2[1])
+    x2, y2 = min(box1[2], box2[2]), min(box1[3], box2[3])
+    inter = max(0, x2 - x1) * max(0, y2 - y1)
+    if inter == 0:
+        return 0.0
+    a1 = (box1[2] - box1[0]) * (box1[3] - box1[1])
+    a2 = (box2[2] - box2[0]) * (box2[3] - box2[1])
+    return inter / (a1 + a2 - inter + 1e-8)
+
+
+def _nms_detections(dets: list[dict], iou_thr: float = 0.40) -> list[dict]:
+    """NMS per class — keep largest-area detection when IoU > threshold."""
+    from collections import defaultdict
+    groups: dict[str, list] = defaultdict(list)
+    for d in dets:
+        groups[d.get("class_id", "unknown")].append(d)
+
+    result = []
+    for group in groups.values():
+        group = sorted(group, key=lambda d: d.get("area_px", 0), reverse=True)
+        kept = []
+        for d in group:
+            if all(_iou(d["bbox_xyxy"], k["bbox_xyxy"]) < iou_thr for k in kept):
+                kept.append(d)
+        result.extend(kept)
+    return result
+
+
+# ═══════════════════════════════════════════════════════════════════════════
 # 2. Shape features + classification
 # ═══════════════════════════════════════════════════════════════════════════
 def extract_shape_features(contour: np.ndarray) -> dict:
@@ -502,6 +534,7 @@ def run_perception(rgb_bgr: np.ndarray,
                    frame_id: int = 0,
                    camera_name: str = "head_stereo_left",
                    detection_method: str = "color",
+                   yaw_method: str = "pca",
                    reference_depth: float | None = None,
                    bbox_ann_data: dict | None = None,
                    sem_ann_data: dict | None = None) -> dict:
@@ -583,11 +616,12 @@ def run_perception(rgb_bgr: np.ndarray,
             d["class_id"] = cop.get("implies_class", "part_A")
             d["confidence"] = 0.85
 
-        all_dets = dets_A + dets_B + dets_ori + dets_cop
+        all_dets = _nms_detections(dets_A + dets_B + dets_ori + dets_cop)
 
     objects = []
     for idx, det in enumerate(all_dets):
-        obj = make_object_state(det, depth, intr, T_base_camera, object_id=f"obj_{idx:03d}")
+        obj = make_object_state(det, depth, intr, T_base_camera,
+                                object_id=f"obj_{idx:03d}", yaw_method=yaw_method)
         objects.append(obj)
 
     num_valid = sum(1 for o in objects if o["failure_reason"] is None)
@@ -640,7 +674,7 @@ def detect_parts(rgb: np.ndarray,
                  intr: "CameraIntrinsics",
                  T_base_camera: np.ndarray,
                  confidence_threshold: float = 0.60,
-                 detection_method: str = "annotation",
+                 detection_method: str = "color",
                  hsv_ranges: dict = None,
                  bbox_ann_data: dict | None = None,
                  sem_ann_data: dict | None = None) -> list[dict]:
