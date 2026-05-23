@@ -504,6 +504,13 @@ def make_object_state(det: dict,
         else:
             yaw = estimate_yaw_minrect(contour)
 
+    if pose_base is not None:
+        pose_base["quaternion_xyzw"] = [
+            0.0, 0.0,
+            float(np.sin(yaw / 2.0)),
+            float(np.cos(yaw / 2.0)),
+        ]
+
     return {
         "object_id": object_id,
         "class_id": class_id,
