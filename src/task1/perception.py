@@ -653,28 +653,24 @@ def run_perception(rgb_bgr: np.ndarray,
 # 7. Public interface for task1_runner (N2 calls this)
 # ═══════════════════════════════════════════════════════════════════════════
 
-# Default HSV ranges — có thể override khi gọi detect_parts()
+# Default HSV ranges — calibrated via calibrate_hsv.py (semantic mask, N=8 iters)
+# part_A: red body wrapping H=0-10 / H=170-179, S median=62, V median=211
+# part_B: bright blue H=95-102 (very tight), S median=130, V median=242
 _DEFAULT_HSV_RANGES = {
-    # Part A — dark red/maroon body (variant 2 in parts list)
-    "red_dark": {
-        "lower": [0, 100, 50], "upper": [10, 255, 170],
-        "lower2": [165, 100, 50], "upper2": [179, 255, 170],
+    # Part A — red body (wraps at H=0/179)
+    "red_A": {
+        "lower": [0, 35, 30], "upper": [15, 255, 255],
+        "lower2": [165, 35, 30], "upper2": [179, 255, 255],
         "implies_class": "part_A",
     },
-    # Part A — gold/copper screw on black body (variant 1 in parts list)
-    "gold": {
-        "lower": [15, 80, 120], "upper": [35, 255, 255],
+    # Part A — copper/gold sub-mesh (H=15-35)
+    "gold_A": {
+        "lower": [15, 35, 80], "upper": [40, 255, 255],
         "implies_class": "part_A",
     },
-    # Part B — bright blue assembly (variant 1 in parts list)
-    "blue": {
-        "lower": [95, 80, 60], "upper": [135, 255, 255],
-        "implies_class": "part_B",
-    },
-    # Part B — red/coral wheels on white body (variant 3 in parts list)
-    "red_coral": {
-        "lower": [0, 150, 150], "upper": [8, 255, 255],
-        "lower2": [170, 150, 150], "upper2": [179, 255, 255],
+    # Part B — bright blue (H=87-110, very stable across scatter)
+    "blue_B": {
+        "lower": [87, 30, 150], "upper": [110, 255, 255],
         "implies_class": "part_B",
     },
 }
