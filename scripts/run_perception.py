@@ -179,7 +179,7 @@ print("[transform] transform_sanity_report.md saved")
 # ═══════════════════════════════════════════════════════════════════════════
 # Step 5 — Run full perception pipeline
 # ═══════════════════════════════════════════════════════════════════════════
-method = "color"
+method = "depth_fg"
 print(f"[perception] detection_method={method}")
 
 perc_state = run_perception(
