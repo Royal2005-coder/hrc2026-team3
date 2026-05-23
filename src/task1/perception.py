@@ -51,7 +51,6 @@ def detect_by_color(rgb_bgr: np.ndarray,
 
     kernel = np.ones((3, 3), np.uint8)
     mask = cv.morphologyEx(mask, cv.MORPH_OPEN, kernel)
-    mask = cv.morphologyEx(mask, cv.MORPH_CLOSE, kernel)
 
     contours, _ = cv.findContours(mask, cv.RETR_EXTERNAL, cv.CHAIN_APPROX_SIMPLE)
 
