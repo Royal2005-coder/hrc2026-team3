@@ -1,5 +1,6 @@
 object_id,class_id,yaw_rad,yaw_deg,grasp_width_m,approach_axis
-obj_000,part_B,-2.3996,-137.49,0.045,z_down
-obj_001,part_B,-2.9252,-167.6,0.045,z_down
-obj_002,part_A,1.2211,69.96,0.045,z_down
-obj_003,part_A,1.6733,95.87,0.045,z_down
+obj_000,part_A,-3.1331,-179.51,0.045,z_down
+obj_001,part_A,2.1805,124.93,0.045,z_down
+obj_002,part_A,0.789,45.21,0.045,z_down
+obj_003,part_A,2.354,134.87,0.045,z_down
+obj_004,part_A,0.8245,47.24,0.045,z_down
