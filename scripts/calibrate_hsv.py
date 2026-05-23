@@ -128,6 +128,9 @@ for it in range(N_ITER):
     iter_masks  = {}
     for sem_id, class_id in sem_class.items():
         px_mask = (mask_arr == sem_id)
+        # Keep only saturated pixels (drop black/gray/white sub-meshes)
+        sat_mask = hsv_img[:, :, 1] > 30
+        px_mask  = px_mask & sat_mask
         n_px = int(px_mask.sum())
         if n_px == 0:
             continue
