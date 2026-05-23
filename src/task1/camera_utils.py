@@ -67,7 +67,7 @@ def pixel_to_camera_point(u: float, v: float, depth_z: float,
         raise ValueError(f"Invalid depth value: {depth_z}")
 
     x = (u - intr.cx) * depth_z / intr.fx
-    y = (v - intr.cy) * depth_z / intr.fy
+    y = -(v - intr.cy) * depth_z / intr.fy  # Isaac Sim camera Y-up, image v-down
     z = depth_z
     return np.array([x, y, z], dtype=float)
 
