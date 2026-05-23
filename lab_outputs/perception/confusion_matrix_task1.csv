@@ -1,5 +1,4 @@
 object_id,predicted_class,confidence,failure_reason
 obj_000,part_B,0.8,
-obj_001,part_B,0.8,
+obj_001,part_A,0.8,
 obj_002,part_A,0.8,
-obj_003,part_A,0.8,
