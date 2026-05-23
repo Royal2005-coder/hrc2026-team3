@@ -101,9 +101,13 @@ _cam = stage.GetPrimAtPath(CAMERA_PRIM)
 _fl  = _cam.GetAttribute("focalLength").Get()
 _ha  = _cam.GetAttribute("horizontalAperture").Get()
 _va  = _cam.GetAttribute("verticalAperture").Get()
+_hao = _cam.GetAttribute("horizontalApertureOffset").Get() or 0.0
+_vao = _cam.GetAttribute("verticalApertureOffset").Get() or 0.0
 intr = CameraIntrinsics(
-    fx=(W * _fl) / _ha, fy=(H * _fl) / _va,
-    cx=W / 2.0, cy=H / 2.0,
+    fx=(W * _fl) / _ha,
+    fy=(H * _fl) / _va,
+    cx=W / 2.0 + (W * _hao) / _ha,
+    cy=H / 2.0 + (H * _vao) / _va,
     width=W, height=H, depth_unit="meter",
 )
 print(f"[3/5] Intrinsics: fx={intr.fx:.1f} fy={intr.fy:.1f}")
