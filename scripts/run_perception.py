@@ -115,7 +115,10 @@ def _world_tf(path):
 
 T_wc = _world_tf(CAMERA_PRIM)
 T_wb = _world_tf("/Root/Ref_Xform/Ref/base_link")
-T_base_camera = np.linalg.inv(T_wb) @ T_wc
+# Isaac Sim camera: Y-up, -Z forward. OpenCV (pixel_to_camera_point): Y-down, +Z forward.
+# Absorb the frame difference into T_base_camera so the rest of the pipeline is unchanged.
+_R_cam = np.diag([1., -1., -1., 1.])
+T_base_camera = np.linalg.inv(T_wb) @ T_wc @ _R_cam
 print("[4/5] Transforms ready")
 
 # ═══════════════════════════════════════════════════════════════════════════
