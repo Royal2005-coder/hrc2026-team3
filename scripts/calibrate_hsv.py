@@ -212,8 +212,7 @@ for cls in ("part_A", "part_B"):
     v_lo = max(0,   int(np.percentile(v, 5))  - 20)
     print(f"  {cls}: lower=[{h_lo},{s_lo},{v_lo}]  upper=[{h_hi},255,255]")
     if h_lo <= 10 or h_hi >= 165:
-        print(f"  {cls} red-wrap: lower2=[{max(0,170-(8-(h_lo))},{s_lo},{v_lo}]"
-              f"  upper2=[179,255,255]")
+        print(f"  {cls} red-wrap: lower2=[170,{s_lo},{v_lo}]  upper2=[179,255,255]")
 
 logger.close()
 kit.close()
