@@ -37,7 +37,7 @@ from task1.camera_utils import (CameraIntrinsics, depth_sanity,
 from task1.transform_utils import run_transform_sanity
 from task1.perception import (run_perception, save_perception_json,
                               save_pose_report_csv, save_yaw_report_csv,
-                              save_failure_cases_jsonl)
+                              save_failure_cases_jsonl, _DEFAULT_HSV_RANGES)
 from task1.perception_debug import (save_overlays, save_confusion_matrix_csv,
                                     validate_perception_output)
 
@@ -179,10 +179,7 @@ print("[transform] transform_sanity_report.md saved")
 # ═══════════════════════════════════════════════════════════════════════════
 # Step 5 — Run full perception pipeline
 # ═══════════════════════════════════════════════════════════════════════════
-has_sem = (sem_raw is not None
-           and isinstance(sem_raw, dict)
-           and sem_raw.get("info", {}).get("idToLabels"))
-method = "annotation" if has_sem else "depth_fg"
+method = "color"
 print(f"[perception] detection_method={method}")
 
 perc_state = run_perception(
@@ -190,11 +187,10 @@ perc_state = run_perception(
     depth=depth_raw,
     intr=intr,
     T_base_camera=T_base_camera,
-    hsv_ranges={},
+    hsv_ranges=_DEFAULT_HSV_RANGES,
     frame_id=0,
     camera_name="head_stereo_left",
     detection_method=method,
-    sem_ann_data=sem_raw,
 )
 
 # ═══════════════════════════════════════════════════════════════════════════
