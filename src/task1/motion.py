@@ -16,7 +16,7 @@ def load_action_plan(yaml_file_path) :
         spec = yaml.safe_load(f)['action_plan']
     return spec
 
-def run_pipeline(json_file_path, action_plan, robot=None, world=None, coord_transform=None):
+def run_pipeline(json_file_path, action_plan, robot=None, world=None):
     with open(json_file_path, 'r') as f:
         workpieces = json.load(f).get('workpieces', [])
     print(f"Calculating IK for {len(workpieces)} workpieces...")
@@ -28,10 +28,10 @@ def run_pipeline(json_file_path, action_plan, robot=None, world=None, coord_tran
         for index,  item in enumerate(workpieces):
             T_object = get_base_matrix(item['position'], item['quaternion'])
             T_bin = get_base_matrix(item['bin_position'], item['quaternion'])
-            R_flip = rmu.make_R(0, np.pi, 0)
-            T_object[:3, :3] = T_object[:3, :3] @ R_flip
-            T_bin[:3, :3] = T_bin[:3, :3] @ R_flip
-            excute_pick_and_place(T_object, T_bin, item['id'], action_plan, writer, robot, world, coord_transform)
+            # R_flip = rmu.make_R(0, np.pi, 0)
+            # T_object[:3, :3] = T_object[:3, :3] @ R_flip
+            # T_bin[:3, :3] = T_bin[:3, :3] @ R_flip
+            excute_pick_and_place(T_object, T_bin, item['id'], action_plan, writer, robot, world)
     print('Run successfully! Waypoints saved to', FILE_OUTPUT_CSV)  
 # Phan tinh toan 
 def get_base_matrix(position, quaternion) -> np.ndarray:
@@ -72,7 +72,6 @@ def execute_stage(robot, world, stage_name, target_pose, gripper_side, gripper_s
 
         
 
-    # Gửi tín hiệu đóng/mở ngay từ đầu stage
 
     if gripper_state == "close":
 
@@ -82,19 +81,10 @@ def execute_stage(robot, world, stage_name, target_pose, gripper_side, gripper_s
 
         robot.open_gripper(side=gripper_side)
 
-    
-
     start_time = time.time()
-
     steps = 0
-
     success = False
-
     failure_reason = None
-
-    
-
-    # 2. VÒNG LẶP CHẠY MÔ PHỎNG (Vừa di chuyển tay, vừa là Settle Time cho Gripper)
 
     while steps < max_steps:
         # Call IK control every step
@@ -129,7 +119,8 @@ def execute_stage(robot, world, stage_name, target_pose, gripper_side, gripper_s
 
     return success, elapsed, failure_reason
 # Phan thuc hien pick and place
-def excute_pick_and_place(T_object, T_bin, object_id, action_plan, writer, robot=None, world=None, coord_transform=None):
+#coord_transform=None
+def excute_pick_and_place(T_object, T_bin, object_id, action_plan, writer, robot=None, world=None):
 
     approach_offset = action_plan['approach_offset_m']
     lift_height = action_plan['lift_height_m']
@@ -168,11 +159,11 @@ def excute_pick_and_place(T_object, T_bin, object_id, action_plan, writer, robot
     total_time = 0.0
     # Log to CSV and execute each stage
     for stage_name, target_T, gripper_state in stages:
-        if coord_transform is not None:
-            Target_T_local = coord_transform.world_to_local(target_T)
-        else:
-            Target_T_local = target_T
-        ik_input = convert_matrix_to_ik_input(Target_T_local)
+        # if coord_transform is not None:
+        #     Target_T_local = coord_transform.world_to_local(target_T)
+        # else:
+        #     Target_T_local = target_T
+        ik_input = convert_matrix_to_ik_input(target_T)
 
         writer.writerow([object_id, stage_name, gripper_state] + ik_input)
         

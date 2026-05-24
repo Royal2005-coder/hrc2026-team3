@@ -182,7 +182,7 @@ else:
 
 try:
     # Run with robot=None, world=None to skip execution, just generate CSV
-    run_pipeline(task_json_path, action_plan, robot=robot, world=world, coord_transform=coord_transform)
+    run_pipeline(task_json_path, action_plan, robot=robot, world=world)
     print("=" * 70)
     print("\n[Motion] ✓ Waypoints generated and executed successfully!")
 except Exception as e:
