@@ -4,7 +4,7 @@ from isaacsim.core.utils.types import ArticulationActions
 import torch
 import numpy as np
 from isaacsim.sensors.camera import Camera
-from .DualArmIK import DualArmIK
+from DualArmIK import DualArmIK
 
 class RobotArticulation:
     """具有articulation属性的机器人类，提供控制接口"""
@@ -374,6 +374,86 @@ class RobotArticulation:
         smoothed = prev + alpha * (ik_positions - prev)
         self._last_arm_positions[side] = smoothed.copy()
         return smoothed
+
+    def close_gripper(self, side: Optional[str] = None):
+        """Close gripper on specified side.
+        
+        Args:
+            side: 'left', 'right', or None (both)
+        """
+        if self._articulation is None:
+            return
+            
+        gripper_close_width = 0.01
+        
+        # Get finger joint indices
+        s2_joint_names = self._articulation.dof_names
+        finger_indices = []
+        
+        if side in ['left', None]:
+            # Find left finger joints
+            for name in ['L_finger1_joint', 'L_finger2_joint']:
+                if name in s2_joint_names:
+                    idx = self._articulation.get_dof_index(name)
+                    if idx >= 0:
+                        finger_indices.append(idx)
+        
+        if side in ['right', None]:
+            # Find right finger joints
+            for name in ['R_finger1_joint', 'R_finger2_joint']:
+                if name in s2_joint_names:
+                    idx = self._articulation.get_dof_index(name)
+                    if idx >= 0:
+                        finger_indices.append(idx)
+        
+        if finger_indices:
+            positions = [gripper_close_width] * len(finger_indices)
+            self._articulation.apply_action(
+                ArticulationActions(
+                    joint_positions=torch.tensor([positions], dtype=torch.float32),
+                    joint_indices=torch.tensor(finger_indices, dtype=torch.int32),
+                )
+            )
+
+    def open_gripper(self, side: Optional[str] = None):
+        """Open gripper on specified side.
+        
+        Args:
+            side: 'left', 'right', or None (both)
+        """
+        if self._articulation is None:
+            return
+            
+        gripper_open_width = -0.0215
+        
+        # Get finger joint indices
+        s2_joint_names = self._articulation.dof_names
+        finger_indices = []
+        
+        if side in ['left', None]:
+            # Find left finger joints
+            for name in ['L_finger1_joint', 'L_finger2_joint']:
+                if name in s2_joint_names:
+                    idx = self._articulation.get_dof_index(name)
+                    if idx >= 0:
+                        finger_indices.append(idx)
+        
+        if side in ['right', None]:
+            # Find right finger joints
+            for name in ['R_finger1_joint', 'R_finger2_joint']:
+                if name in s2_joint_names:
+                    idx = self._articulation.get_dof_index(name)
+                    if idx >= 0:
+                        finger_indices.append(idx)
+        
+        if finger_indices:
+            positions = [gripper_open_width] * len(finger_indices)
+            self._articulation.apply_action(
+                ArticulationActions(
+                    joint_positions=torch.tensor([positions], dtype=torch.float32),
+                    joint_indices=torch.tensor(finger_indices, dtype=torch.int32),
+                )
+            )
 
     def control_example(self, step_size):
         """

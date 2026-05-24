@@ -1,0 +1,5 @@
+
+action_plan:
+  approach_offset_m: 0.08
+  lift_height_m: 0.17
+  settle_time_s: 1.5
