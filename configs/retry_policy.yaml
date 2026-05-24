@@ -1,0 +1,72 @@
+retry_policies:
+
+
+  GRASP_FAIL:
+    retry: true
+    max_attempts: 3        
+    speed: slow             
+    timeout_s: 25.0          
+    on_exceed: skip          
+    note: "Reduce speed so gripper can settle properly before closing"
+
+
+  DROP:
+    retry: true
+    max_attempts: 2         
+    speed: very_slow         
+    timeout_s: 30.0
+    on_exceed: skip
+    note: "Re-perceive object position before retrying — it may have moved"
+
+  TIMEOUT:
+    retry: true
+    max_attempts: 2
+    speed: slow
+    timeout_s: 35.0         
+    on_exceed: abort
+    note: "May indicate path planning issue — abort if still failing"
+
+
+  WRONG_BIN:
+    retry: false
+    max_attempts: 1
+    speed: normal
+    timeout_s: 20.0
+    on_exceed: abort       
+    note: "Never retry wrong bin — indicates planner or bin mapping bug"
+
+
+  COLLISION:
+    retry: false
+    max_attempts: 1
+    speed: normal
+    timeout_s: 20.0
+    on_exceed: abort        
+    note: "Abort immediately — move arm to safe_home before anything else"
+
+
+named_policies:
+
+  retry_once_slow:
+    description: "Retry once with slow speed — default for most failures"
+    max_attempts: 2
+    speed: slow
+    timeout_s: 25.0
+
+  retry_twice_slow:
+    description: "Retry twice with slow speed — for fragile objects"
+    max_attempts: 3
+    speed: slow
+    timeout_s: 25.0
+
+  no_retry:
+    description: "Do not retry — fail immediately"
+    max_attempts: 1
+    speed: normal
+    timeout_s: 20.0
+
+  abort:
+    description: "Abort entire task — used for COLLISION and WRONG_BIN"
+    max_attempts: 1
+    speed: normal
+    timeout_s: 20.0

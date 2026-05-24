@@ -1,0 +1,22 @@
+{"step_id": 1, "from_state": "IDLE", "to_state": "VALIDATE", "reason": "frame received"}
+{"step_id": 2, "from_state": "VALIDATE", "to_state": "SELECT_OBJECT", "reason": "4 valid objects found"}
+{"step_id": 2, "event": "object_selected", "object_id": "obj_000", "class_id": "part_B", "confidence": 0.8}
+{"step_id": 3, "from_state": "SELECT_OBJECT", "to_state": "PLAN", "reason": "selected obj_000", "object_id": "obj_000"}
+{"step_id": 3, "event": "plan_built", "plan_id": "plan_0009", "target_bin": "bin_B"}
+{"step_id": 4, "from_state": "PLAN", "to_state": "PICKING", "reason": "plan ready", "object_id": "obj_000"}
+{"step_id": 5, "from_state": "PICKING", "to_state": "PLACING", "reason": "grasp success", "object_id": "obj_000"}
+{"step_id": 6, "from_state": "PLACING", "to_state": "VERIFYING", "reason": "place success", "object_id": "obj_000"}
+{"step_id": 6, "event": "verify_ok", "object_id": "obj_000"}
+{"step_id": 7, "from_state": "VERIFYING", "to_state": "SELECT_OBJECT", "reason": "next object", "object_id": "obj_000"}
+{"step_id": 7, "event": "object_selected", "object_id": "obj_001", "class_id": "part_B", "confidence": 0.8}
+{"step_id": 8, "from_state": "SELECT_OBJECT", "to_state": "PLAN", "reason": "selected obj_001", "object_id": "obj_001"}
+{"step_id": 8, "event": "plan_built", "plan_id": "plan_0010", "target_bin": "bin_B"}
+{"step_id": 9, "from_state": "PLAN", "to_state": "PICKING", "reason": "plan ready", "object_id": "obj_001"}
+{"step_id": 9, "event": "retry_triggered", "object_id": "obj_001", "attempt": 2, "speed": 0.6, "reason": "retry 1/2 at speed=slow"}
+{"step_id": 10, "from_state": "PICKING", "to_state": "RETRY", "reason": "retry allowed: retry 1/2 at speed=slow", "object_id": "obj_001"}
+{"step_id": 11, "from_state": "RETRY", "to_state": "PICKING", "reason": "retrying pick", "object_id": "obj_001"}
+{"step_id": 11, "event": "retry_triggered", "object_id": "obj_001", "attempt": 3, "speed": 0.6, "reason": "retry 2/2 at speed=slow"}
+{"step_id": 12, "from_state": "PICKING", "to_state": "RETRY", "reason": "retry allowed: retry 2/2 at speed=slow", "object_id": "obj_001"}
+{"step_id": 13, "from_state": "RETRY", "to_state": "PICKING", "reason": "retrying pick", "object_id": "obj_001"}
+{"step_id": 13, "event": "retry_exceeded_or_denied", "object_id": "obj_001", "reason": "max attempts 3 exceeded \u2192 skip"}
+{"step_id": 14, "from_state": "PICKING", "to_state": "FAIL", "reason": "retry denied: max attempts 3 exceeded \u2192 skip", "object_id": "obj_001"}

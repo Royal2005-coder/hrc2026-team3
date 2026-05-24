@@ -1,0 +1,172 @@
+{
+  "frame_id": 0,
+  "timestamp": 1779512302.723,
+  "camera_name": "head_stereo_left",
+  "objects": [
+    {
+      "object_id": "obj_000",
+      "class_id": "part_B",
+      "confidence": 0.8,
+      "bbox_xyxy": [
+        384,
+        319,
+        408,
+        343
+      ],
+      "centroid_px": [
+        396.3687315634218,
+        329.5132743362832
+      ],
+      "mask_quality": 0.0011,
+      "centroid_camera_m": [
+        0.20031810572019124,
+        -0.31306232598551276,
+        0.6795443892478943
+      ],
+      "pose_base": {
+        "position_m": [
+          -0.5788014433882747,
+          -0.16831586561258807,
+          0.8269522782696205
+        ],
+        "quaternion_xyzw": [
+          0.0,
+          0.0,
+          0.0,
+          1.0
+        ]
+      },
+      "grasp_hint": {
+        "approach_axis": "z_down",
+        "yaw_rad": -2.3996,
+        "grasp_width_m": 0.045
+      },
+      "failure_reason": null
+    },
+    {
+      "object_id": "obj_001",
+      "class_id": "part_B",
+      "confidence": 0.8,
+      "bbox_xyxy": [
+        287,
+        343,
+        315,
+        364
+      ],
+      "centroid_px": [
+        301.0788804071247,
+        351.8040712468193
+      ],
+      "mask_quality": 0.0013,
+      "centroid_camera_m": [
+        -0.04542364296958591,
+        -0.3578751028224201,
+        0.6219397783279419
+      ],
+      "pose_base": {
+        "position_m": [
+          -0.5566331272179099,
+          0.07742559248654579,
+          0.757416785565063
+        ],
+        "quaternion_xyzw": [
+          0.0,
+          0.0,
+          0.0,
+          1.0
+        ]
+      },
+      "grasp_hint": {
+        "approach_axis": "z_down",
+        "yaw_rad": -2.9252,
+        "grasp_width_m": 0.045
+      },
+      "failure_reason": null
+    },
+    {
+      "object_id": "obj_002",
+      "class_id": "part_A",
+      "confidence": 0.8,
+      "bbox_xyxy": [
+        414,
+        388,
+        434,
+        417
+      ],
+      "centroid_px": [
+        423.2471655328798,
+        402.18820861678006
+      ],
+      "mask_quality": 0.0014,
+      "centroid_camera_m": [
+        0.21339451976848317,
+        -0.44695431861667284,
+        0.5354492664337158
+      ],
+      "pose_base": {
+        "position_m": [
+          -0.5356901218383749,
+          -0.18139264475697434,
+          0.6350359566203969
+        ],
+        "quaternion_xyzw": [
+          0.0,
+          0.0,
+          0.0,
+          1.0
+        ]
+      },
+      "grasp_hint": {
+        "approach_axis": "z_down",
+        "yaw_rad": 1.2211,
+        "grasp_width_m": 0.045
+      },
+      "failure_reason": null
+    },
+    {
+      "object_id": "obj_003",
+      "class_id": "part_A",
+      "confidence": 0.8,
+      "bbox_xyxy": [
+        316,
+        398,
+        334,
+        424
+      ],
+      "centroid_px": [
+        323.8431952662722,
+        410.61538461538464
+      ],
+      "mask_quality": 0.0011,
+      "centroid_camera_m": [
+        0.007578176215756593,
+        -0.448568915586608,
+        0.510840654373169
+      ],
+      "pose_base": {
+        "position_m": [
+          -0.5163034511970368,
+          0.024423283785202348,
+          0.6197873978654941
+        ],
+        "quaternion_xyzw": [
+          0.0,
+          0.0,
+          0.0,
+          1.0
+        ]
+      },
+      "grasp_hint": {
+        "approach_axis": "z_down",
+        "yaw_rad": 1.6733,
+        "grasp_width_m": 0.045
+      },
+      "failure_reason": null
+    }
+  ],
+  "summary": {
+    "num_objects": 4,
+    "num_valid_objects": 4,
+    "num_invalid_depth": 0
+  }
+}

@@ -1,0 +1,36 @@
+============================= test session starts ==============================
+platform linux -- Python 3.11.13, pytest-9.0.3, pluggy-1.6.0 -- /isaac-sim/kit/python/bin/python3
+cachedir: .pytest_cache
+rootdir: /home/ubuntu/thu
+configfile: pytest.ini
+plugins: anyio-4.9.0
+collecting ... collected 26 items
+
+tests/test_transform.py::TestValidateQuaternion::test_valid_identity PASSED [  3%]
+tests/test_transform.py::TestValidateQuaternion::test_valid_90_degree_rotation PASSED [  7%]
+tests/test_transform.py::TestValidateQuaternion::test_invalid_unnormalized PASSED [ 11%]
+tests/test_transform.py::TestValidateQuaternion::test_invalid_zero_quaternion PASSED [ 15%]
+tests/test_transform.py::TestValidateQuaternion::test_invalid_wrong_length PASSED [ 19%]
+tests/test_transform.py::TestValidateQuaternion::test_valid_near_tolerance PASSED [ 23%]
+tests/test_transform.py::TestValidatePosition::test_valid_real_object_000 PASSED [ 26%]
+tests/test_transform.py::TestValidatePosition::test_valid_real_object_003 PASSED [ 30%]
+tests/test_transform.py::TestValidatePosition::test_x_too_far_negative PASSED [ 34%]
+tests/test_transform.py::TestValidatePosition::test_x_too_close_to_robot PASSED [ 38%]
+tests/test_transform.py::TestValidatePosition::test_y_out_of_range PASSED [ 42%]
+tests/test_transform.py::TestValidatePosition::test_z_too_low PASSED     [ 46%]
+tests/test_transform.py::TestValidatePosition::test_boundary_values PASSED [ 50%]
+tests/test_transform.py::TestValidatePosition::test_wrong_length PASSED  [ 53%]
+tests/test_transform.py::TestValidateTransform::test_valid_real_object PASSED [ 57%]
+tests/test_transform.py::TestValidateTransform::test_invalid_position_valid_quat PASSED [ 61%]
+tests/test_transform.py::TestValidateTransform::test_valid_position_invalid_quat PASSED [ 65%]
+tests/test_transform.py::TestQuaternionToYaw::test_identity_zero_yaw PASSED [ 69%]
+tests/test_transform.py::TestQuaternionToYaw::test_90_degrees PASSED     [ 73%]
+tests/test_transform.py::TestQuaternionToYaw::test_180_degrees PASSED    [ 76%]
+tests/test_transform.py::TestCameraToBase::test_identity_transform PASSED [ 80%]
+tests/test_transform.py::TestCameraToBase::test_returns_3_values PASSED  [ 84%]
+tests/test_transform.py::TestCameraToBase::test_with_custom_transform PASSED [ 88%]
+tests/test_transform.py::TestWorldToRobot::test_with_robot_offset PASSED [ 92%]
+tests/test_transform.py::TestWorldToRobot::test_no_offset PASSED         [ 96%]
+tests/test_transform.py::TestWorldToRobot::test_returns_3_values PASSED  [100%]
+
+============================== 26 passed in 0.44s ==============================
