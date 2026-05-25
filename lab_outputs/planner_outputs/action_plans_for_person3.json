@@ -1,0 +1,162 @@
+[
+  {
+    "plan_id": "plan_0001",
+    "primitive": "pick_place",
+    "object_id": "obj_000",
+    "class_id": "part_B",
+    "object_pose_base": {
+      "position_m": [
+        -0.5788014433882747,
+        -0.16831586561258807,
+        0.8269522782696205
+      ],
+      "quaternion_xyzw": [
+        0.0,
+        0.0,
+        0.0,
+        1.0
+      ]
+    },
+    "target_bin": "bin_B",
+    "bin_pose_base": {
+      "position_m": [
+        -0.45,
+        -0.25,
+        0.8
+      ],
+      "quaternion_xyzw": [
+        0.0,
+        0.0,
+        0.0,
+        1.0
+      ]
+    },
+    "grasp_hint": {
+      "yaw_rad": -2.3996,
+      "grasp_width_m": 0.06,
+      "approach_axis": "z_down"
+    },
+    "retry_policy": "retry_once_slow",
+    "timeout_s": 20.0
+  },
+  {
+    "plan_id": "plan_0002",
+    "primitive": "pick_place",
+    "object_id": "obj_001",
+    "class_id": "part_B",
+    "object_pose_base": {
+      "position_m": [
+        -0.5566331272179099,
+        0.07742559248654579,
+        0.757416785565063
+      ],
+      "quaternion_xyzw": [
+        0.0,
+        0.0,
+        0.0,
+        1.0
+      ]
+    },
+    "target_bin": "bin_B",
+    "bin_pose_base": {
+      "position_m": [
+        -0.45,
+        -0.25,
+        0.8
+      ],
+      "quaternion_xyzw": [
+        0.0,
+        0.0,
+        0.0,
+        1.0
+      ]
+    },
+    "grasp_hint": {
+      "yaw_rad": -2.9252,
+      "grasp_width_m": 0.06,
+      "approach_axis": "z_down"
+    },
+    "retry_policy": "retry_once_slow",
+    "timeout_s": 20.0
+  },
+  {
+    "plan_id": "plan_0003",
+    "primitive": "pick_place",
+    "object_id": "obj_002",
+    "class_id": "part_A",
+    "object_pose_base": {
+      "position_m": [
+        -0.5356901218383749,
+        -0.18139264475697434,
+        0.6350359566203969
+      ],
+      "quaternion_xyzw": [
+        0.0,
+        0.0,
+        0.0,
+        1.0
+      ]
+    },
+    "target_bin": "bin_A",
+    "bin_pose_base": {
+      "position_m": [
+        -0.45,
+        0.25,
+        0.8
+      ],
+      "quaternion_xyzw": [
+        0.0,
+        0.0,
+        0.0,
+        1.0
+      ]
+    },
+    "grasp_hint": {
+      "yaw_rad": 1.2211,
+      "grasp_width_m": 0.045,
+      "approach_axis": "z_down"
+    },
+    "retry_policy": "retry_once_slow",
+    "timeout_s": 20.0
+  },
+  {
+    "plan_id": "plan_0004",
+    "primitive": "pick_place",
+    "object_id": "obj_003",
+    "class_id": "part_A",
+    "object_pose_base": {
+      "position_m": [
+        -0.5163034511970368,
+        0.024423283785202348,
+        0.6197873978654941
+      ],
+      "quaternion_xyzw": [
+        0.0,
+        0.0,
+        0.0,
+        1.0
+      ]
+    },
+    "target_bin": "bin_A",
+    "bin_pose_base": {
+      "position_m": [
+        -0.45,
+        0.25,
+        0.8
+      ],
+      "quaternion_xyzw": [
+        0.0,
+        0.0,
+        0.0,
+        1.0
+      ]
+    },
+    "grasp_hint": {
+      "yaw_rad": 1.6733,
+      "grasp_width_m": 0.045,
+      "approach_axis": "z_down"
+    },
+    "retry_policy": "retry_once_slow",
+    "timeout_s": 20.0
+  }
+]

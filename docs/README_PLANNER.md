@@ -24,8 +24,8 @@ All manual checks have been converted into an automated test suite. To generate 
 
 ```bash
 # 1. Run Unit Tests & Export Reports
-pytest tests/test_transform.py -v > lab_outputs/planner_outputs/pytest_transform.txt
-pytest tests/test_planner.py -v > lab_outputs/planner_outputs/planner_unit_test_report.txt
+pytest tests/test_transform.py -v > outputs/pytest_transform.txt
+pytest tests/test_planner.py -v > outputs/planner_unit_test_report.txt
 
 # 2. Generate Action Plan & Failure Case Examples
 python3 src/task1/generate_examples.py
@@ -34,9 +34,10 @@ python3 src/task1/generate_examples.py
 pytest tests/test_manual_*.py -s
 ```
 
-## Expected Outputs (`lab_outputs/planner_outputs/`)
+## Expected Outputs (`outputs/`)
 
-After running the commands above, the `lab_outputs/planner_outputs/` folder will be populated with:
+After running the commands above, the `outputs/` folder will be populated with:
+- `action_plans_for_person3.json`: The actual plans for the object detected from the perception from Person 1
 - `action_plan_examples.jsonl`: Successfully generated JSON payload examples that Person 3 can consume.
 - `failure_cases_planner.jsonl`: Logs of objects rejected due to low confidence, bad geometry, or unknown classes.
 - `object_bin_pose_report.json`: Final placement mappings showing exactly which bin each object belongs to.
