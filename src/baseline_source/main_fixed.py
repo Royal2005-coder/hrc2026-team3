@@ -33,7 +33,7 @@ from grasp_planner import GraspPlanner
 
 # Add task1 to path
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', 'task1'))
-from motion import load_action_plan, run_pipeline
+from motion import load_action_plan
 
 # ── 1. Configuration ─────────────────────────────────────────────────
 config_path = os.path.join(os.path.dirname(__file__), '..', '..', 'configs', 'Part_Sorting.yaml')
@@ -65,8 +65,6 @@ scene = SceneBuilder(cfg, data_logger=data_logger)
 apply_scatter_config(cfg)
 
 scene.build_all()
-# NOTE: rep.orchestrator.step() was causing segfault - skip for now
-# rep.orchestrator.step()
 print("[Init] 场景物体已创建，开始物理稳定...")
 
 world.play()
@@ -132,71 +130,42 @@ print("\n[Motion] Preparing Pick & Place motion planning...")
 if robot is None:
     print("[Motion] 跳过 - 机器人未加载")
 else:
-    # Generate workpieces JSON
-    workpieces_data = {
-        "task_number": 1,
-        "total_workpieces": len(part_poses),
-        "workpieces": []
-    }
-
-    for i, part_pose in enumerate(part_poses):
-        pos = part_pose['position']
-        rot = part_pose.get('orientation', [0, 0, 0, 1])
-        part_type = part_pose.get('type', 'PartA')
-        
-        # Assign bin position based on part type
-        if 'PartA' in part_type or i % 2 == 0:
-            bin_pos = [1.2, 0.3, 1.05]
-        else:
-            bin_pos = [1.2, -0.3, 1.05]
-        
-        workpiece = {
-            "id": part_pose.get('prim_path', f'part_{i}').split('/')[-1],
-            "type": part_type,
-            "position": list(pos),
-            "quaternion": list(rot),
-            "bin_position": list(bin_pos)
-        }
-        workpieces_data['workpieces'].append(workpiece)
-
-    # Save workpieces JSON
-    task_json_path = '/tmp/task1_workpieces.json'
-    with open(task_json_path, 'w') as f:
-        json.dump(workpieces_data, f, indent=2)
-    print(f"[Motion] Workpiece data saved to: {task_json_path}")
-
-    # Load motion action plan
+    # Load motion action plan configuration
     action_plan_path = os.path.join(os.path.dirname(__file__), '..', '..', 'src', 'task1', 'primitive_spec_task1.yaml')
     try:
         action_plan = load_action_plan(action_plan_path)
-        print(f"[Motion] Action plan loaded:")
-        print(f"  - Approach offset: {action_plan['approach_offset_m']} m")
-        print(f"  - Lift height: {action_plan['lift_height_m']} m")
+        print(f"[Motion] Action plan loaded successfully.")
     except Exception as e:
         print(f"[Error] Failed to load action plan: {e}")
-        action_plan = {'approach_offset_m': 0.08, 'lift_height_m': 0.17}
 
-    # Execute motion pipeline (generate waypoints WITHOUT simulator execution)
-    print("\n[Motion] Generating motion waypoints (IK-only, no execution)...\n")
+    print("\n[Motion] Generating motion waypoints from Person 2's planner...\n")
     print("=" * 70)
 
-try:
-    # Run with robot=None, world=None to skip execution, just generate CSV
-    run_pipeline(task_json_path, action_plan, robot=robot, world=world)
-    print("=" * 70)
-    print("\n[Motion] ✓ Waypoints generated and executed successfully!")
-except Exception as e:
-    print("=" * 70)
-    print(f"\n[Error] Motion planning failed: {e}")
-    import traceback
-    traceback.print_exc()
+    try:
+        # Import hàm run pipeline từ nhánh motion
+        from motion import run_pipeline_from_person2
+        
+        # Lấy thông tin transform thời gian thực từ torso_link của Isaac Sim
+        my_transform = CoordinateTransform.from_torso_link(robot.ik_solver)
+        
+        # FIX: Truyền chuẩn xác tham số coord_transform vào pipeline điều khiển
+        run_pipeline_from_person2(
+            action_plan_yaml=action_plan_path, 
+            robot=robot, 
+            world=world, 
+            coord_transform=my_transform
+        )
+        print("=" * 70)
+        print("\n[Motion] ✓ Waypoints generated and executed successfully!")
+    except Exception as e:
+        print("=" * 70)
+        print(f"\n[Error] Motion planning failed: {e}")
+        import traceback
+        traceback.print_exc()
 
 # ── 9. Cleanup ──────────────────────────────────────────────────────
 print("\n[Sim] Test completed successfully!")
-print("[Sim] - Scene initialized with", len(part_poses), "parts")
-print("[Sim] - Robot initialized and ready")
-print("[Sim] - IK solver initialized")
-print("\n[Note] Motion pipeline execution coming soon...")
+print("[Sim] - Scene initialized with robot and items ready")
 
 # Cleanup
 world.pause()
