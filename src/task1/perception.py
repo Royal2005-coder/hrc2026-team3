@@ -26,6 +26,89 @@ from .transform_utils import (
 )
 
 
+# ── helpers for semantic_bbox detection method ───────────────────────────────
+def _usd_matrix_to_np(matrix) -> np.ndarray:
+    """USD Gf.Matrix4d (row-major, translation in last row) → numpy 4×4."""
+    return np.array([[float(matrix[i][j]) for j in range(4)] for i in range(4)]).T
+
+
+def _prim_pose_in_base(stage, prim_path: str, t_base_world: np.ndarray) -> dict | None:
+    """
+    Read object pose from USD prim runtime transform and express in robot-base frame.
+    Returns dict(position_m, quaternion_xyzw [xyzw], yaw_rad) or None on failure.
+    """
+    try:
+        from pxr import Usd, UsdGeom
+        prim = stage.GetPrimAtPath(prim_path)
+        if not prim or not prim.IsValid():
+            return None
+        T_world_obj = _usd_matrix_to_np(
+            UsdGeom.XformCache(Usd.TimeCode.Default()).GetLocalToWorldTransform(prim)
+        )
+        T_base_obj = t_base_world @ T_world_obj
+        R = T_base_obj[:3, :3]
+        pos = T_base_obj[:3, 3]
+        quat = rotation_matrix_to_quaternion(R)
+        yaw = float(np.arctan2(R[1, 0], R[0, 0]))
+        return {
+            "position_m":      pos.tolist(),
+            "quaternion_xyzw": quat.tolist(),
+            "yaw_rad":         yaw,
+        }
+    except Exception:
+        return None
+
+
+def _parse_bbox_row(row) -> list[int] | None:
+    """Extract [x1, y1, x2, y2] from bbox annotator row (handles multiple formats)."""
+    for keys in (("x_min", "y_min", "x_max", "y_max"), ("xMin", "yMin", "xMax", "yMax")):
+        try:
+            vals = [float(row[k]) for k in keys]
+            return [int(round(v)) for v in vals]
+        except Exception:
+            pass
+    try:
+        return [int(round(float(row[i]))) for i in range(1, 5)]
+    except Exception:
+        return None
+
+
+def _classify_bbox_label(row, id_to_labels: dict) -> str:
+    """Map semantic_id from bbox row → 'part_A' | 'part_B' | 'unknown'."""
+    sem_id = None
+    for key in ("semanticId", "semantic_id", "id", "semantic"):
+        try:
+            v = row[key]
+            if v is not None:
+                sem_id = str(int(float(v)))
+                break
+        except Exception:
+            pass
+    if sem_id is None:
+        return "unknown"
+    label_entry = id_to_labels.get(sem_id) or id_to_labels.get(int(sem_id), {}) or {}
+    text = json.dumps(label_entry, ensure_ascii=False).lower()
+    if "part_a" in text:
+        return "part_A"
+    if "part_b" in text:
+        return "part_B"
+    return "unknown"
+
+
+def _median_depth_in_bbox(depth: np.ndarray, bbox: list) -> tuple[float | None, float]:
+    """Return (median_z, valid_ratio) for pixels inside the bounding box."""
+    h, w = depth.shape[:2]
+    x1, y1, x2, y2 = bbox
+    x1, y1 = max(0, x1), max(0, y1)
+    x2, y2 = min(w - 1, x2), min(h - 1, y2)
+    crop = depth[y1:y2 + 1, x1:x2 + 1]
+    valid = np.isfinite(crop) & (crop > 0)
+    if not valid.any():
+        return None, 0.0
+    vals = crop[valid]
+    return float(np.median(vals)), float(valid.mean())
+
+
 # ═══════════════════════════════════════════════════════════════════════════
 # 1. Detection — colour-based
 # ═══════════════════════════════════════════════════════════════════════════
@@ -76,7 +159,74 @@ def detect_by_color(rgb_bgr: np.ndarray,
 
 
 # ═══════════════════════════════════════════════════════════════════════════
-# 1a. Detection — Isaac Sim annotators (best accuracy, sim-only)
+# 1a. Detection — semantic bbox annotator + USD prim transform  (Team-2 approach)
+# ═══════════════════════════════════════════════════════════════════════════
+def detect_by_semantic_bbox(bbox_ann_data: dict,
+                            depth: np.ndarray,
+                            stage,
+                            t_base_world: np.ndarray) -> list[dict]:
+    """
+    Detect objects using the bounding_box_2d_tight_fast annotator.
+
+    Pose comes from USD prim runtime transform — position error ≈ 0.
+    Depth is kept as a cross-check field; it is NOT used for position.
+
+    Parameters
+    ----------
+    bbox_ann_data : output of bounding_box_2d_tight_fast.get_data()
+    depth         : (H, W) float32, metres — cross-check only
+    stage         : Isaac Sim USD stage
+    t_base_world  : 4×4 inv(T_world_base)
+    """
+    if bbox_ann_data is None or stage is None or t_base_world is None:
+        return []
+
+    raw = bbox_ann_data
+    data       = raw.get("data", raw) if isinstance(raw, dict) else raw
+    info       = raw.get("info", {}) if isinstance(raw, dict) else {}
+    id_to_labels = info.get("idToLabels") or info.get("id_to_labels") or {}
+    prim_paths = info.get("primPaths", [])
+
+    try:
+        rows = list(data)
+    except Exception:
+        return []
+
+    detections = []
+    for idx, row in enumerate(rows):
+        bbox = _parse_bbox_row(row)
+        if bbox is None:
+            continue
+        x1, y1, x2, y2 = bbox
+        if x2 <= x1 or y2 <= y1:
+            continue
+
+        class_id = _classify_bbox_label(row, id_to_labels)
+        if class_id not in ("part_A", "part_B"):
+            continue
+
+        prim_path = prim_paths[idx] if idx < len(prim_paths) else None
+        prim_pose = _prim_pose_in_base(stage, prim_path, t_base_world) if prim_path else None
+        z, valid_ratio = _median_depth_in_bbox(depth, bbox)
+
+        detections.append({
+            "bbox_xyxy":         [x1, y1, x2, y2],
+            "centroid_px":       [(x1 + x2) / 2.0, (y1 + y2) / 2.0],
+            "area_px":           float((x2 - x1) * (y2 - y1)),
+            "class_id":          class_id,
+            "confidence":        1.0,
+            "prim_path":         prim_path,
+            "prim_pose":         prim_pose,
+            "depth_median_m":    z,
+            "depth_valid_ratio": valid_ratio,
+        })
+
+    detections.sort(key=lambda d: (d["class_id"], d["bbox_xyxy"][1], d["bbox_xyxy"][0]))
+    return detections
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+# 1b. Detection — Isaac Sim semantic_segmentation annotator (pixel mask)
 # ═══════════════════════════════════════════════════════════════════════════
 _LABEL_MAP = {
     "part_a": "part_A",
@@ -191,7 +341,7 @@ def detect_by_annotation(bbox_data: dict,
 
 
 # ═══════════════════════════════════════════════════════════════════════════
-# 1b. Detection — depth foreground (recommended for Task 1)
+# 1c. Detection — depth foreground (fallback)
 # ═══════════════════════════════════════════════════════════════════════════
 def detect_by_depth_foreground(depth: np.ndarray,
                                fg_threshold_m: float = 0.015,
@@ -259,7 +409,7 @@ def detect_by_depth_foreground(depth: np.ndarray,
 
 
 # ═══════════════════════════════════════════════════════════════════════════
-# 1c. NMS — deduplicate overlapping detections within same class
+# 1d. NMS — deduplicate overlapping detections within same class
 # ═══════════════════════════════════════════════════════════════════════════
 def _iou(box1: list, box2: list) -> float:
     x1, y1 = max(box1[0], box2[0]), max(box1[1], box2[1])
@@ -531,6 +681,44 @@ def make_object_state(det: dict,
     }
 
 
+def make_object_state_from_prim(det: dict,
+                                object_id: str = "obj_000",
+                                default_grasp_width: float = 0.045) -> dict:
+    """
+    Build ObjectState from a semantic_bbox detection.
+    Position and orientation come from the USD prim runtime transform.
+    """
+    prim_pose = det.get("prim_pose")
+    failure = None if prim_pose is not None else "TRANSFORM_NOT_AVAILABLE"
+
+    pose_base = None
+    yaw = 0.0
+    if prim_pose is not None:
+        pose_base = {
+            "position_m":      prim_pose["position_m"],
+            "quaternion_xyzw": prim_pose["quaternion_xyzw"],
+        }
+        yaw = prim_pose["yaw_rad"]
+
+    return {
+        "object_id":         object_id,
+        "class_id":          det.get("class_id", "unknown"),
+        "confidence":        float(det.get("confidence", 1.0)),
+        "bbox_xyxy":         det["bbox_xyxy"],
+        "centroid_px":       det["centroid_px"],
+        "centroid_camera_m": None,
+        "pose_base":         pose_base,
+        "grasp_hint": {
+            "approach_axis": "z_down",
+            "yaw_rad":       round(yaw, 4),
+            "grasp_width_m": default_grasp_width,
+        },
+        "depth_median_m":    det.get("depth_median_m"),
+        "depth_valid_ratio": det.get("depth_valid_ratio", 0.0),
+        "failure_reason":    failure,
+    }
+
+
 # ═══════════════════════════════════════════════════════════════════════════
 # 6. Full-frame perception
 # ═══════════════════════════════════════════════════════════════════════════
@@ -545,7 +733,9 @@ def run_perception(rgb_bgr: np.ndarray,
                    yaw_method: str = "pca",
                    reference_depth: float | None = None,
                    bbox_ann_data: dict | None = None,
-                   sem_ann_data: dict | None = None) -> dict:
+                   sem_ann_data: dict | None = None,
+                   stage=None,
+                   t_base_world: np.ndarray | None = None) -> dict:
     """
     Run full perception pipeline on one RGB-D frame.
 
@@ -566,7 +756,28 @@ def run_perception(rgb_bgr: np.ndarray,
     """
     timestamp = round(time.time(), 3)
 
-    if detection_method == "annotation":
+    if detection_method == "semantic_bbox":
+        all_dets = detect_by_semantic_bbox(bbox_ann_data, depth, stage, t_base_world)
+        objects = [
+            make_object_state_from_prim(det, object_id=f"obj_{idx:03d}")
+            for idx, det in enumerate(all_dets)
+        ]
+        num_valid = sum(1 for o in objects if o["failure_reason"] is None)
+        return {
+            "frame_id":   frame_id,
+            "timestamp":  timestamp,
+            "camera_name": camera_name,
+            "objects":    objects,
+            "summary": {
+                "num_objects":       len(objects),
+                "num_valid_objects": num_valid,
+                "num_invalid_depth": sum(
+                    1 for o in objects if o.get("failure_reason") == "INVALID_DEPTH"
+                ),
+            },
+        }
+
+    elif detection_method == "annotation":
         all_dets = detect_by_annotation(bbox_ann_data, sem_ann_data, depth)
 
     elif detection_method == "depth_fg":
@@ -684,7 +895,9 @@ def detect_parts(rgb: np.ndarray,
                  detection_method: str = "color",
                  hsv_ranges: dict = None,
                  bbox_ann_data: dict | None = None,
-                 sem_ann_data: dict | None = None) -> list[dict]:
+                 sem_ann_data: dict | None = None,
+                 stage=None,
+                 t_base_world: np.ndarray | None = None) -> list[dict]:
     """
     Interface chính cho task1_runner — N2 gọi hàm này.
 
@@ -727,6 +940,8 @@ def detect_parts(rgb: np.ndarray,
         detection_method=detection_method,
         bbox_ann_data=bbox_ann_data,
         sem_ann_data=sem_ann_data,
+        stage=stage,
+        t_base_world=t_base_world,
     )
 
     return [

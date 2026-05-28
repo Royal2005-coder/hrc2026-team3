@@ -1,0 +1,852 @@
+{
+  "timestamp": "2026-05-21T02:46:16.775774+00:00",
+  "pipeline": "runtime_head_left_semantic_rgbd_pose_base",
+  "baseline_path": "/workspace/GlobalHumanoidRobotChallenge_2026_Baseline",
+  "config_path": "/workspace/GlobalHumanoidRobotChallenge_2026_Baseline/Ubtech_sim/config/Part_Sorting.yaml",
+  "camera_name": "head_left",
+  "camera_prim_path": "/Root/Ref_Xform/Ref/head_pitch_link/head_stereo_left/head_stereo_left_Camera_01",
+  "base_frame": "/Root/Ref_Xform/Ref",
+  "headless": true,
+  "objects": [
+    {
+      "index": 0,
+      "class_id": "part_a",
+      "confidence": 1.0,
+      "confidence_note": "Replicator semantic class from baseline SceneBuilder; not learned detector confidence.",
+      "semantic_id": "3",
+      "prim_path": "/Replicator/Ref_Xform_01",
+      "bbox_xyxy": [
+        291,
+        323,
+        305,
+        338
+      ],
+      "centroid_px": [
+        298.0,
+        330.5
+      ],
+      "depth_median_m": 0.6778058409690857,
+      "depth_valid_ratio": 1.0,
+      "depth_stats": {
+        "valid_count": 240,
+        "total_count": 240,
+        "min": 0.6233336329460144,
+        "median": 0.6778058409690857,
+        "max": 0.7208914756774902
+      },
+      "centroid_camera_cv_m": [
+        0.13735719291473855,
+        0.24364549695590532,
+        0.6778058409690857
+      ],
+      "centroid_world_m": [
+        0.8054109437174568,
+        0.37985464630646454,
+        1.0171844945108004
+      ],
+      "object_runtime_transform": {
+        "source": "semantic_prim_runtime_transform",
+        "T_world_object": [
+          [
+            0.7411306926182301,
+            0.0009183546159551859,
+            -0.6713601515461147,
+            0.7957071661949158
+          ],
+          [
+            0.671359634475954,
+            0.0008332354504498873,
+            0.7411312615960803,
+            0.3814084231853485
+          ],
+          [
+            0.0012400223934030952,
+            -0.9999992311714463,
+            9.901472189932647e-07,
+            1.0113455057144165
+          ],
+          [
+            0.0,
+            0.0,
+            0.0,
+            1.0
+          ]
+        ],
+        "T_base_object": [
+          [
+            0.6713596344759541,
+            0.0008332354504498876,
+            0.7411312615960802,
+            0.5814084231853485
+          ],
+          [
+            -0.74113069261823,
+            -0.0009183546159551856,
+            0.6713601515461148,
+            -0.0957071661949157
+          ],
+          [
+            0.0012400223934030952,
+            -0.9999992311714463,
+            9.901472189932647e-07,
+            0.11134550571441648
+          ],
+          [
+            0.0,
+            0.0,
+            0.0,
+            1.0
+          ]
+        ],
+        "position_m": [
+          0.5814084231853485,
+          -0.0957071661949157,
+          0.11134550571441648
+        ],
+        "orientation_xyzw": [
+          -0.6465827477872981,
+          0.2862346156393701,
+          -0.2870364568688184,
+          0.6462279532036698
+        ],
+        "yaw_rad": -0.8347538254761588,
+        "yaw_convention": "atan2 of object local +X axis projected into base XY plane"
+      },
+      "pose_base": {
+        "frame": "/Root/Ref_Xform/Ref",
+        "position_m": [
+          0.5814084231853485,
+          -0.0957071661949157,
+          0.11134550571441648
+        ],
+        "orientation_xyzw": [
+          -0.6465827477872981,
+          0.2862346156393701,
+          -0.2870364568688184,
+          0.6462279532036698
+        ],
+        "source": "semantic_prim_runtime_transform",
+        "rgbd_centroid_position_m": [
+          0.5798546463064647,
+          -0.10541094371745674,
+          0.11718449451080037
+        ],
+        "rgbd_centroid_position_delta_m": 0.011431155276726107
+      },
+      "grasp_hint": {
+        "yaw_rad": -0.8347538254761588,
+        "yaw_convention": "atan2 of object local +X axis projected into base XY plane",
+        "approach": "top_down_workspace_candidate",
+        "quality": "semantic_prim_transform_with_rgbd_centroid_crosscheck"
+      }
+    },
+    {
+      "index": 1,
+      "class_id": "part_a",
+      "confidence": 1.0,
+      "confidence_note": "Replicator semantic class from baseline SceneBuilder; not learned detector confidence.",
+      "semantic_id": "3",
+      "prim_path": "/Replicator/Ref_Xform_02",
+      "bbox_xyxy": [
+        288,
+        338,
+        300,
+        355
+      ],
+      "centroid_px": [
+        294.0,
+        346.5
+      ],
+      "depth_median_m": 0.6190624237060547,
+      "depth_valid_ratio": 1.0,
+      "depth_stats": {
+        "valid_count": 234,
+        "total_count": 234,
+        "min": 0.5995579957962036,
+        "median": 0.6190624237060547,
+        "max": 0.6727408766746521
+      },
+      "centroid_camera_cv_m": [
+        0.11350496254460385,
+        0.27032102921806966,
+        0.6190624237060547
+      ],
+      "centroid_world_m": [
+        0.7815545850350581,
+        0.31632144422703,
+        1.0283964689483738
+      ],
+      "object_runtime_transform": {
+        "source": "semantic_prim_runtime_transform",
+        "T_world_object": [
+          [
+            0.012936756260567561,
+            -0.5196419250342421,
+            0.8542861991652222,
+            0.7894060015678406
+          ],
+          [
+            -0.0031450761726485865,
+            0.854332322251762,
+            0.5197176076022243,
+            0.3222595155239105
+          ],
+          [
+            -0.9999113704890663,
+            -0.009410255183492311,
+            0.009417975581761273,
+            1.033616542816162
+          ],
+          [
+            0.0,
+            0.0,
+            0.0,
+            1.0
+          ]
+        ],
+        "T_base_object": [
+          [
+            -0.0031450761726485835,
+            0.8543323222517619,
+            0.5197176076022245,
+            0.5222595155239105
+          ],
+          [
+            -0.012936756260567561,
+            0.5196419250342423,
+            -0.8542861991652221,
+            -0.08940600156784051
+          ],
+          [
+            -0.9999113704890663,
+            -0.009410255183492311,
+            0.009417975581761273,
+            0.1336165428161621
+          ],
+          [
+            0.0,
+            0.0,
+            0.0,
+            1.0
+          ]
+        ],
+        "position_m": [
+          0.5222595155239105,
+          -0.08940600156784051,
+          0.1336165428161621
+        ],
+        "orientation_xyzw": [
+          0.3419777124358208,
+          0.6150953230242305,
+          -0.3510417093167732,
+          0.6176396247900866
+        ],
+        "yaw_rad": -1.8092814042883714,
+        "yaw_convention": "atan2 of object local +X axis projected into base XY plane"
+      },
+      "pose_base": {
+        "frame": "/Root/Ref_Xform/Ref",
+        "position_m": [
+          0.5222595155239105,
+          -0.08940600156784051,
+          0.1336165428161621
+        ],
+        "orientation_xyzw": [
+          0.3419777124358208,
+          0.6150953230242305,
+          -0.3510417093167732,
+          0.6176396247900866
+        ],
+        "source": "semantic_prim_runtime_transform",
+        "rgbd_centroid_position_m": [
+          0.5163214442270301,
+          -0.08155458503505808,
+          0.12839646894837375
+        ],
+        "rgbd_centroid_position_delta_m": 0.01114246846453921
+      },
+      "grasp_hint": {
+        "yaw_rad": -1.8092814042883714,
+        "yaw_convention": "atan2 of object local +X axis projected into base XY plane",
+        "approach": "top_down_workspace_candidate",
+        "quality": "semantic_prim_transform_with_rgbd_centroid_crosscheck"
+      }
+    },
+    {
+      "index": 2,
+      "class_id": "part_b",
+      "confidence": 1.0,
+      "confidence_note": "Replicator semantic class from baseline SceneBuilder; not learned detector confidence.",
+      "semantic_id": "4",
+      "prim_path": "/Replicator/Ref_Xform_04",
+      "bbox_xyxy": [
+        232,
+        349,
+        248,
+        373
+      ],
+      "centroid_px": [
+        240.0,
+        361.0
+      ],
+      "depth_median_m": 0.588841438293457,
+      "depth_valid_ratio": 1.0,
+      "depth_stats": {
+        "valid_count": 425,
+        "total_count": 425,
+        "min": 0.5632115602493286,
+        "median": 0.588841438293457,
+        "max": 0.6413373351097107
+      },
+      "centroid_camera_cv_m": [
+        -0.04545850583334455,
+        0.2983214445313236,
+        0.588841438293457
+      ],
+      "centroid_world_m": [
+        0.6225877482673651,
+        0.2755751324275132,
+        1.0223966040682013
+      ],
+      "object_runtime_transform": {
+        "source": "semantic_prim_runtime_transform",
+        "T_world_object": [
+          [
+            0.9931692375321368,
+            0.02984907401522933,
+            -0.11280025886613604,
+            0.624362587928772
+          ],
+          [
+            -0.02324746403109092,
+            0.9979638951973381,
+            0.059393764813148585,
+            0.28224292397499084
+          ],
+          [
+            0.11434343459926799,
+            -0.0563657401529496,
+            0.991840956152272,
+            1.0153815746307373
+          ],
+          [
+            0.0,
+            0.0,
+            0.0,
+            1.0
+          ]
+        ],
+        "T_base_object": [
+          [
+            -0.0232474640310907,
+            0.9979638951973381,
+            0.05939376481314856,
+            0.4822429239749908
+          ],
+          [
+            -0.9931692375321368,
+            -0.02984907401522911,
+            0.11280025886613605,
+            0.0756374120712281
+          ],
+          [
+            0.11434343459926799,
+            -0.0563657401529496,
+            0.991840956152272,
+            0.11538157463073728
+          ],
+          [
+            0.0,
+            0.0,
+            0.0,
+            1.0
+          ]
+        ],
+        "position_m": [
+          0.4822429239749908,
+          0.0756374120712281,
+          0.11538157463073728
+        ],
+        "orientation_xyzw": [
+          -0.06074671561464545,
+          -0.019732168301973444,
+          -0.715006554899777,
+          0.6961940135669712
+        ],
+        "yaw_rad": -1.5941994073106363,
+        "yaw_convention": "atan2 of object local +X axis projected into base XY plane"
+      },
+      "pose_base": {
+        "frame": "/Root/Ref_Xform/Ref",
+        "position_m": [
+          0.4822429239749908,
+          0.0756374120712281,
+          0.11538157463073728
+        ],
+        "orientation_xyzw": [
+          -0.06074671561464545,
+          -0.019732168301973444,
+          -0.715006554899777,
+          0.6961940135669712
+        ],
+        "source": "semantic_prim_runtime_transform",
+        "rgbd_centroid_position_m": [
+          0.47557513242751315,
+          0.077412251732635,
+          0.1223966040682013
+        ],
+        "rgbd_centroid_position_delta_m": 0.009839722453037185
+      },
+      "grasp_hint": {
+        "yaw_rad": -1.5941994073106363,
+        "yaw_convention": "atan2 of object local +X axis projected into base XY plane",
+        "approach": "top_down_workspace_candidate",
+        "quality": "semantic_prim_transform_with_rgbd_centroid_crosscheck"
+      }
+    },
+    {
+      "index": 3,
+      "class_id": "part_b",
+      "confidence": 1.0,
+      "confidence_note": "Replicator semantic class from baseline SceneBuilder; not learned detector confidence.",
+      "semantic_id": "4",
+      "prim_path": "/Replicator/Ref_Xform_03",
+      "bbox_xyxy": [
+        310,
+        365,
+        332,
+        389
+      ],
+      "centroid_px": [
+        321.0,
+        377.0
+      ],
+      "depth_median_m": 0.5467031002044678,
+      "depth_valid_ratio": 1.0,
+      "depth_stats": {
+        "valid_count": 575,
+        "total_count": 575,
+        "min": 0.5215318202972412,
+        "median": 0.5467031002044678,
+        "max": 0.6005349159240723
+      },
+      "centroid_camera_cv_m": [
+        0.17145955913186414,
+        0.3191785639223932,
+        0.5467031002044678
+      ],
+      "centroid_world_m": [
+        0.8395027006908289,
+        0.22900987667848666,
+        1.0290061612848351
+      ],
+      "object_runtime_transform": {
+        "source": "semantic_prim_runtime_transform",
+        "T_world_object": [
+          [
+            0.9357692426265767,
+            0.15685880213366482,
+            0.3158025344218677,
+            0.839531660079956
+          ],
+          [
+            0.3113788788991645,
+            0.05267481449277778,
+            -0.948824829825638,
+            0.22774344682693481
+          ],
+          [
+            -0.1654663661581489,
+            0.9862153315130237,
+            0.00044895330955563306,
+            1.034540057182312
+          ],
+          [
+            0.0,
+            0.0,
+            0.0,
+            1.0
+          ]
+        ],
+        "T_base_object": [
+          [
+            0.3113788788991647,
+            0.05267481449277781,
+            -0.9488248298256379,
+            0.4277434468269349
+          ],
+          [
+            -0.9357692426265766,
+            -0.15685880213366482,
+            -0.3158025344218679,
+            -0.1395316600799561
+          ],
+          [
+            -0.1654663661581489,
+            0.9862153315130237,
+            0.00044895330955563306,
+            0.134540057182312
+          ],
+          [
+            0.0,
+            0.0,
+            0.0,
+            1.0
+          ]
+        ],
+        "position_m": [
+          0.4277434468269349,
+          -0.1395316600799561,
+          0.134540057182312
+        ],
+        "orientation_xyzw": [
+          0.6057616543912454,
+          -0.36445622702102887,
+          -0.45987195950178783,
+          0.5373474272002835
+        ],
+        "yaw_rad": -1.2495692638502005,
+        "yaw_convention": "atan2 of object local +X axis projected into base XY plane"
+      },
+      "pose_base": {
+        "frame": "/Root/Ref_Xform/Ref",
+        "position_m": [
+          0.4277434468269349,
+          -0.1395316600799561,
+          0.134540057182312
+        ],
+        "orientation_xyzw": [
+          0.6057616543912454,
+          -0.36445622702102887,
+          -0.45987195950178783,
+          0.5373474272002835
+        ],
+        "source": "semantic_prim_runtime_transform",
+        "rgbd_centroid_position_m": [
+          0.42900987667848667,
+          -0.13950270069082893,
+          0.1290061612848351
+        ],
+        "rgbd_centroid_position_delta_m": 0.005677031532344308
+      },
+      "grasp_hint": {
+        "yaw_rad": -1.2495692638502005,
+        "yaw_convention": "atan2 of object local +X axis projected into base XY plane",
+        "approach": "top_down_workspace_candidate",
+        "quality": "semantic_prim_transform_with_rgbd_centroid_crosscheck"
+      }
+    }
+  ],
+  "failure_reason": null,
+  "reproducibility": {
+    "seed": 20260521,
+    "seed_controls": [
+      "random.seed",
+      "numpy.random.seed",
+      "rep.set_global_seed_if_available"
+    ],
+    "baseline_git": {
+      "commit": "9f4debc1e37a5ad57ade08707fc055930867960b",
+      "status_short": "M .dockerignore\n M .gitmodules\n M Ubtech_sim/main.py\n M Ubtech_sim/source/SceneBuilder.py\n m assets\n M lerobot/common/robot_devices/robots/isaac_sim_robot_interface.py"
+    },
+    "command": "/home/ubuntu/Team2/Task1-Perception/scripts/run_task1_semantic_pose_pipeline.py --config-path /workspace/GlobalHumanoidRobotChallenge_2026_Baseline/Ubtech_sim/config/Part_Sorting.yaml --headless --seed 20260521",
+    "replicator_seed_status": "set"
+  },
+  "scene_path": "/workspace/GlobalHumanoidRobotChallenge_2026_Baseline/assets/resources/Collected_Task4/SubUSDs/2_small_warehouse2.usd",
+  "camera_intrinsics": {
+    "status": "computed_from_usd_focal_aperture_assuming_center_principal_point",
+    "fx": 207.25412857244675,
+    "fy": 207.25412857244675,
+    "cx": 256.0,
+    "cy": 256.0,
+    "matrix_3x3": [
+      [
+        207.25412857244675,
+        0.0,
+        256.0
+      ],
+      [
+        0.0,
+        207.25412857244675,
+        256.0
+      ],
+      [
+        0.0,
+        0.0,
+        1.0
+      ]
+    ]
+  },
+  "depth_unit": "meters_runtime_distance_to_image_plane_stage_units",
+  "T_world_camera": [
+    [
+      0.9999999957262766,
+      8.721557230408136e-05,
+      -3.067394565871574e-05,
+      0.6680542100916681
+    ],
+    [
+      -7.461170460443932e-05,
+      0.5653944477231366,
+      -0.824820655001403,
+      -0.0414475517595172
+    ],
+    [
+      -5.459432690868991e-05,
+      0.8248206537649826,
+      0.5653944518140996,
+      1.6013834934114686
+    ],
+    [
+      0.0,
+      0.0,
+      0.0,
+      1.0
+    ]
+  ],
+  "T_world_base": [
+    [
+      2.220446049250313e-16,
+      -1.0,
+      0.0,
+      0.7
+    ],
+    [
+      1.0,
+      2.220446049250313e-16,
+      0.0,
+      -0.2
+    ],
+    [
+      0.0,
+      0.0,
+      1.0,
+      0.9
+    ],
+    [
+      0.0,
+      0.0,
+      0.0,
+      1.0
+    ]
+  ],
+  "T_base_camera": [
+    [
+      -7.461170460421728e-05,
+      0.5653944477231366,
+      -0.824820655001403,
+      0.15855244824048279
+    ],
+    [
+      -0.9999999957262766,
+      -8.721557230395582e-05,
+      3.067394565853259e-05,
+      0.031945789908331856
+    ],
+    [
+      -5.459432690868991e-05,
+      0.8248206537649826,
+      0.5653944518140996,
+      0.7013834934114686
+    ],
+    [
+      0.0,
+      0.0,
+      0.0,
+      1.0
+    ]
+  ],
+  "selected_object": {
+    "index": 0,
+    "class_id": "part_a",
+    "confidence": 1.0,
+    "confidence_note": "Replicator semantic class from baseline SceneBuilder; not learned detector confidence.",
+    "semantic_id": "3",
+    "prim_path": "/Replicator/Ref_Xform_01",
+    "bbox_xyxy": [
+      291,
+      323,
+      305,
+      338
+    ],
+    "centroid_px": [
+      298.0,
+      330.5
+    ],
+    "depth_median_m": 0.6778058409690857,
+    "depth_valid_ratio": 1.0,
+    "depth_stats": {
+      "valid_count": 240,
+      "total_count": 240,
+      "min": 0.6233336329460144,
+      "median": 0.6778058409690857,
+      "max": 0.7208914756774902
+    },
+    "centroid_camera_cv_m": [
+      0.13735719291473855,
+      0.24364549695590532,
+      0.6778058409690857
+    ],
+    "centroid_world_m": [
+      0.8054109437174568,
+      0.37985464630646454,
+      1.0171844945108004
+    ],
+    "object_runtime_transform": {
+      "source": "semantic_prim_runtime_transform",
+      "T_world_object": [
+        [
+          0.7411306926182301,
+          0.0009183546159551859,
+          -0.6713601515461147,
+          0.7957071661949158
+        ],
+        [
+          0.671359634475954,
+          0.0008332354504498873,
+          0.7411312615960803,
+          0.3814084231853485
+        ],
+        [
+          0.0012400223934030952,
+          -0.9999992311714463,
+          9.901472189932647e-07,
+          1.0113455057144165
+        ],
+        [
+          0.0,
+          0.0,
+          0.0,
+          1.0
+        ]
+      ],
+      "T_base_object": [
+        [
+          0.6713596344759541,
+          0.0008332354504498876,
+          0.7411312615960802,
+          0.5814084231853485
+        ],
+        [
+          -0.74113069261823,
+          -0.0009183546159551856,
+          0.6713601515461148,
+          -0.0957071661949157
+        ],
+        [
+          0.0012400223934030952,
+          -0.9999992311714463,
+          9.901472189932647e-07,
+          0.11134550571441648
+        ],
+        [
+          0.0,
+          0.0,
+          0.0,
+          1.0
+        ]
+      ],
+      "position_m": [
+        0.5814084231853485,
+        -0.0957071661949157,
+        0.11134550571441648
+      ],
+      "orientation_xyzw": [
+        -0.6465827477872981,
+        0.2862346156393701,
+        -0.2870364568688184,
+        0.6462279532036698
+      ],
+      "yaw_rad": -0.8347538254761588,
+      "yaw_convention": "atan2 of object local +X axis projected into base XY plane"
+    },
+    "pose_base": {
+      "frame": "/Root/Ref_Xform/Ref",
+      "position_m": [
+        0.5814084231853485,
+        -0.0957071661949157,
+        0.11134550571441648
+      ],
+      "orientation_xyzw": [
+        -0.6465827477872981,
+        0.2862346156393701,
+        -0.2870364568688184,
+        0.6462279532036698
+      ],
+      "source": "semantic_prim_runtime_transform",
+      "rgbd_centroid_position_m": [
+        0.5798546463064647,
+        -0.10541094371745674,
+        0.11718449451080037
+      ],
+      "rgbd_centroid_position_delta_m": 0.011431155276726107
+    },
+    "grasp_hint": {
+      "yaw_rad": -0.8347538254761588,
+      "yaw_convention": "atan2 of object local +X axis projected into base XY plane",
+      "approach": "top_down_workspace_candidate",
+      "quality": "semantic_prim_transform_with_rgbd_centroid_crosscheck"
+    }
+  },
+  "counts": {
+    "total_objects": 4,
+    "part_a": 2,
+    "part_b": 2,
+    "unknown": 42
+  },
+  "four_object_pass": true,
+  "pose_base_available": true,
+  "orientation_available": true,
+  "yaw_available": true,
+  "same_run_artifacts": {
+    "rgb_path": "/home/ubuntu/Team2/Task1-Perception/outputs/task1/perception/samples/semantic_pose_rgb_head_left.png",
+    "depth_path": "/home/ubuntu/Team2/Task1-Perception/outputs/task1/perception/samples/semantic_pose_depth_head_left.npy",
+    "depth_vis_path": "/home/ubuntu/Team2/Task1-Perception/outputs/task1/perception/samples/semantic_pose_depth_vis_head_left.png",
+    "overlay_path": "/home/ubuntu/Team2/Task1-Perception/outputs/task1/perception/overlays/overlay_semantic_pose_base_head_left.png"
+  },
+  "semantic_raw": {
+    "raw_count": 46,
+    "id_to_labels": {
+      "0": {
+        "class": "floor"
+      },
+      "1": {
+        "class": "wall"
+      },
+      "2": {
+        "class": "boxes"
+      },
+      "3": {
+        "class": "part_a"
+      },
+      "4": {
+        "class": "part_b"
+      }
+    }
+  },
+  "runtime_log": {
+    "seed": 20260521,
+    "resolution": [
+      512,
+      512
+    ],
+    "settle_time_s": 2.0,
+    "render_steps": 35,
+    "counts": {
+      "total_objects": 4,
+      "part_a": 2,
+      "part_b": 2,
+      "unknown": 42
+    },
+    "four_object_pass": true,
+    "pose_base_available": true,
+    "orientation_available": true,
+    "yaw_available": true
+  },
+  "limits": [
+    "Semantic labels come from simulator annotations, not a trained real detector.",
+    "orientation_xyzw and yaw_rad come from simulator semantic prim runtime transform.",
+    "RGB-D centroid pose is kept as a cross-check, not the primary final pose.",
+    "Exact pixel reproduction across machines can depend on Isaac Sim/GPU/driver versions even with seeds."
+  ]
+}

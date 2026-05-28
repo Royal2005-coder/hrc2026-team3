@@ -1,0 +1,22 @@
+{
+  "timestamp": "2026-05-22T07:56:14.482039+00:00",
+  "status": "pass",
+  "checks": {
+    "required_artifacts_missing": [],
+    "interface_path": "/home/ubuntu/Team2/Task1-Perception/outputs/task1/perception/json/perception_interface_semantic_pose_base.json",
+    "pipeline": "runtime_head_left_semantic_rgbd_pose_base",
+    "camera_name": "head_left",
+    "base_frame": "/Root/Ref_Xform/Ref",
+    "depth_unit": "meters_runtime_distance_to_image_plane_stage_units",
+    "object_count": 4,
+    "part_a_count": 2,
+    "part_b_count": 2,
+    "four_object_pass": true,
+    "pose_base_available": true,
+    "orientation_available": true,
+    "yaw_available": true,
+    "seed": 20260521
+  },
+  "errors": [],
+  "warnings": []
+}

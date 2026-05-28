@@ -86,9 +86,12 @@ _rgb_ann   = rep.AnnotatorRegistry.get_annotator("rgb")
 _depth_ann = rep.AnnotatorRegistry.get_annotator("distance_to_image_plane")
 _sem_ann   = rep.AnnotatorRegistry.get_annotator("semantic_segmentation",
                                                   init_params={"colorize": False})
+_bbox_ann  = rep.AnnotatorRegistry.get_annotator("bounding_box_2d_tight_fast",
+                                                  init_params={"semanticTypes": ["class"]})
 _rgb_ann.attach(_rp)
 _depth_ann.attach(_rp)
 _sem_ann.attach(_rp)
+_bbox_ann.attach(_rp)
 
 for _ in range(10):
     world.step(render=True)
@@ -123,6 +126,7 @@ T_wb = _world_tf("/Root/Ref_Xform/Ref/base_link")
 # Absorb the frame difference into T_base_camera so the rest of the pipeline is unchanged.
 _R_cam = np.diag([1., -1., -1., 1.])
 T_base_camera = np.linalg.inv(T_wb) @ T_wc @ _R_cam
+t_base_world  = np.linalg.inv(T_wb)
 print("[4/5] Transforms ready")
 
 # ═══════════════════════════════════════════════════════════════════════════
@@ -131,6 +135,7 @@ print("[4/5] Transforms ready")
 rgb_raw   = np.array(_rgb_ann.get_data(),   dtype=np.uint8)
 depth_raw = np.array(_depth_ann.get_data(), dtype=np.float32)
 sem_raw   = _sem_ann.get_data()
+bbox_raw  = _bbox_ann.get_data()
 
 if depth_raw.ndim == 3:
     depth_raw = depth_raw[:, :, 0]
@@ -179,7 +184,7 @@ print("[transform] transform_sanity_report.md saved")
 # ═══════════════════════════════════════════════════════════════════════════
 # Step 5 — Run full perception pipeline
 # ═══════════════════════════════════════════════════════════════════════════
-method = "depth_fg"
+method = "semantic_bbox"
 print(f"[perception] detection_method={method}")
 
 perc_state = run_perception(
@@ -191,6 +196,9 @@ perc_state = run_perception(
     frame_id=0,
     camera_name="head_stereo_left",
     detection_method=method,
+    bbox_ann_data=bbox_raw,
+    stage=stage,
+    t_base_world=t_base_world,
 )
 
 # ═══════════════════════════════════════════════════════════════════════════

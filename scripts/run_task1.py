@@ -92,9 +92,12 @@ _rgb_ann   = rep.AnnotatorRegistry.get_annotator("rgb")
 _depth_ann = rep.AnnotatorRegistry.get_annotator("distance_to_image_plane")
 _sem_ann   = rep.AnnotatorRegistry.get_annotator("semantic_segmentation",
                                                   init_params={"colorize": False})
+_bbox_ann  = rep.AnnotatorRegistry.get_annotator("bounding_box_2d_tight_fast",
+                                                  init_params={"semanticTypes": ["class"]})
 _rgb_ann.attach(_rp)
 _depth_ann.attach(_rp)
 _sem_ann.attach(_rp)
+_bbox_ann.attach(_rp)
 
 for _ in range(5):
     world.step(render=True)
@@ -123,6 +126,7 @@ def _world_tf(path):
 T_wc = _world_tf(CAMERA_PRIM)
 T_wb = _world_tf("/Root/Ref_Xform/Ref/base_link")
 T_base_camera = np.linalg.inv(T_wb) @ T_wc
+t_base_world  = np.linalg.inv(T_wb)
 
 coord_transform = CoordinateTransform.from_torso_link(ik_solver=robot.ik_solver)
 print(f"[Coord] R_base=\n{coord_transform.robot_world_R.round(3)}")
@@ -135,9 +139,9 @@ print("[4/5] Transforms ready")
 # ═══════════════════════════════════════════════════════════════════════
 def detect_parts_camera():
     """
-    Detect parts từ camera RGB-D + semantic segmentation annotator.
-    Trả về list[dict]: class_id, pos_world, yaw_rad — cùng format với detect_parts_stage().
-    Fallback: depth_fg nếu semantic labels không có.
+    Detect parts từ camera: dùng bounding_box_2d_tight_fast annotator + USD prim pose.
+    Fallback: depth_fg nếu bbox annotator không có primPaths.
+    Trả về list[dict]: class_id, pos_world, yaw_rad.
     """
     for _ in range(5):
         world.step(render=True)
@@ -145,7 +149,7 @@ def detect_parts_camera():
 
     rgb_raw   = _rgb_ann.get_data()
     depth_raw = _depth_ann.get_data()
-    sem_raw   = _sem_ann.get_data()
+    bbox_raw  = _bbox_ann.get_data()
 
     if rgb_raw is None or depth_raw is None:
         print("[Detect] Camera data not ready")
@@ -156,12 +160,12 @@ def detect_parts_camera():
     if depth.ndim == 3:
         depth = depth[:, :, 0]
 
-    # Thử annotation trước (dùng semantic mask từ camera — không phải USD stage)
-    has_sem = (sem_raw is not None
-               and isinstance(sem_raw, dict)
-               and sem_raw.get("info", {}).get("idToLabels"))
-    method = "annotation" if has_sem else "depth_fg"
-    print(f"[Detect] method={method}  sem_labels={bool(has_sem)}")
+    # semantic_bbox: pose từ USD prim transform (Team-2 approach)
+    has_bbox = (bbox_raw is not None
+                and isinstance(bbox_raw, dict)
+                and bbox_raw.get("info", {}).get("primPaths"))
+    method = "semantic_bbox" if has_bbox else "depth_fg"
+    print(f"[Detect] method={method}  has_prim_paths={bool(has_bbox)}")
 
     objects = _detect_parts_rgbd(
         rgb=rgb,
@@ -169,7 +173,9 @@ def detect_parts_camera():
         intr=intr,
         T_base_camera=T_base_camera,
         detection_method=method,
-        sem_ann_data=sem_raw,
+        bbox_ann_data=bbox_raw,
+        stage=stage,
+        t_base_world=t_base_world,
     )
 
     # Chuyển pose_base → pos_world (T_wb: base → world)
