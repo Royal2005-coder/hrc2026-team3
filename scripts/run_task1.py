@@ -38,16 +38,17 @@ cfg["root_path"] = os.path.join(ROOT, "assets/resources/")
 grasp_cfg = cfg.get("grasp", {})  # baseline params (settle_time, ik_rot_weight, ...)
 
 # ── N1/N2 params — chỉnh tại đây, KHÔNG sửa Part_Sorting.yaml ────────
-# Bin: đo bằng cách chạy detect_parts_stage() và đọc pos_world của bin
-BIN_A_WORLD = np.array([1.15,  0.15, 1.05])   # TODO: đo thực tế
-BIN_B_WORLD = np.array([1.15, -0.15, 1.05])   # TODO: đo thực tế
+# /Root/Box tại world=[1.2, 0.3, 1.05], có vách ngăn chia 2 khu theo trục Y
+# z=1.1 để gripper release hơi trên miệng box (không va vào thành)
+BIN_A_WORLD = np.array([1.2,  0.15, 1.1])   # khu trước (y nhỏ)
+BIN_B_WORLD = np.array([1.2,  0.45, 1.1])   # khu sau  (y lớn)
 
-LIFT_HEIGHT       = 0.20   # m — nhấc lên 20cm so với mặt bàn
-APPROACH_OFFSET_Z = 0.10   # m — tiếp cận từ trên 10cm trước khi hạ xuống
+LIFT_HEIGHT       = 0.20   # m — nhấc lên 20cm so với mặt part
+APPROACH_OFFSET_Z = 0.10   # m — tiếp cận từ trên 10cm trước khi hạ
 
 # Gripper — tune theo URDF finger joint limits (xem s2.urdf để biết max)
 FINGER_OPEN  = 0.0    # rad — mở hoàn toàn
-FINGER_CLOSE = 0.7    # rad — TODO: tune cho đến khi kẹp được part
+FINGER_CLOSE = 0.7    # rad — tune nếu part bị rơi (tăng lên 1.0, 1.2, ...)
 GRIPPER_CLOSE_STEPS = 60   # physics steps chờ gripper đóng (~1s @ 60Hz)
 GRIPPER_OPEN_STEPS  = 30   # physics steps chờ gripper mở (~0.5s)
 
