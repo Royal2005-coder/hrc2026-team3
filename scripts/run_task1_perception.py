@@ -27,9 +27,9 @@ def parse_args():
                         help="Số frame rồi thoát (0 = chạy mãi)")
     parser.add_argument("--save-params", action="store_true",
                         help="Lưu camera intrinsics + T_base_camera ra YAML")
-    parser.add_argument("--method", default="annotation",
-                        choices=["annotation", "color", "depth_fg"],
-                        help="Detection method: annotation (default) | color | depth_fg")
+    parser.add_argument("--method", default="semantic_bbox",
+                        choices=["semantic_bbox", "annotation", "color", "depth_fg"],
+                        help="Detection method: semantic_bbox (default) | depth_fg | color")
     parser.add_argument("--no-perception", action="store_true",
                         help="Chỉ build scene, không chạy perception")
     args, _ = parser.parse_known_args()
@@ -64,6 +64,7 @@ from task1.camera_utils import (
     CameraIntrinsics,
     depth_sanity,
     write_depth_sanity_report,
+    save_camera_config_csv,
 )
 from task1.transform_utils import run_transform_sanity
 from task1.perception import (
@@ -147,8 +148,11 @@ _CAM_W, _CAM_H = 640, 480
 _rp = rep.create.render_product(CAMERA_PRIM, (_CAM_W, _CAM_H))
 _rgb_ann   = rep.AnnotatorRegistry.get_annotator("rgb")
 _depth_ann = rep.AnnotatorRegistry.get_annotator("distance_to_image_plane")
+_bbox_ann  = rep.AnnotatorRegistry.get_annotator("bounding_box_2d_tight_fast",
+                                                  init_params={"semanticTypes": ["class"]})
 _rgb_ann.attach(_rp)
 _depth_ann.attach(_rp)
+_bbox_ann.attach(_rp)
 print(f"      Render product created: {_CAM_W}×{_CAM_H}")
 
 # Vài step để render product warm up
@@ -234,6 +238,13 @@ def get_T_base_camera(camera_prim_path: str,
 print("[4/5] Computing T_base_camera...")
 T_base_camera = get_T_base_camera(CAMERA_PRIM)
 
+from pxr import UsdGeom as _UsdGeom
+_base_prim = omni.usd.get_context().get_stage().GetPrimAtPath(
+    "/Root/Ref_Xform/Ref/base_link"
+)
+_T_wb = np.array(_UsdGeom.Xformable(_base_prim).ComputeLocalToWorldTransform(0)).T
+t_base_world = np.linalg.inv(_T_wb)
+
 # ═══════════════════════════════════════════════════════════════════════
 # 5. Save params (--save-params)
 # ═══════════════════════════════════════════════════════════════════════
@@ -271,16 +282,9 @@ if args.save_params:
 # 5b. Stage-based detection — reads prim positions from USD
 # ═══════════════════════════════════════════════════════════════════════
 def _yaw_from_usd_rotation(T_wobj: np.ndarray) -> float:
-    """
-    Extract yaw (rotation around world Z-up axis) directly from USD prim
-    world transform. Parts lie flat on table so Z-yaw = grasp orientation.
-    Returns yaw in radians.
-    """
+    """Extract yaw from USD prim world transform (atan2 of local +X in XY plane)."""
     R = T_wobj[:3, :3]
-    # Yaw around Z: atan2(R[1,0], R[0,0])
     return float(np.arctan2(R[1, 0], R[0, 0]))
-    rect = cv2.minAreaRect(cnt)
-    return float(np.deg2rad(rect[-1]))
 
 
 def get_parts_from_stage(T_base_camera, intr, depth, bgr=None,
@@ -420,6 +424,11 @@ def _save_artifacts(bgr, depth, state, fid):
         write_depth_sanity_report(info, p("depth_sanity_report.md"))
         print(f"      Depth: valid={info['valid_ratio']:.1%}, "
               f"median={info['median']}, unit={info['guessed_unit']}")
+        save_camera_config_csv(intr, T_source="ComputeLocalToWorldTransform(USD)",
+                               camera_name=CAMERA_NAME,
+                               path=p("camera_config_sheet.csv"))
+        run_transform_sanity(T_base_camera,
+                             report_path=p("transform_sanity_report.md"))
 
     # Detection overlay
     overlay = bgr.copy()
@@ -528,61 +537,20 @@ try:
             cv2.imwrite(p("debug_mask_blue_f0001.png"), mask_b)
             print(f"  [DEBUG] wide color red={len(dets_r)+len(dets_r2)} blue={len(dets_b)}")
 
-        if args.method == "annotation":
-            # Get ground-truth detections from USD stage (exact positions + yaw from image)
-            _num_per_class = cfg["part"].get("num_parts", 2)
-            stage_dets = get_parts_from_stage(
-                T_base_camera, intr, depth, bgr=bgr,
-                parts_prim_paths=scene.parts_prim_paths,
-                num_parts_per_class=_num_per_class,
-            )
-            if fid == 1:
-                print(f"  [STAGE] found {len(stage_dets)} parts: "
-                      f"{[d['class_id'] for d in stage_dets]}")
-                for d in stage_dets:
-                    pb = d.get("_pose_base_exact", {})
-                    print(f"    {d['class_id']}  px=({d['centroid_px'][0]:.0f},{d['centroid_px'][1]:.0f})"
-                          f"  pos_base={[round(x,3) for x in pb.get('position_m',[])]}  yaw={d['_yaw_rad']:.3f}rad")
+        bbox_raw = _bbox_ann.get_data()
+        stage    = omni.usd.get_context().get_stage()
 
-            import time as _time
-            objects = []
-            for idx, det in enumerate(stage_dets):
-                # Build object state, then override pose_base + yaw with exact values
-                from task1.perception import make_object_state
-                obj = make_object_state(det, depth, intr, T_base_camera,
-                                        object_id=f"obj_{idx:03d}")
-                # Override with accurate stage-derived pose (no depth noise)
-                if "_pose_base_exact" in det:
-                    obj["pose_base"] = det["_pose_base_exact"]
-                    obj["failure_reason"] = None  # pose is always valid from stage
-                if "_yaw_rad" in det:
-                    obj["grasp_hint"]["yaw_rad"] = round(det["_yaw_rad"], 4)
-                objects.append(obj)
-
-            num_valid = sum(1 for o in objects if o["failure_reason"] is None)
-            state = {
-                "frame_id": fid,
-                "timestamp": round(_time.time(), 3),
-                "camera_name": CAMERA_NAME,
-                "objects": objects,
-                "summary": {
-                    "num_objects": len(objects),
-                    "num_valid_objects": num_valid,
-                    "num_invalid_depth": sum(1 for o in objects
-                                             if o["failure_reason"] == "INVALID_DEPTH"),
-                },
-            }
-            if num_valid < 4:
-                print(f"  [WARN] Only {num_valid}/4 parts valid — check prim paths")
-        else:
-            state = run_perception(
-                bgr, depth, intr, T_base_camera,
-                hsv_ranges=HSV_RANGES,
-                frame_id=fid,
-                camera_name=CAMERA_NAME,
-                detection_method=args.method,
-                reference_depth=table_depth,
-            )
+        state = run_perception(
+            bgr, depth, intr, T_base_camera,
+            hsv_ranges=HSV_RANGES,
+            frame_id=fid,
+            camera_name=CAMERA_NAME,
+            detection_method=args.method,
+            reference_depth=table_depth,
+            bbox_ann_data=bbox_raw,
+            stage=stage,
+            t_base_world=t_base_world,
+        )
         last_state[0] = state
 
         s = state["summary"]
