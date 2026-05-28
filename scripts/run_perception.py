@@ -293,5 +293,67 @@ if gt_parts and perc_world:
         print(f"\n  Mean position error: {np.mean(total_err):.4f}m"
               f"  Max: {np.max(total_err):.4f}m")
 
+# ═══════════════════════════════════════════════════════════════════════════
+# Step 8 — Tìm bin positions (scan toàn bộ stage)
+# ═══════════════════════════════════════════════════════════════════════════
+print("\n── Bin / Box positions ─────────────────────────────────────────────")
+
+BIN_KEYWORDS = {"bin", "box", "tray", "basket", "container", "target", "place"}
+
+found_bins = []
+for prim in stage.Traverse():
+    path = str(prim.GetPath())
+    name = path.split("/")[-1].lower()
+
+    # Bỏ qua các prim system / camera / robot
+    skip = any(k in path.lower() for k in [
+        "ref_xform", "robot", "camera", "render", "looks",
+        "material", "mesh", "geometry", "scope", "world"
+    ])
+    if skip:
+        continue
+
+    # Kiểm tra tên có chứa từ khoá bin không
+    if not any(kw in name for kw in BIN_KEYWORDS):
+        continue
+
+    if not prim.IsA(UsdGeom.Xformable):
+        continue
+
+    T = np.array(UsdGeom.Xformable(prim).ComputeLocalToWorldTransform(0)).T
+    pos = T[:3, 3]
+
+    # Lọc các prim nằm trên mặt bàn (z > 0.5m, x > 0)
+    if pos[2] < 0.3 or pos[0] < 0:
+        continue
+
+    found_bins.append({"path": path, "pos": pos})
+    print(f"  [BIN?]  {path}")
+    print(f"          world = {pos.round(4).tolist()}")
+
+if not found_bins:
+    # Fallback: in tất cả prim ở depth 2 để người dùng tự xác định
+    print("  Không tìm thấy bin bằng keyword. In tất cả prim depth-2:\n")
+    seen = set()
+    for prim in stage.Traverse():
+        path = str(prim.GetPath())
+        parts_path = path.split("/")
+        if len(parts_path) != 3:          # /Root/<Name>
+            continue
+        if path in seen:
+            continue
+        seen.add(path)
+
+        if not prim.IsA(UsdGeom.Xformable):
+            continue
+        T = np.array(UsdGeom.Xformable(prim).ComputeLocalToWorldTransform(0)).T
+        pos = T[:3, 3]
+        print(f"  {path:<55} world={pos.round(3).tolist()}")
+
+print()
+print("  → Copy path của bin vào run_task1.py:")
+print("    BIN_A_WORLD = np.array([x, y, z])  # vị trí bin A")
+print("    BIN_B_WORLD = np.array([x, y, z])  # vị trí bin B")
+
 logger.close()
 kit.close()
