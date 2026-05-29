@@ -1,4 +1,3 @@
-
 import csv
 import math
 import numpy as np
@@ -7,6 +6,7 @@ import json
 import yaml
 import sys
 import time
+import types
 from pathlib import Path
 from enum import Enum
 from collections import namedtuple
@@ -16,15 +16,17 @@ from typing import Optional
 sys.path.append('/home/ubuntu/vinh/Ubtech_sim_ref/source')
 from DualArmIK import DualArmIK
 
+# ======================================================================
 # 1. ENUMS & CONFIGURATION
+# ======================================================================
 
 class PrimitiveEvent(Enum):
-    SUCCESS = "PRIMITIVE_SUCCESS"              
-    GRASP_FAIL = "PRIMITIVE_GRASP_FAIL"        
-    DROP = "PRIMITIVE_DROP"                    
-    WRONG_BIN = "PRIMITIVE_WRONG_BIN"          
-    COLLISION = "PRIMITIVE_COLLISION"          
-    TIMEOUT = "PRIMITIVE_TIMEOUT"              
+    SUCCESS = "PRIMITIVE_SUCCESS"
+    GRASP_FAIL = "PRIMITIVE_GRASP_FAIL"
+    DROP = "PRIMITIVE_DROP"
+    WRONG_BIN = "PRIMITIVE_WRONG_BIN"
+    COLLISION = "PRIMITIVE_COLLISION"
+    TIMEOUT = "PRIMITIVE_TIMEOUT"
 
 @dataclass
 class PrimitiveResult:
@@ -45,7 +47,7 @@ EVENT_RETRY_POLICIES = {
 ENABLE_WORKSPACE_VALIDATION = True
 
 def load_workspace_bounds_from_yaml(config_path: Path) -> dict:
-    default_bounds = {"x": (0.4, 1.0), "y": (-0.5, 0.5), "z": (0.9, 1.5)} 
+    default_bounds = {"x": (0.4, 1.0), "y": (-0.5, 0.5), "z": (0.9, 1.5)}
     try:
         if not config_path.exists(): return default_bounds
         with open(config_path, "r", encoding="utf-8") as f:
@@ -71,10 +73,282 @@ def validate_position_in_workspace(position_m: list, bounds: dict = None) -> tup
     if errors: return False, "; ".join(errors)
     return True, "Valid"
 
-# 2. CORE MOTION & INTERPOLATION
+
+# ======================================================================
+# 2. WORKAROUND HELPERS — fixes cho BTC code issues
+# ======================================================================
+
+def _check_reached_via_fk(robot, target_xyzrpy, side, pos_tol, rot_tol):
+    """[FIX #1] Tự dùng FK của solver để check arm đã reach target chưa.
+    Không phụ thuộc vào return value của control_dual_arm_ik (vốn return None).
+    """
+    if robot is None or robot.ik_solver is None or target_xyzrpy is None:
+        return True
+    try:
+        import pinocchio as pin
+        # Sync current joint state vào solver
+        joints = robot.get_joint_states()
+        if joints is None:
+            return False
+        # joints['positions'] có thể là [[...]] hoặc [...] tùy version Isaac
+        positions = joints['positions']
+        if positions and isinstance(positions[0], list):
+            positions = positions[0]
+        robot.ik_solver.sync_joint_positions(joints['names'], positions)
+        
+        # FK → current EE pose
+        current_pose = robot.ik_solver.get_ee_pose(side)
+        target_se3 = robot.ik_solver.xyzrpy_to_se3(target_xyzrpy)
+        
+        # Error in SE3
+        err = pin.log(current_pose.actInv(target_se3)).vector
+        pos_err = float(np.linalg.norm(err[:3]))
+        rot_err = float(np.linalg.norm(err[3:]))
+        
+        return pos_err < pos_tol and rot_err < rot_tol, pos_err, rot_err
+    except Exception as e:
+        print(f"  [_check_reached] error: {e}")
+        return False, 999.0, 999.0
+
+
+def patch_robot_workarounds(robot):
+    """[FIX #3] Áp các workaround lên robot instance:
+    - Tăng EMA smoothing alpha cho responsive hơn
+    - (Optional) Disable smoothing nếu cần debug
+    """
+    if robot is None:
+        return
+    try:
+        if hasattr(robot, '_smooth_alpha'):
+            old = robot._smooth_alpha
+            robot._smooth_alpha = 0.8
+            print(f"[Patch] EMA alpha: {old} → {robot._smooth_alpha}")
+    except Exception as e:
+        print(f"[Patch] Failed to patch alpha: {e}")
+
+
+def reset_robot_state_full(robot, world, verbose=True):
+    """[FIX #2] Reset toàn bộ runtime state của robot trước khi start plan mới:
+    - Teleport joints về initial
+    - Clear _last_arm_positions (EMA state)
+    - Reset IK solver runtime state
+    - Re-sync joint state vào solver
+    """
+    if robot is None:
+        return
+    try:
+        import torch
+        # 1. Teleport joints về initial
+        if robot._articulation is not None and robot.inital_joint_positions is not None:
+            s2_joint_names = robot._articulation.dof_names
+            s2_joint_indices = [robot._articulation.get_dof_index(n) for n in s2_joint_names]
+            robot._articulation.set_joint_positions(
+                torch.tensor(robot.inital_joint_positions, dtype=torch.float32),
+                joint_indices=torch.tensor(s2_joint_indices, dtype=torch.int32)
+            )
+            if verbose: print("  → Teleported joints to initial")
+        
+        # 2. Clear EMA state
+        if hasattr(robot, '_last_arm_positions'):
+            robot._last_arm_positions = {}
+            if verbose: print("  → Cleared _last_arm_positions (EMA state)")
+        
+        # 3. Step world để physics settle
+        if world is not None:
+            for _ in range(30): world.step(render=True)
+        
+        # 4. Reset IK solver state + re-sync
+        if hasattr(robot, 'ik_solver') and robot.ik_solver is not None:
+            if hasattr(robot.ik_solver, 'reset_runtime_state'):
+                robot.ik_solver.reset_runtime_state()
+                if verbose: print("  → IK solver runtime state reset")
+            
+            joints = robot.get_joint_states()
+            if joints is not None:
+                positions = joints['positions']
+                if positions and isinstance(positions[0], list):
+                    positions = positions[0]
+                robot.ik_solver.sync_joint_positions(joints['names'], positions)
+                if hasattr(robot.ik_solver, 'save_initial_q'):
+                    robot.ik_solver.save_initial_q()
+                if verbose: print("  → Re-synced IK solver with current joints")
+        
+        # 5. Settle thêm
+        if world is not None:
+            for _ in range(30): world.step(render=True)
+    except Exception as e:
+        print(f"⚠️ reset_robot_state_full error: {e}")
+
+
+def close_gripper_with_width(robot, side, width):
+    """[FIX #4] Close gripper với width tùy chỉnh (BTC's close_gripper không nhận width)."""
+    if not robot or not robot._articulation:
+        return
+    try:
+        import torch
+        from isaacsim.core.utils.types import ArticulationActions
+        
+        finger_names = (['L_finger1_joint', 'L_finger2_joint'] if side == 'left' 
+                        else ['R_finger1_joint', 'R_finger2_joint'])
+        dof_names = robot._articulation.dof_names
+        indices = [robot._articulation.get_dof_index(n) 
+                   for n in finger_names if n in dof_names]
+        if indices:
+            positions = [width] * len(indices)
+            robot._articulation.apply_action(
+                ArticulationActions(
+                    joint_positions=torch.tensor([positions], dtype=torch.float32),
+                    joint_indices=torch.tensor(indices, dtype=torch.int32),
+                )
+            )
+    except Exception as e:
+        print(f"  close_gripper_with_width error: {e} — fallback to default close_gripper")
+        try:
+            robot.close_gripper(side=side)
+        except Exception:
+            pass
+
+
+def verify_grasp_success(robot, side, min_finger_gap_m: float = 0.004) -> bool:
+    """Check if gripper is holding an object by reading actual finger joint positions.
+
+    Returns True if fingers stopped short of fully closing (object between them).
+    Returns False if fingers closed completely (grasped nothing).
+    """
+    if not robot or not robot._articulation:
+        return True
+    try:
+        finger_names = (['L_finger1_joint', 'L_finger2_joint'] if side == 'left'
+                        else ['R_finger1_joint', 'R_finger2_joint'])
+        dof_names = robot._articulation.dof_names
+        indices = [robot._articulation.get_dof_index(n)
+                   for n in finger_names if n in dof_names]
+        if not indices:
+            print("  [VERIFY_GRASP] No finger joints found — assuming success")
+            return True
+        joint_pos = robot._articulation.get_joint_positions()
+        positions = joint_pos[0] if (hasattr(joint_pos, 'shape') and len(joint_pos.shape) > 1) else joint_pos
+        finger_positions = [float(positions[i]) for i in indices]
+        avg_pos = sum(finger_positions) / len(finger_positions)
+        print(f"  [VERIFY_GRASP] Finger positions: {[f'{p:.4f}m' for p in finger_positions]} | avg={avg_pos:.4f}m")
+        if avg_pos > min_finger_gap_m:
+            print(f"  [VERIFY_GRASP] ✓ Object detected in gripper (avg={avg_pos:.4f}m)")
+            return True
+        else:
+            print(f"  [VERIFY_GRASP] ✗ Gripper empty — fingers fully closed (avg={avg_pos:.4f}m ≤ {min_finger_gap_m:.4f}m)")
+            return False
+    except Exception as e:
+        print(f"  [VERIFY_GRASP] error: {e} — assuming success")
+        return True
+
+
+# ======================================================================
+# 3. CORE MOTION & INTERPOLATION
+# ======================================================================
+
 def load_action_plans_from_person2(file_path: str = None) -> list:
     if file_path is None: file_path = "/home/ubuntu/thu/lab_outputs/planner_outputs/action_plans_for_person3_demo.json"
     with open(file_path, "r", encoding="utf-8") as f: return json.load(f)
+
+
+def load_action_plans_from_scene(template_file: str = None) -> list:
+    """Build action plans using ACTUAL object positions from USD scene at runtime.
+
+    Reads /Replicator/Ref_Xform_NN for objects and /Root/Box for bin.
+    Uses template JSON only for class_id, grasp_hint, etc.
+    Falls back to JSON if Isaac Sim is unavailable.
+    """
+    if template_file is None:
+        template_file = "/home/ubuntu/thu/lab_outputs/planner_outputs/action_plans_for_person3_demo.json"
+    try:
+        with open(template_file, "r") as f:
+            template_plans = json.load(f)
+    except Exception as e:
+        print(f"[SCENE_LOAD] Cannot load template: {e}")
+        template_plans = []
+
+    try:
+        from isaacsim.core.utils.stage import get_current_stage
+        from pxr import Usd, UsdGeom
+    except ImportError:
+        print("[SCENE_LOAD] Isaac Sim unavailable — using JSON fallback")
+        return template_plans
+
+    try:
+        stage = get_current_stage()
+
+        def _prim_world_pos(prim_path: str):
+            p = stage.GetPrimAtPath(prim_path)
+            if not p.IsValid():
+                return None
+            t = UsdGeom.Xformable(p).ComputeLocalToWorldTransform(
+                Usd.TimeCode.Default()).ExtractTranslation()
+            return np.array([float(t[0]), float(t[1]), float(t[2])])
+
+        def _world_to_base(w):
+            return np.array([w[1] + 0.20, -w[0] + 0.70, w[2] - 0.9005])
+
+        # Read bin position
+        bin_world = _prim_world_pos("/Root/Box")
+        if bin_world is None:
+            print("[SCENE_LOAD] /Root/Box not found — using JSON bin positions")
+            bin_base = None
+        else:
+            bin_base = _world_to_base(bin_world)
+            print(f"[SCENE_LOAD] Bin  world=({bin_world[0]:.4f},{bin_world[1]:.4f},{bin_world[2]:.4f})"
+                  f"  base=({bin_base[0]:.4f},{bin_base[1]:.4f},{bin_base[2]:.4f})")
+
+        # Read object positions: /Replicator/Ref_Xform_01 … Ref_Xform_20
+        obj_list = []
+        for i in range(1, 21):
+            path = f"/Replicator/Ref_Xform_{i:02d}"
+            w = _prim_world_pos(path)
+            if w is None:
+                break
+            b = _world_to_base(w)
+            obj_list.append((path, w, b))
+            print(f"[SCENE_LOAD] {path}  world=({w[0]:.4f},{w[1]:.4f},{w[2]:.4f})"
+                  f"  base=({b[0]:.4f},{b[1]:.4f},{b[2]:.4f})")
+
+        if not obj_list:
+            print("[SCENE_LOAD] No Replicator objects found — using JSON fallback")
+            return template_plans
+
+        plans = []
+        for idx, (path, w_obj, b_obj) in enumerate(obj_list):
+            tmpl = template_plans[idx] if idx < len(template_plans) else {}
+            # Use actual bin_base if found, otherwise template bin position
+            if bin_base is not None:
+                bin_pos = bin_base.tolist()
+            else:
+                bin_pos = tmpl.get("bin_pose_base", {}).get("position_m", [0.50, -0.50, 0.14])
+            bin_quat = tmpl.get("bin_pose_base", {}).get("quaternion_xyzw", [0, 0, 0, 1])
+            obj_quat = tmpl.get("object_pose_base", {}).get("quaternion_xyzw", [0, 0, 0, 1])
+            grasp_hint = dict(tmpl.get("grasp_hint", {}))
+            grasp_hint.setdefault("approach_axis", "diagonal_45")
+            grasp_hint.setdefault("yaw_rad", 0.0)
+            grasp_hint.setdefault("grasp_width_m", 0.05)
+            grasp_hint["approach_axis"] = "diagonal_45"  # always override
+            grasp_hint["yaw_rad"] = 0.0  # JSON yaw was for z_down — large yaw pushes wrist out of reach for diagonal_45
+
+            plans.append({
+                "plan_id": tmpl.get("plan_id", f"plan_{idx+1:04d}"),
+                "primitive": "pick_place",
+                "object_id": tmpl.get("object_id", f"obj_{idx:03d}"),
+                "class_id": tmpl.get("class_id", "unknown"),
+                "object_pose_base": {"position_m": b_obj.tolist(), "quaternion_xyzw": obj_quat},
+                "bin_pose_base":    {"position_m": bin_pos,         "quaternion_xyzw": bin_quat},
+                "grasp_hint": grasp_hint,
+                "retry_policy": tmpl.get("retry_policy", "retry_once_slow"),
+                "timeout_s": tmpl.get("timeout_s", 20.0),
+            })
+
+        print(f"[SCENE_LOAD] ✓ Built {len(plans)} plans from actual USD scene positions")
+        return plans
+
+    except Exception as e:
+        print(f"[SCENE_LOAD] Error ({e}) — using JSON fallback")
+        return template_plans
 
 def load_action_plan(yaml_file_path):
     with open(yaml_file_path, 'r') as f: return yaml.safe_load(f)['action_plan']
@@ -88,103 +362,203 @@ def convert_matrix_to_ik_input(T: np.ndarray) -> list:
     p = T[:3, 3]
     return DualArmIK.se3_to_xyzrpy(pin.SE3(R_mat, p)).tolist()
 
+def _make_diagonal_R(tilt_deg: float) -> np.ndarray:
+    """Build R = Rx(tilt) @ R_flip: tilt z_down by tilt_deg around +X_world axis.
+
+    tilt_deg=0   → z_down: tool_Z_world=[0,0,-1]           reach≈0.46m
+    tilt_deg=45  → tool_Z_world=[0,+0.707,-0.707]           reach≈0.34m
+    tilt_deg=60  → tool_Z_world=[0,+0.866,-0.500]           reach≈0.30m
+
+    Tilting around +X_world pulls the wrist in −Y_world (back toward robot),
+    because the arm extends primarily in +Y_world. Verified: wrist ends up
+    between robot (Y=−0.20) and object (Y=+0.10) for all tilt_deg > 0.
+    """
+    a = math.radians(tilt_deg)
+    ca, sa = math.cos(a), math.sin(a)
+    R_flip = np.array([[1., 0.,  0.], [0., -1., 0.], [0., 0., -1.]])
+    Rx     = np.array([[1., 0.,  0.], [0.,  ca, -sa], [0., sa,  ca]])
+    return Rx @ R_flip
+
+
 def apply_grasp_rotation(T_pose: np.ndarray, yaw_rad: float, approach_axis: str = "z_down") -> np.ndarray:
     T_rotated = T_pose.copy()
     cos_yaw, sin_yaw = np.cos(yaw_rad), np.sin(yaw_rad)
     R_yaw = np.array([[cos_yaw, -sin_yaw, 0], [sin_yaw, cos_yaw, 0], [0, 0, 1]])
     if approach_axis == "z_down":
-        R_flip = np.array([[1, 0, 0], [0, -1, 0], [0, 0, -1]])
-        R_final = R_yaw @ R_flip
-    else: R_final = R_yaw
+        R_final = R_yaw @ _make_diagonal_R(0)
+    elif approach_axis == "diagonal_45":
+        R_final = R_yaw @ _make_diagonal_R(45)
+    elif approach_axis == "diagonal_60":
+        R_final = R_yaw @ _make_diagonal_R(60)
+    else:
+        R_final = R_yaw
     T_rotated[:3, :3] = T_rotated[:3, :3] @ R_final
     return T_rotated
 
-def execute_stage(robot, world, stage_name, target_pose, gripper_side, gripper_state="open", step_size=0.016, max_steps=2000, pos_tol=0.02, rot_tol=0.1, timeout_sec=60.0, verbose=True):
-    # gripper_state is accepted but not used - gripper is managed separately by FSM
+_R_W2B = np.array([[0., 1., 0.], [-1., 0., 0.], [0., 0., 1.]])  # world→base: 90° Z rotation
+
+def _matrix_to_base_ik(T: np.ndarray) -> list:
+    """Convert 4x4 world-frame SE3 → [x,y,z,roll,pitch,yaw] in robot base frame.
+
+    Rotates the matrix directly (world→base) before Euler extraction to avoid
+    gimbal lock from intermediate world-frame Euler decomposition.
+    """
+    import pinocchio as pin
+    x_w, y_w, z_w = T[0, 3], T[1, 3], T[2, 3]
+    p_base = np.array([y_w + 0.20, -x_w + 0.70, z_w - 0.9005])
+    R_base = _R_W2B @ T[:3, :3]
+    return DualArmIK.se3_to_xyzrpy(pin.SE3(R_base, p_base)).tolist()
+
+
+def execute_stage(robot, world, stage_name, target_pose, gripper_side,
+                  gripper_state="open", step_size=0.016, max_steps=2000,
+                  pos_tol=0.05, rot_tol=0.15, timeout_sec=60.0, verbose=True):
+    """[FIX #1] Tự check is_reached qua FK thay vì dựa vào return của control_dual_arm_ik.
+    
+    Key insight: solver dùng tolerance chặt (5e-3) bên trong để converge sâu,
+    còn mình check ở ngoài với tolerance lỏng hơn để break sớm khi đủ tốt.
+    """
     left_target = target_pose if gripper_side == "left" else None
     right_target = target_pose if gripper_side == "right" else None
+    
     start_time = time.time()
     steps = 0
+    last_pos_err = None
+    stuck_counter = 0
+    check_interval = 5  # check FK mỗi 5 steps
+    
     while steps < max_steps:
-        is_reached = robot.control_dual_arm_ik(step_size, left_target_xyzrpy=left_target, right_target_xyzrpy=right_target, pos_tol=pos_tol, rot_tol=rot_tol)
+        # Gọi controller — apply_action xảy ra bên trong, ignore return value
+        robot.control_dual_arm_ik(
+            step_size,
+            left_target_xyzrpy=left_target,
+            right_target_xyzrpy=right_target,
+            pos_tol=0.005,   # solver-internal tolerance (chặt)
+            rot_tol=0.01,
+        )
         world.step(render=True)
         steps += 1
         elapsed = time.time() - start_time
-        if is_reached:
-            settle_frames = 10 if verbose else 1
-            for _ in range(settle_frames): world.step(render=True)
-            if verbose: print(f"  ✓ [{stage_name}] reached in {steps} steps")
-            return True, elapsed, None
+        
+        # Tự check is_reached qua FK
+        if steps % check_interval == 0:
+            result = _check_reached_via_fk(robot, target_pose, gripper_side, pos_tol, rot_tol)
+            if isinstance(result, tuple):
+                is_reached, pos_err, rot_err = result
+            else:
+                is_reached = result
+                pos_err, rot_err = None, None
+            
+            if is_reached:
+                settle_frames = 10 if verbose else 1
+                for _ in range(settle_frames): world.step(render=True)
+                if verbose: 
+                    print(f"  ✓ [{stage_name}] reached in {steps} steps "
+                          f"(pos_err={pos_err:.4f}m, rot_err={rot_err:.4f}rad)" if pos_err is not None
+                          else f"  ✓ [{stage_name}] reached in {steps} steps")
+                return True, elapsed, None
+            
+            # Detect stuck: pos_err không giảm trong nhiều check liên tiếp
+            if pos_err is not None:
+                if last_pos_err is not None and abs(last_pos_err - pos_err) < 1e-4:
+                    stuck_counter += 1
+                else:
+                    stuck_counter = 0
+                last_pos_err = pos_err
+
+                # Exit sớm khi arm bị stuck thật sự (300 steps không cải thiện)
+                if stuck_counter > 60:
+                    if verbose:
+                        print(f"  ✗ [{stage_name}] STUCK at step {steps} "
+                              f"(pos_err={pos_err:.4f}m, rot_err={rot_err:.4f}rad — no improvement)")
+                    return False, elapsed, "stuck"
+
+                # Log progress every 50 steps
+                if verbose and steps % 50 == 0:
+                    print(f"  [{stage_name}] step {steps}: pos_err={pos_err:.4f}m, rot_err={rot_err:.4f}rad")
+        
         if elapsed > timeout_sec:
-            if verbose: print(f"  ⚠️ [{stage_name}] TIMEOUT")
+            if verbose: 
+                msg = f"  ⚠️ [{stage_name}] TIMEOUT after {steps} steps"
+                if last_pos_err is not None:
+                    msg += f" (last pos_err={last_pos_err:.4f}m)"
+                print(msg)
             return False, elapsed, "timeout"
-    if verbose: print(f"  ✗ [{stage_name}] MAX STEPS EXCEEDED")
+    
+    if verbose: 
+        msg = f"  ✗ [{stage_name}] MAX STEPS EXCEEDED"
+        if last_pos_err is not None:
+            msg += f" (last pos_err={last_pos_err:.4f}m)"
+        print(msg)
     return False, elapsed, "max_steps_exceeded"
 
-def move_interpolated(robot, world, T_start, T_end, side, stage_name, num_steps=20, max_sim_steps=100, writer=None, object_id="") -> tuple:
-    print(f"  [{stage_name}] Nội suy {num_steps} điểm (Đường thẳng tuyệt đối)...")
+
+# Alias: execute_stage_fsm dùng cùng logic
+def execute_stage_fsm(robot, world, stage_name, target_pose, gripper_side,
+                      step_size=0.016, max_steps=200, pos_tol=0.04, rot_tol=0.2,
+                      timeout_sec=60.0, verbose=True):
+    """Wrapper for FSM state machine - same logic as execute_stage."""
+    return execute_stage(robot, world, stage_name, target_pose, gripper_side,
+                         step_size=step_size, max_steps=max_steps,
+                         pos_tol=pos_tol, rot_tol=rot_tol,
+                         timeout_sec=timeout_sec, verbose=verbose)
+
+
+def _slerp_R(R0: np.ndarray, R1: np.ndarray, t: float) -> np.ndarray:
+    """Spherical interpolation between two rotation matrices using pinocchio log3/exp3."""
+    import pinocchio as pin
+    R_rel = R0.T @ R1
+    log_R = pin.log3(R_rel)
+    return R0 @ pin.exp3(t * log_R)
+
+
+def move_interpolated(robot, world, T_start, T_end, side, stage_name,
+                      num_steps=20, max_sim_steps=100,
+                      pos_tol=0.08, rot_tol=0.20,
+                      step_size=0.016,
+                      writer=None, object_id="",
+                      interp_rotation=False) -> tuple:
+    """Interpolate from T_start to T_end in Cartesian space.
+
+    interp_rotation=True: SLERP rotation from T_start to T_end (for orientation transitions).
+    interp_rotation=False: use T_end rotation for all waypoints (original behaviour).
+    """
+    print(f"  [{stage_name}] {num_steps} pts | tol=({pos_tol},{rot_tol}) | step={step_size} | max_sim={max_sim_steps} | interp_rot={interp_rotation}")
     for i in range(1, num_steps + 1):
         t = i / float(num_steps)
         T_curr = T_start.copy()
-        
-        # KHÓA CHẶT TUYẾN TÍNH: Bắt buộc đi theo đường thẳng tắp trong hệ World
         T_curr[:3, 3] = T_start[:3, 3] + t * (T_end[:3, 3] - T_start[:3, 3])
-        T_curr[:3, :3] = T_end[:3, :3] 
+        if interp_rotation:
+            T_curr[:3, :3] = _slerp_R(T_start[:3, :3], T_end[:3, :3], t)
+        else:
+            T_curr[:3, :3] = T_end[:3, :3]
 
-        ik_input_world = convert_matrix_to_ik_input(T_curr)
-        x_w, y_w, z_w, roll_w, pitch_w, yaw_w = ik_input_world
-        
-        x_base, y_base, z_base = y_w + 0.20, -x_w + 0.70, z_w - 0.9005
-        yaw_base = (yaw_w - (math.pi / 2.0) + math.pi) % (2 * math.pi) - math.pi
-        ik_input_base = [x_base, y_base, z_base, roll_w, pitch_w, yaw_base]
-        
+        ik_input_base = _matrix_to_base_ik(T_curr)
+
         is_success, _, _ = execute_stage_fsm(
-            robot, world, stage_name=f"{stage_name}_pt{i}", target_pose=ik_input_base, 
-            gripper_side=side, max_steps=150, pos_tol=0.08, rot_tol=0.20, verbose=False
+            robot, world, stage_name=f"{stage_name}_pt{i}", target_pose=ik_input_base,
+            gripper_side=side, step_size=step_size,
+            max_steps=max_sim_steps, pos_tol=pos_tol, rot_tol=rot_tol, verbose=False
         )
         if not is_success:
-            print(f"  ✗ [{stage_name}] Kẹt vật lý tại điểm {i}/{num_steps}")
+            print(f"  ✗ [{stage_name}] stuck at pt {i}/{num_steps}")
             return False, "interpolation_stuck"
-            
+
     if writer: writer.writerow([object_id, stage_name, "active"] + ik_input_base)
     return True, None
 
 
 # ======================================================================
-# 3. Industrial-optimized FSM: L-shape trajectory & grip force verification
+# 4. Industrial-optimized FSM: L-shape trajectory & grip force verification
 # ======================================================================
 
-def execute_stage_fsm(robot, world, stage_name, target_pose, gripper_side, 
-                      step_size=0.016, max_steps=120, pos_tol=0.04, rot_tol=0.2, 
-                      timeout_sec=60.0, verbose=True):
-    """Wrapper for FSM state machine - doesn't require gripper_state"""
-    left_target = target_pose if gripper_side == "left" else None
-    right_target = target_pose if gripper_side == "right" else None
-    start_time = time.time()
-    steps = 0
-    while steps < max_steps:
-        is_reached = robot.control_dual_arm_ik(step_size, left_target_xyzrpy=left_target, 
-                                               right_target_xyzrpy=right_target, 
-                                               pos_tol=pos_tol, rot_tol=rot_tol)
-        world.step(render=True)
-        steps += 1
-        elapsed = time.time() - start_time
-        if is_reached:
-            settle_frames = 10 if verbose else 1
-            for _ in range(settle_frames): world.step(render=True)
-            if verbose: print(f"  ✓ [{stage_name}] reached in {steps} steps")
-            return True, elapsed, None
-        if elapsed > timeout_sec:
-            if verbose: print(f"  ⚠️ [{stage_name}] TIMEOUT")
-            return False, elapsed, "timeout"
-    if verbose: print(f"  ✗ [{stage_name}] MAX STEPS EXCEEDED")
-    return False, elapsed, "max_steps_exceeded"
-
 class PickAndPlaceStateMachine:
-    def __init__(self, robot, world, plan, motion_specs, coord_transform=None, writer=None):
+    def __init__(self, robot, world, plan, motion_specs, coord_transform=None, writer=None,
+                 remaining_plans=None):
         self.robot, self.world = robot, world
         self.plan, self.specs = plan, motion_specs
         self.coord_transform, self.writer = coord_transform, writer
+        self.remaining_plans = remaining_plans or []
         
         self.state = "INIT"
         self.start_time = time.time()
@@ -196,13 +570,15 @@ class PickAndPlaceStateMachine:
     def run(self) -> PrimitiveResult:
         print(f"\n================ FSM: PICK & PLACE [{self.object_id}] ================")
         while self.state not in ["DONE", "FAIL"]:
-            if self.state == "INIT": self._state_init()
-            elif self.state == "APPROACH": self._state_approach()
-            elif self.state == "CONTACT_GRASP": self._state_contact_grasp()
-            elif self.state == "VERIFY_GRASP": self._state_verify_grasp()  # <--- BƯỚC MỚI
-            elif self.state == "LIFT_TRANSFER": self._state_lift_transfer()
-            elif self.state == "PLACE": self._state_place()
-            elif self.state == "VERIFY": self._state_verify()
+            if   self.state == "INIT":         self._state_init()
+            elif self.state == "S1_PREGRASP":  self._state_s1_pregrasp()
+            elif self.state == "S2_GRASP":     self._state_s2_grasp()
+            elif self.state == "S3_LIFT":      self._state_s3_lift()
+            elif self.state == "S4_TRANSFER":  self._state_s4_transfer()
+            elif self.state == "S5_LOWER_BIN": self._state_s5_lower_bin()
+            elif self.state == "S6_RELEASE":   self._state_s6_release()
+            elif self.state == "S7_RETREAT":   self._state_s7_retreat()
+            elif self.state == "VERIFY":       self._state_verify()
                 
         return PrimitiveResult(
             primitive_name="pick_place", success=(self.state == "DONE"),
@@ -218,8 +594,11 @@ class PickAndPlaceStateMachine:
     def _state_init(self):
         print("[FSM] State: INIT")
         try:
-            self.yaw_rad = 0.0 
-            
+            grasp_hint = self.plan.get('grasp_hint', {})
+            self.yaw_rad = float(grasp_hint.get('yaw_rad', 0.0))
+            self.approach_axis = grasp_hint.get('approach_axis', 'z_down')
+            print(f"[FSM] Grasp hint: yaw_rad={self.yaw_rad:.4f}, approach_axis={self.approach_axis}")
+
             raw_obj = np.array(self.plan['object_pose_base']['position_m'])
             raw_bin = np.array(self.plan['bin_pose_base']['position_m'])
             
@@ -229,17 +608,33 @@ class PickAndPlaceStateMachine:
             else:
                 world_obj = np.array([-raw_obj[1] + 0.70, raw_obj[0] - 0.20, 1.0400])
                 world_bin = np.array([-raw_bin[1] + 0.70, raw_bin[0] - 0.20, 1.0400])
+            
+            # Sanity check transform roundtrip
+            back_to_base = np.array([world_obj[1] + 0.20, -world_obj[0] + 0.70, world_obj[2] - 0.9005])
+            roundtrip_err = float(np.linalg.norm(raw_obj[:2] - back_to_base[:2]))
+            print(f"[SANITY] raw_obj (base):     {np.round(raw_obj, 4).tolist()}")
+            print(f"[SANITY] world_obj:          {np.round(world_obj, 4).tolist()}")
+            print(f"[SANITY] back_to_base:       {np.round(back_to_base, 4).tolist()}")
+            print(f"[SANITY] roundtrip error XY: {roundtrip_err*100:.2f}cm")
+            print(f"[SANITY] ⚠️ Hãy so sánh world_obj với [DEBUG_SCENE] output bên trên để xác nhận tọa độ khớp!")
                 
             world_obj[2] = 1.0400
             world_bin[2] = 1.0400
             
             obj_valid, msg = validate_position_in_workspace(world_obj.tolist())
-            if not obj_valid and ENABLE_WORKSPACE_VALIDATION: return self._fail("target_out_of_workspace")
+            if not obj_valid and ENABLE_WORKSPACE_VALIDATION: 
+                return self._fail("target_out_of_workspace")
 
             self.side = "right" if raw_obj[1] < 0 else "left"
             
             tcp_offset = np.array([0.0, 0.0, 0.0], dtype=float)
-            config_paths = ['configs/Part_Sorting.yaml', '../configs/Part_Sorting.yaml', '../../configs/Part_Sorting.yaml']
+            config_paths = [
+                '/home/ubuntu/vinh/configs/Part_Sorting.yaml',
+                '/home/ubuntu/thu/configs/Part_Sorting.yaml',
+                'configs/Part_Sorting.yaml',
+                '../configs/Part_Sorting.yaml',
+                '../../configs/Part_Sorting.yaml',
+            ]
             for cfg_path in config_paths:
                 if Path(cfg_path).exists():
                     try:
@@ -254,177 +649,362 @@ class PickAndPlaceStateMachine:
                         continue
             if np.allclose(tcp_offset, [0, 0, 0]):
                 print(f"[FSM] Warning: TCP offset is zero (default) - gripper may not touch target!")
-            
-            T_obj = get_base_matrix(world_obj.tolist(), self.plan['object_pose_base']['quaternion_xyzw'])
-            T_bin = get_base_matrix(world_bin.tolist(), self.plan['bin_pose_base']['quaternion_xyzw'])
-            
-            app_offset = self.specs.get("approach_offset_m", 0.08)
-            lift_height = self.specs.get("lift_height_m", 0.17)
-            Z_OFFSET = 0.035 
-            SAFE_FLY_HEIGHT = 1.25 
-            
-            T_grasp_base = apply_grasp_rotation(T_obj, self.yaw_rad)
-            
-            # 1. Điểm Grasp (Chạm vật)
-            self.T_grasp = T_grasp_base.copy()
-            self.T_grasp[:3, 3] += T_grasp_base[:3, :3] @ tcp_offset
-            self.T_grasp[2, 3] += Z_OFFSET
 
-            print(f"[FSM] T_grasp position (world): {self.T_grasp[:3,3].tolist()}")
-            print(f"[FSM] T_pre_grasp position (world) will be computed next")
-            
-            # 2. Điểm Pre-grasp (Nằm NGAY TRÊN ĐỈNH ĐẦU vật)
+            # z_down approach for both grasp and place — avoids diagonal_45 singularities
+            # tcp_z: distance from wrist flange to fingertip along tool-Z
+            tcp_z = float(tcp_offset[2]) if tcp_offset[2] > 0.01 else 0.12
+            print(f"[FSM] z_down approach: tcp_z={tcp_z:.3f}m")
+
+            Z_DOWN_R = _make_diagonal_R(0)  # z_down rotation: tool-Z = [0,0,-1] in world
+            app_offset = self.specs.get("approach_offset_m", 0.08)
+            Z_OFFSET = self.specs.get("grasp_z_offset_m", 0.0)
+            SAFE_FLY_HEIGHT = 1.25
+
+            # GRASP: wrist directly above fingertip target, z_down orientation
+            # wrist_z = obj_z + tcp_z + Z_OFFSET  →  fingertip_z = obj_z + Z_OFFSET
+            self.T_grasp = np.eye(4)
+            self.T_grasp[:3, :3] = Z_DOWN_R
+            self.T_grasp[0, 3] = world_obj[0]
+            self.T_grasp[1, 3] = world_obj[1]
+            self.T_grasp[2, 3] = world_obj[2] + tcp_z + Z_OFFSET
+
+            # PRE-GRASP: directly above grasp, same XY
             self.T_pre_grasp = self.T_grasp.copy()
             self.T_pre_grasp[2, 3] += app_offset
-            
-            # 3. Điểm High Approach (Nằm TÍT TRÊN KHÔNG TRUNG, ngay trên đầu vật)
-            self.T_high_approach = self.T_pre_grasp.copy()
+
+            # HIGH APPROACH: safe fly height
+            self.T_high_approach = self.T_grasp.copy()
             self.T_high_approach[2, 3] = SAFE_FLY_HEIGHT
-            
-            # Khởi tạo tương tự cho khay Bin (Bảo đảm đi cắm thẳng đứng)
-            T_bin_rot = apply_grasp_rotation(T_bin, self.yaw_rad)
-            self.T_place = T_bin_rot.copy()
-            self.T_place[:3, 3] += T_bin_rot[:3, :3] @ tcp_offset
-            self.T_place[2, 3] += Z_OFFSET
-            
+
+            # BIN PLACE: z_down, wrist above bin
+            self.T_place = np.eye(4)
+            self.T_place[:3, :3] = Z_DOWN_R
+            self.T_place[0, 3] = world_bin[0]
+            self.T_place[1, 3] = world_bin[1]
+            self.T_place[2, 3] = world_bin[2] + tcp_z + Z_OFFSET
+
+            # PRE-PLACE: directly above place, same XY
             self.T_pre_place = self.T_place.copy()
             self.T_pre_place[2, 3] += app_offset
-            
-            self.T_high_place = self.T_pre_place.copy()
+
+            # HIGH PLACE: safe fly height
+            self.T_high_place = self.T_place.copy()
             self.T_high_place[2, 3] = SAFE_FLY_HEIGHT
-            
-            self.state = "APPROACH"
+
+            # Debug + reach check
+            ik_grasp_debug = _matrix_to_base_ik(self.T_grasp)
+            ik_pre_debug   = _matrix_to_base_ik(self.T_pre_grasp)
+            x_b, y_b, z_b = ik_pre_debug[0], ik_pre_debug[1], ik_pre_debug[2]
+            reach_dist = np.sqrt(x_b**2 + y_b**2 + z_b**2)
+            print(f"[FSM] T_grasp world Z={self.T_grasp[2,3]:.4f}m  fingertip_z={world_obj[2]+Z_OFFSET:.4f}m")
+            print(f"[FSM] T_grasp base: x={ik_grasp_debug[0]:.3f}, y={ik_grasp_debug[1]:.3f}, z={ik_grasp_debug[2]:.3f}")
+            print(f"[FSM] Pre-grasp base coords: x={x_b:.3f}, y={y_b:.3f}, z={z_b:.3f}")
+            print(f"[FSM] Reach distance from base: {reach_dist:.3f}m")
+
+            if self.robot: self.robot.open_gripper(side=self.side)
+
+            # Spatial conflict warning
+            conflicts = check_spatial_conflicts(
+                self.plan, self.remaining_plans, safety_margin_m=0.05)
+            if conflicts:
+                for oid, d in conflicts:
+                    print(f"  ⚠️ [SPATIAL] {oid} nằm cách {d*100:.1f}cm — có thể bị va chạm khi gắp!")
+
+            self.state = "S1_PREGRASP"
         except Exception as e: return self._fail(f"init_error: {e}")
 
-    def _state_approach(self):
-        print("[FSM] State: APPROACH (Quỹ đạo chữ L)")
-        if self.robot: self.robot.open_gripper(side=self.side)
-        
-        # Nhịp 1: Đưa tay tới không gian an toàn, không vặn cổ tay
-        ik_input_world = convert_matrix_to_ik_input(self.T_high_approach)
-        x_w, y_w, z_w, _, _, _ = ik_input_world
-        x_base, y_base, z_base = y_w + 0.20, -x_w + 0.70, z_w - 0.9005
-        
-        print("  -> Lướt đến tọa độ thẳng đứng trên vật (Chưa xoay cổ tay)...")
-        print(f"    target base coords: x={x_base:.3f}, y={y_base:.3f}, z={z_base:.3f}")
-        success, elapsed, reason = execute_stage(self.robot, self.world, "fly_pos_only", [x_base, y_base, z_base, 0, 0, 0], 
-                     self.side, "open", max_steps=400, pos_tol=0.20, rot_tol=3.14)
-        if not success:
-            print(f"  [FSM] fly_pos_only failed: {reason} (elapsed={elapsed}) -- will continue to alignment attempt")
+    def _state_s1_pregrasp(self):
+        print("[FSM] State: S1_PREGRASP -> T_pre_grasp (z_down)")
+        ik_pre = _matrix_to_base_ik(self.T_pre_grasp)
+        x_b, y_b, z_b, roll_b, pitch_b, yaw_b = ik_pre
+        print(f"  target base: x={x_b:.3f}, y={y_b:.3f}, z={z_b:.3f} | roll={roll_b:.3f} yaw={yaw_b:.3f}")
+        reach = math.sqrt(x_b**2 + y_b**2 + z_b**2)
+        print(f"  reach={reach:.3f}m")
 
-        # Nhịp 2: Căn chỉnh xoay cổ tay vuông góc (z_down)
-        print("  -> Vặn úp bàn tay xuống...")
-        yaw_base = (0.0 - (math.pi / 2.0) + math.pi) % (2 * math.pi) - math.pi
-        print(f"    align target yaw (base): {yaw_base:.3f}")
-        success2, elapsed2, reason2 = execute_stage(self.robot, self.world, "fly_align_rot", [x_base, y_base, z_base, 3.1416, 0.0, yaw_base], 
-                     self.side, "open", max_steps=250, pos_tol=0.12, rot_tol=0.6)
-        if not success2:
-            print(f"  [FSM] fly_align_rot failed: {reason2} (elapsed={elapsed2}) -- proceeding to vertical descent to observe behavior")
-        
-        # Phase 3: Vertical linear descent (ensure no arc motion)
-        print("  -> Vertical linear descent to pre-grasp point...")
-        success, err = move_interpolated(self.robot, self.world, self.T_high_approach, self.T_pre_grasp, self.side, "drop_vertical", num_steps=15, max_sim_steps=150)
-        
-        if success: self.state = "CONTACT_GRASP"
-        else: self._fail(err)
+        success, _, reason = execute_stage(
+            self.robot, self.world, "s1_full", ik_pre, self.side,
+            step_size=0.025, max_steps=3000,
+            pos_tol=0.06, rot_tol=0.40,
+            timeout_sec=90.0,
+        )
+        if success:
+            try:
+                joints = self.robot.get_joint_states()
+                positions = joints['positions']
+                if positions and isinstance(positions[0], list):
+                    positions = positions[0]
+                self.robot.ik_solver.sync_joint_positions(joints['names'], positions)
+                actual_se3 = self.robot.ik_solver.get_ee_pose(self.side)
+                actual_z = actual_se3.rotation[:, 2]
+                print(f"  [S1 POST] EE Z-axis in base: {actual_z.round(3).tolist()} (expect ≈[0,0,-1])")
+            except Exception as e:
+                print(f"  [S1 POST] Could not read EE state: {e}")
+            self.state = "S2_GRASP"
+        else:
+            self._fail(f"s1_pregrasp_fail: {reason}")
 
-    def _state_contact_grasp(self):
-        print("[FSM] State: CONTACT_GRASP (Lower and grasp)")
-        success, err = move_interpolated(self.robot, self.world, self.T_pre_grasp, self.T_grasp, self.side, "grasp_down", num_steps=15, max_sim_steps=120)
-        if not success: return self._fail("collision_risk")
-        
-        print("  -> Close gripper...")
-        if self.robot: self.robot.close_gripper(side=self.side, width=self.grasp_width)
-        if self.world: self.world.step(steps=50) # Wait for fingers to close
-        
-        self.state = "VERIFY_GRASP" # Move to verification step
+    def _state_s2_grasp(self):
+        print("[FSM] State: S2_GRASP [z_down] -> descend straight to T_grasp")
+        # T_pre_grasp and T_grasp share same XY and z_down orientation.
+        # Move is purely vertical — no SLERP needed, avoids diagonal_45 singularity.
+        success, err = move_interpolated(
+            self.robot, self.world, self.T_pre_grasp, self.T_grasp,
+            self.side, "s2_grasp_down",
+            num_steps=20, max_sim_steps=400, pos_tol=0.015, rot_tol=0.30,
+            step_size=0.010, interp_rotation=False)
+        if not success: return self._fail("collision_on_grasp")
 
-    def _state_verify_grasp(self):
-        print("[FSM] State: VERIFY_GRASP (Grip force verification - Lift Test)")
-        
-        # 1. Perform a small lift (5cm) to test the grasp
-        print("  -> Performing lift test (raise 5cm)...")
-        T_lift_test = self.T_grasp.copy()
-        T_lift_test[2, 3] += 0.05
-        
-        success, err = move_interpolated(self.robot, self.world, self.T_grasp, T_lift_test, self.side, "lift_test", num_steps=10)
-        if not success: return self._fail("lift_test_failed")
-        
-        # 2. SENSOR CHECK (prevent false grasps)
-        print("  -> Reading joint states from fingers...")
-        is_grasped = True # Mặc định Pass nếu không có API
-        if self.robot and hasattr(self.robot, 'get_joint_states'):
+        # Settle + verify wrist Z before closing
+        if self.world:
+            for _ in range(15): self.world.step(render=True)
+        try:
             joints = self.robot.get_joint_states()
-            if joints:
-                names = joints['names']
-                positions = joints['positions'][0]
-                
-                # Find the fingers for the active side
-                finger_prefix = "L_finger" if self.side == "left" else "R_finger"
-                for i, name in enumerate(names):
-                    if finger_prefix in name:
-                        # If finger is nearly fully closed (e.g., < 0.012) -> likely empty grasp
-                        # If finger is obstructed (e.g., > 0.015) -> likely holding an object
-                        finger_pos = positions[i]
-                        print(f"     * {name} = {finger_pos:.4f}")
-                        if finger_pos < 0.012: 
-                            is_grasped = False
-                            
-        if not is_grasped:
-            print("  ⚠️ Detected failed grasp (fingers empty)!")
-            self.robot.open_gripper(side=self.side)
-            self.world.step(steps=20)
-            return self._fail("gripper_not_closed") # Report failure to orchestrator for retry
-            
-        print("  ✓ Confirmed object is held securely!")
-        self.state = "LIFT_TRANSFER"
+            positions = joints['positions']
+            if positions and isinstance(positions[0], list):
+                positions = positions[0]
+            self.robot.ik_solver.sync_joint_positions(joints['names'], positions)
+            actual_se3 = self.robot.ik_solver.get_ee_pose(self.side)
+            actual_z_base = float(actual_se3.translation[2])
+            target_z_base = _matrix_to_base_ik(self.T_grasp)[2]
+            z_err = actual_z_base - target_z_base
+            print(f"  [S2 CHECK] wrist z_base: actual={actual_z_base:.3f} target={target_z_base:.3f} err={z_err:+.3f}m")
+            if z_err > 0.025:  # arm still >2.5cm above target — push down one more time
+                print(f"  [S2 CHECK] Arm {z_err*100:.1f}cm above grasp — correction step...")
+                ik_grasp = _matrix_to_base_ik(self.T_grasp)
+                execute_stage(
+                    self.robot, self.world, "s2_correct",
+                    ik_grasp, self.side,
+                    step_size=0.005, max_steps=600,
+                    pos_tol=0.015, rot_tol=0.5, timeout_sec=20.0)
+        except Exception as e:
+            print(f"  [S2 CHECK] Cannot verify: {e}")
 
-    def _state_lift_transfer(self):
-        print("[FSM] State: LIFT_TRANSFER (Đưa vật sang khay)")
-        T_lift_test = self.T_grasp.copy()
-        T_lift_test[2, 3] += 0.05 # Bắt đầu từ điểm Lift Test
-        
-        print("  -> Nhấc bổng thẳng đứng...")
-        success, err = move_interpolated(self.robot, self.world, T_lift_test, self.T_high_approach, self.side, "lift_vertical", num_steps=15)
-        if not success: return self._fail("dropped_object")
-        
-        print("  -> Lướt trên không trung qua Bin...")
-        success, err = move_interpolated(self.robot, self.world, self.T_high_approach, self.T_high_place, self.side, "fly_to_bin", num_steps=15)
-        if success: self.state = "PLACE"
-        else: self._fail(err)
+        print("  -> Close gripper...")
+        if self.robot:
+            close_gripper_with_width(self.robot, self.side, self.grasp_width)
+        if self.world:
+            for _ in range(80): self.world.step(render=True)
 
-    def _state_place(self):
-        print("[FSM] State: PLACE (Hạ và nhả vật)")
-        print("  -> Đâm thẳng đứng xuống khay Bin...")
-        success, err = move_interpolated(self.robot, self.world, self.T_high_place, self.T_place, self.side, "drop_to_bin", num_steps=15)
-        if not success: return self._fail("collision_risk")
-        
-        print("  -> Mở tay nhả vật...")
+        # Verify object is actually between fingers before lifting
+        if not verify_grasp_success(self.robot, self.side):
+            return self._fail("grasp_fail_empty_gripper")
+
+        self.state = "S3_LIFT"
+
+    def _state_s3_lift(self):
+        print("[FSM] State: S3_LIFT [MoveJ] -> raise to SAFE_FLY_HEIGHT (joint space)")
+        ik_high = _matrix_to_base_ik(self.T_high_approach)
+        success, _, reason = execute_stage(
+            self.robot, self.world, "s3_lift", ik_high, self.side,
+            step_size=0.025, max_steps=1500,
+            pos_tol=0.08, rot_tol=0.40,
+            timeout_sec=45.0)
+        if success: self.state = "S4_TRANSFER"
+        else: self._fail(f"s3_lift_fail: {reason}")
+
+    def _state_s4_transfer(self):
+        print("[FSM] State: S4_TRANSFER [MoveJ] -> fly to bin (joint space)")
+        ik_high_place = _matrix_to_base_ik(self.T_high_place)
+        success, _, reason = execute_stage(
+            self.robot, self.world, "s4_transfer", ik_high_place, self.side,
+            step_size=0.030, max_steps=2000,
+            pos_tol=0.10, rot_tol=0.40,
+            timeout_sec=60.0)
+        if success: self.state = "S5_LOWER_BIN"
+        else: self._fail(f"s4_transfer_fail: {reason}")
+
+    def _state_s5_lower_bin(self):
+        print("[FSM] State: S5_LOWER_BIN [z_down] -> lower straight to T_place")
+        # z_down orientation throughout — no singularity risk.
+        # High→pre_place first, then pre_place→place for finer control near bin.
+        success, err = move_interpolated(
+            self.robot, self.world, self.T_high_place, self.T_pre_place,
+            self.side, "s5_lower_pre",
+            num_steps=20, max_sim_steps=300, pos_tol=0.06, rot_tol=0.35)
+        if not success: return self._fail("collision_at_bin_pre")
+
+        success, err = move_interpolated(
+            self.robot, self.world, self.T_pre_place, self.T_place,
+            self.side, "s5_lower_final",
+            num_steps=15, max_sim_steps=300, pos_tol=0.020, rot_tol=0.35)
+        if success: self.state = "S6_RELEASE"
+        else: self._fail("collision_at_bin")
+
+    def _state_s6_release(self):
+        print("[FSM] State: S6_RELEASE -> open gripper, release object")
         if self.robot: self.robot.open_gripper(side=self.side)
-        if self.world: self.world.step(steps=40)
-        
-        print("  -> Rút tay lên khỏi khay...")
-        move_interpolated(self.robot, self.world, self.T_place, self.T_high_place, self.side, "post_place_up", num_steps=10)
-        self.state = "VERIFY"
+        if self.world: 
+            for _ in range(60): self.world.step(render=True)
+        self.state = "S7_RETREAT"
+
+    def _state_s7_retreat(self):
+        print("[FSM] State: S7_RETREAT [MoveJ] -> raise back to SAFE_FLY_HEIGHT (joint space)")
+        ik_retreat = _matrix_to_base_ik(self.T_high_place)
+        execute_stage(
+            self.robot, self.world, "s7_retreat", ik_retreat, self.side,
+            step_size=0.030, max_steps=1500,
+            pos_tol=0.12, rot_tol=0.40,
+            timeout_sec=45.0)
+        self.state = "VERIFY"  # luôn tiếp tục kể cả khi retreat không hoàn hảo
 
     def _state_verify(self):
         print("[FSM] State: VERIFY -> Hoàn tất vòng lặp!")
         self.state = "DONE"
 
+
 # ======================================================================
-# 4. ORCHESTRATOR 
+# 5. ORCHESTRATOR 
 # ======================================================================
 
 def emit_primitive_event(event: PrimitiveEvent, plan_id: str, object_id: str, details: dict = None) -> dict:
     if details is None: details = {}
     return {"event_type": event.value, "plan_id": plan_id, "object_id": object_id, "details": details}
 
-def run_pipeline_from_person2(action_plan_yaml: str = None, robot=None, world=None, coord_transform=None):
+def check_spatial_conflicts(current_plan: dict, remaining_plans: list,
+                            safety_margin_m: float = 0.05) -> list:
+    cur_pos = np.array(current_plan['object_pose_base']['position_m'][:2])
+    cur_width = current_plan.get('grasp_hint', {}).get('grasp_width_m', 0.06)
+    danger_r = cur_width / 2.0 + safety_margin_m
+    conflicts = []
+    for p in remaining_plans:
+        if p['object_id'] == current_plan['object_id']:
+            continue
+        other_pos = np.array(p['object_pose_base']['position_m'][:2])
+        dist = float(np.linalg.norm(cur_pos - other_pos))
+        if dist < danger_r:
+            conflicts.append((p['object_id'], dist))
+    return conflicts
+
+def sort_plans_by_confidence(action_plans: list, perception_json_path: str = None) -> list:
+    if perception_json_path is None:
+        perception_json_path = "/home/ubuntu/thu/src/task1/perception_interface.json"
+    try:
+        with open(perception_json_path, "r", encoding="utf-8") as f:
+            perception = json.load(f)
+        confidence_map = {obj["object_id"]: obj.get("confidence", 0.0)
+                          for obj in perception.get("objects", [])}
+        sorted_plans = sorted(action_plans,
+                              key=lambda p: confidence_map.get(p["object_id"], 0.0),
+                              reverse=True)
+        print("[Planner] Thứ tự gắp theo confidence (cao → thấp):")
+        for p in sorted_plans:
+            conf = confidence_map.get(p["object_id"], 0.0)
+            print(f"  {p['object_id']} ({p['class_id']}): confidence={conf:.3f}")
+        return sorted_plans
+    except Exception as e:
+        print(f"[Planner] Warning: không sort được theo confidence ({e}), giữ thứ tự gốc")
+        return action_plans
+def debug_scene_objects(world=None):
+    """Scan USD stage for all rigid bodies and print their actual world positions.
+
+    Compares world positions with the coordinate transform used in FSM so we
+    can detect if JSON plan coordinates differ from actual sim positions.
+    """
+    try:
+        from isaacsim.core.utils.stage import get_current_stage
+        from pxr import Usd, UsdGeom, UsdPhysics
+    except ImportError:
+        print("[DEBUG_SCENE] Isaac Sim not available — skipping")
+        return
+
+    print("\n" + "="*60)
+    print("[DEBUG_SCENE] Scanning stage for all RigidBody prims...")
+    print("  Format: world(x,y,z)  →  base(x,y,z)")
+    print("  Robot base frame: x_base=y_w+0.20, y_base=-x_w+0.70, z_base=z_w-0.9005")
+    print("="*60)
+
+    try:
+        stage = get_current_stage()
+        count = 0
+        for prim in stage.TraverseAll():
+            try:
+                if not prim.HasAPI(UsdPhysics.RigidBodyAPI):
+                    continue
+                path = str(prim.GetPath())
+                xf = UsdGeom.Xformable(prim)
+                tf = xf.ComputeLocalToWorldTransform(Usd.TimeCode.Default())
+                t = tf.ExtractTranslation()
+                x_w, y_w, z_w = float(t[0]), float(t[1]), float(t[2])
+                x_b = y_w + 0.20
+                y_b = -x_w + 0.70
+                z_b = z_w - 0.9005
+                print(f"  {path}")
+                print(f"    world: ({x_w:.4f}, {y_w:.4f}, {z_w:.4f})")
+                print(f"    base:  ({x_b:.4f}, {y_b:.4f}, {z_b:.4f})")
+                count += 1
+            except Exception:
+                continue
+        if count == 0:
+            print("  ⚠️ Không tìm thấy rigid body nào. Thử scan tất cả XformPrim...")
+            for prim in stage.TraverseAll():
+                try:
+                    if not UsdGeom.Xformable(prim):
+                        continue
+                    path = str(prim.GetPath())
+                    if any(skip in path for skip in ['/NavMesh', '/PhysicsScene', '/DistantLight',
+                                                      '/RectLight', '/GroundPlane', '/NavMesh']):
+                        continue
+                    xf = UsdGeom.Xformable(prim)
+                    tf = xf.ComputeLocalToWorldTransform(Usd.TimeCode.Default())
+                    t = tf.ExtractTranslation()
+                    x_w, y_w, z_w = float(t[0]), float(t[1]), float(t[2])
+                    if z_w < 0.9 or z_w > 1.2:
+                        continue  # chỉ in vật ở độ cao mặt bàn
+                    x_b = y_w + 0.20; y_b = -x_w + 0.70; z_b = z_w - 0.9005
+                    print(f"  {path}")
+                    print(f"    world: ({x_w:.4f}, {y_w:.4f}, {z_w:.4f})")
+                    print(f"    base:  ({x_b:.4f}, {y_b:.4f}, {z_b:.4f})")
+                    count += 1
+                except Exception:
+                    continue
+        print(f"[DEBUG_SCENE] Tổng: {count} objects tìm thấy")
+        print("="*60 + "\n")
+    except Exception as e:
+        print(f"[DEBUG_SCENE] Error: {e}")
+
+
+def debug_ee_frame(robot):
+    import pinocchio as pin
+    import numpy as np
+    
+    joints = robot.get_joint_states()
+    positions = joints['positions']
+    if positions and isinstance(positions[0], list):
+        positions = positions[0]
+    robot.ik_solver.sync_joint_positions(joints['names'], positions)
+    
+    # FK tại neutral pose
+    poses = robot.ik_solver.get_both_ee_poses()
+    print(f"[DEBUG] Right EE at neutral (xyzrpy): {poses['right']}")
+    print(f"[DEBUG] Left EE at neutral (xyzrpy):  {poses['left']}")
+    
+    # Rotation matrix của right EE
+    right_se3 = robot.ik_solver.get_ee_pose("right")
+    print(f"[DEBUG] Right EE rotation matrix:")
+    print(right_se3.rotation)
+    print(f"[DEBUG] Right EE Z-axis (col 2): {right_se3.rotation[:, 2]}")
+    print(f"  → Nếu Z-axis ~ [0,0,-1] thì gripper chĩa xuống (đúng)")
+    print(f"  → Nếu Z-axis ~ [1,0,0] hay [0,1,0] thì gripper hướng ngang (sai)")
+
+
+
+def run_pipeline_from_person2(action_plan_yaml: str = None, robot=None, world=None,
+                               coord_transform=None, perception_json_path: str = None):
     if action_plan_yaml is None: action_plan_yaml = 'src/task1/primitive_spec_task1.yaml'
     motion_specs = load_action_plan(action_plan_yaml)
-    action_plans = load_action_plans_from_person2()
+    # Ưu tiên đọc tọa độ thật từ USD scene; nếu không có thì fallback sang JSON
+    action_plans = load_action_plans_from_scene()
+    action_plans = sort_plans_by_confidence(action_plans, perception_json_path)
 
-    print(f"\n[System] Khởi chạy {len(action_plans)} plans với Cartesian Interpolation...")
+    print(f"\n[System] Khởi chạy {len(action_plans)} plans (sorted by confidence)...")
+
+    # [FIX #3] Áp workaround patches lên robot 1 lần ở đầu pipeline
+    if robot is not None:
+        patch_robot_workarounds(robot)
+        debug_ee_frame(robot)
+
+    # Scan thực tế vị trí vật trong sim để so sánh với JSON plan
+    debug_scene_objects(world)
 
     FILE_OUTPUT_CSV = 'waypoints_task1.csv'
     retry_counts = {plan['plan_id']: 0 for plan in action_plans}
@@ -442,35 +1022,35 @@ def run_pipeline_from_person2(action_plan_yaml: str = None, robot=None, world=No
             is_first_plan = (plan_idx == 0)
             is_recovering = (retry_count > 0)
             
+            # [FIX #2] Full reset trước mỗi plan đầu tiên hoặc khi retry
             if robot is not None and (is_first_plan or is_recovering):
-                print(f"[Init] Teleport tay về Neutral...")
-                try:
-                    import torch
-                    if robot._articulation is not None and robot.inital_joint_positions is not None:
-                        s2_joint_names = robot._articulation.dof_names
-                        s2_joint_indices = [robot._articulation.get_dof_index(n) for n in s2_joint_names]
-                        robot._articulation.set_joint_positions(
-                            torch.tensor(robot.inital_joint_positions, dtype=torch.float32), 
-                            joint_indices=torch.tensor(s2_joint_indices, dtype=torch.int32)
-                        )
-                    if hasattr(robot, 'ik_solver') and hasattr(robot.ik_solver, 'q_initial'):
-                        robot.ik_solver.q = robot.ik_solver.q_initial.copy()
-                    if world is not None:
-                        for _ in range(60): world.step(render=True)
-                except Exception as e: print(f"⚠️ Lỗi reset: {e}")
+                print(f"[Init] Teleport tay về Neutral + reset full state...")
+                reset_robot_state_full(robot, world, verbose=True)
 
-            fsm = PickAndPlaceStateMachine(robot, world, plan, motion_specs, coord_transform, writer)
+            remaining = action_plans[plan_idx + 1:]
+            fsm = PickAndPlaceStateMachine(robot, world, plan, motion_specs,
+                                           coord_transform, writer,
+                                           remaining_plans=remaining)
             result = fsm.run()
             
-            if result.success: final_event = PrimitiveEvent.SUCCESS
+            if result.success:
+                final_event = PrimitiveEvent.SUCCESS
             else:
-                if result.failure_reason in ["ik_fail", "timeout", "target_out_of_workspace", "collision_risk", "interpolation_stuck"]:
+                r = (result.failure_reason or "").lower()
+                # Substring match: failure reason may be prefixed with stage name
+                # e.g. "s1_pregrasp_fail: timeout" still matches "timeout"
+                if any(k in r for k in ["timeout", "stuck", "max_steps", "out_of_workspace",
+                                         "too_far", "ik_fail", "collision", "init_error",
+                                         "interpolation_stuck"]):
                     final_event = PrimitiveEvent.COLLISION
-                elif result.failure_reason in ["dropped_object", "gripper_not_closed"]:
+                elif any(k in r for k in ["empty_gripper", "dropped", "gripper_not_closed",
+                                           "grasp_fail"]):
                     final_event = PrimitiveEvent.GRASP_FAIL
-                else: final_event = PrimitiveEvent.GRASP_FAIL
+                else:
+                    final_event = PrimitiveEvent.GRASP_FAIL
 
-            emit_primitive_event(final_event, plan_id, plan['object_id'], details={"execution_time_s": result.elapsed_s})
+            emit_primitive_event(final_event, plan_id, plan['object_id'], 
+                                details={"execution_time_s": result.elapsed_s})
 
             if final_event == PrimitiveEvent.SUCCESS:
                 print(f"✅ [SUCCESS] Kế hoạch {plan_id} hoàn tất.")
@@ -483,7 +1063,8 @@ def run_pipeline_from_person2(action_plan_yaml: str = None, robot=None, world=No
                 retry_count += 1
                 retry_counts[plan_id] = retry_count
                 
-                if retry_count < max_attempts: print(f"🔄 Retry {retry_count}/{max_attempts}")
+                if retry_count < max_attempts: 
+                    print(f"🔄 Retry {retry_count}/{max_attempts}")
                 else:
                     print(f"🛑 Abort. Bỏ qua {plan_id}.")
                     plan_idx += 1
