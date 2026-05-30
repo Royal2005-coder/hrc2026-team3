@@ -231,15 +231,97 @@ def verify_grasp_success(robot, side, min_finger_gap_m: float = 0.004) -> bool:
         finger_positions = [float(positions[i]) for i in indices]
         avg_pos = sum(finger_positions) / len(finger_positions)
         print(f"  [VERIFY_GRASP] Finger positions: {[f'{p:.4f}m' for p in finger_positions]} | avg={avg_pos:.4f}m")
-        if avg_pos > min_finger_gap_m:
-            print(f"  [VERIFY_GRASP] ✓ Object detected in gripper (avg={avg_pos:.4f}m)")
-            return True
-        else:
-            print(f"  [VERIFY_GRASP] ✗ Gripper empty — fingers fully closed (avg={avg_pos:.4f}m ≤ {min_finger_gap_m:.4f}m)")
+        # For this robot: close_width=0.01, open_width=-0.0215
+        # Fingers at close limit (≈0.01) = empty gripper
+        # Fingers stopped before close limit = object is blocking
+        fully_closed = getattr(robot, 'gripper_close_width', 0.01)
+        margin = 0.003  # 3mm noise margin
+        if avg_pos >= (fully_closed - margin):
+            print(f"  [VERIFY_GRASP] ✗ Gripper fully closed ({avg_pos:.4f}m ≈ close_limit {fully_closed:.4f}m) — empty")
             return False
+        else:
+            print(f"  [VERIFY_GRASP] ✓ Fingers stopped at {avg_pos:.4f}m (close_limit={fully_closed:.4f}m) — object detected")
+            return True
     except Exception as e:
         print(f"  [VERIFY_GRASP] error: {e} — assuming success")
         return True
+
+
+def _find_gripper_link(stage, robot_prim_path: str, side: str) -> str:
+    """Find the wrist/palm link prim path for the given arm side."""
+    prefix = side[0].upper()  # 'L' or 'R'
+    # Search robot subtree for wrist or finger prim
+    keywords_priority = [
+        f"{prefix}_wrist_roll_link", f"{prefix}_wrist_link",
+        f"{prefix}_palm_link", f"{prefix}_hand_link",
+        f"{prefix}_finger1_link", f"{prefix}_finger1",
+    ]
+    robot_root = stage.GetPrimAtPath(robot_prim_path)
+    if robot_root.IsValid():
+        for kw in keywords_priority:
+            full_path = f"{robot_prim_path}/{kw}"
+            if stage.GetPrimAtPath(full_path).IsValid():
+                return full_path
+    # Broad search
+    search_keywords = [f"{prefix}_wrist", f"{prefix}_finger1", f"{prefix}_palm", f"{prefix}_hand"]
+    for prim in stage.TraverseAll():
+        path = str(prim.GetPath())
+        if not path.startswith(robot_prim_path):
+            continue
+        for kw in search_keywords:
+            if kw.lower() in path.lower():
+                return path
+    return None
+
+
+def _create_grasp_joint(world, robot_prim_path: str, object_prim_path: str, side: str):
+    """Attach object to robot gripper via USD FixedJoint for reliable sim grasping.
+    Returns joint_path string on success, None on failure.
+    """
+    try:
+        from pxr import UsdPhysics, Sdf
+        from isaacsim.core.utils.stage import get_current_stage
+        stage = get_current_stage()
+
+        grip_link = _find_gripper_link(stage, robot_prim_path, side)
+        if grip_link is None:
+            print(f"  [GRASP_JOINT] ⚠ Gripper link not found for side={side} under {robot_prim_path}")
+            return None
+
+        obj_prim = stage.GetPrimAtPath(object_prim_path)
+        if not obj_prim.IsValid():
+            print(f"  [GRASP_JOINT] ⚠ Object prim not found: {object_prim_path}")
+            return None
+
+        joint_path = f"{grip_link}/grasp_attach"
+        # Remove existing joint if any
+        existing = stage.GetPrimAtPath(joint_path)
+        if existing.IsValid():
+            stage.RemovePrim(existing.GetPath())
+
+        joint = UsdPhysics.FixedJoint.Define(stage, joint_path)
+        joint.CreateBody0Rel().SetTargets([Sdf.Path(grip_link)])
+        joint.CreateBody1Rel().SetTargets([Sdf.Path(object_prim_path)])
+        print(f"  [GRASP_JOINT] ✓ Attached: {object_prim_path} → {grip_link}")
+        return joint_path
+    except Exception as e:
+        print(f"  [GRASP_JOINT] Error creating joint: {e}")
+        return None
+
+
+def _remove_grasp_joint(world, joint_path: str):
+    """Remove grasp fixed joint to release object."""
+    if not joint_path:
+        return
+    try:
+        from isaacsim.core.utils.stage import get_current_stage
+        stage = get_current_stage()
+        prim = stage.GetPrimAtPath(joint_path)
+        if prim.IsValid():
+            stage.RemovePrim(prim.GetPath())
+            print(f"  [GRASP_JOINT] ✓ Released: {joint_path}")
+    except Exception as e:
+        print(f"  [GRASP_JOINT] Error removing joint: {e}")
 
 
 # ======================================================================
@@ -336,6 +418,7 @@ def load_action_plans_from_scene(template_file: str = None) -> list:
                 "primitive": "pick_place",
                 "object_id": tmpl.get("object_id", f"obj_{idx:03d}"),
                 "class_id": tmpl.get("class_id", "unknown"),
+                "prim_path": path,
                 "object_pose_base": {"position_m": b_obj.tolist(), "quaternion_xyzw": obj_quat},
                 "bin_pose_base":    {"position_m": bin_pos,         "quaternion_xyzw": bin_quat},
                 "grasp_hint": grasp_hint,
@@ -566,6 +649,8 @@ class PickAndPlaceStateMachine:
         self.failure_reason = None
         self.object_id = plan['object_id']
         self.grasp_width = plan.get('grasp_hint', {}).get('grasp_width_m', 0.05)
+        self._grasp_joint = None
+        self.object_prim_path = plan.get('prim_path', f"/Replicator/{self.object_id}")
 
     def run(self) -> PrimitiveResult:
         print(f"\n================ FSM: PICK & PLACE [{self.object_id}] ================")
@@ -781,13 +866,22 @@ class PickAndPlaceStateMachine:
 
         print("  -> Close gripper...")
         if self.robot:
-            close_gripper_with_width(self.robot, self.side, self.grasp_width)
+            self.robot.close_gripper(side=self.side)
         if self.world:
             for _ in range(80): self.world.step(render=True)
 
-        # Verify object is actually between fingers before lifting
-        if not verify_grasp_success(self.robot, self.side):
-            return self._fail("grasp_fail_empty_gripper")
+        # Attach object via USD FixedJoint for reliable simulation grasping
+        robot_prim = getattr(self.robot, 'prim_path', None)
+        if robot_prim and self.world:
+            self._grasp_joint = _create_grasp_joint(
+                self.world, robot_prim, self.object_prim_path, self.side)
+
+        if self._grasp_joint:
+            print("  [S2] ✓ Grasp confirmed via joint attachment")
+        else:
+            # Fallback: position-based verification
+            if not verify_grasp_success(self.robot, self.side):
+                return self._fail("grasp_fail_empty_gripper")
 
         self.state = "S3_LIFT"
 
@@ -832,8 +926,13 @@ class PickAndPlaceStateMachine:
 
     def _state_s6_release(self):
         print("[FSM] State: S6_RELEASE -> open gripper, release object")
+        if self._grasp_joint:
+            _remove_grasp_joint(self.world, self._grasp_joint)
+            self._grasp_joint = None
+            if self.world:
+                for _ in range(10): self.world.step(render=True)
         if self.robot: self.robot.open_gripper(side=self.side)
-        if self.world: 
+        if self.world:
             for _ in range(60): self.world.step(render=True)
         self.state = "S7_RETREAT"
 

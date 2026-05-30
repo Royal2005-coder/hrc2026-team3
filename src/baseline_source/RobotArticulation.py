@@ -253,6 +253,9 @@ class RobotArticulation:
             # 锁定到当前姿态，避免每步被强拉回 0 导致抖动
             self._waist_legs_init_positions.append(float(0.0))
 
+        self._waist_isaac_indices = self._waist_legs_isaac_indices
+        self._waist_init_positions = self._waist_legs_init_positions
+
         # 先将腰部腿部关节设为目标值，再同步 to pinocchio
         if self._waist_legs_isaac_indices:
             self._articulation.set_joint_positions(
@@ -360,12 +363,10 @@ class RobotArticulation:
         else:
             self._ik_warn_counter = 0
 
-        # 锁定腰部关节到初始位置（不用 apply_action，避免与手臂控制耦合）
+        # Include waist in apply_action to avoid dual-controller conflict
         if self._waist_isaac_indices:
-            self._articulation.set_joint_positions(
-                torch.tensor(self._waist_init_positions, dtype=torch.float32),
-                joint_indices=torch.tensor(self._waist_isaac_indices, dtype=torch.int32),
-            )
+            all_indices.extend(self._waist_isaac_indices)
+            all_positions.extend(self._waist_init_positions)
 
         if len(all_indices) > 0:
             self._articulation.apply_action(
@@ -391,6 +392,10 @@ class RobotArticulation:
             return ik_positions
 
         prev = self._last_arm_positions[side]
+        # Reset EMA on large jump (teleport or IK discontinuity)
+        if np.linalg.norm(ik_positions - prev) > 0.5:
+            self._last_arm_positions[side] = ik_positions.copy()
+            return ik_positions
         alpha = self._smooth_alpha
         smoothed = prev + alpha * (ik_positions - prev)
         self._last_arm_positions[side] = smoothed.copy()
