@@ -137,6 +137,7 @@ def patch_robot_workarounds(robot):
 
 def reset_robot_state_full(robot, world, verbose=True):
     """[FIX #2] Reset toàn bộ runtime state của robot trước khi start plan mới:
+    - Ensure _physics_view is valid (reinit if needed)
     - Teleport joints về initial
     - Clear _last_arm_positions (EMA state)
     - Reset IK solver runtime state
@@ -146,15 +147,27 @@ def reset_robot_state_full(robot, world, verbose=True):
         return
     try:
         import torch
+        # 0. Ensure articulation physics view is valid after any FixedJoint mutations
+        if hasattr(robot, '_reinitialize_physics'):
+            if not hasattr(robot._articulation, '_physics_view') or robot._articulation._physics_view is None:
+                if verbose: print("  → _physics_view missing — reinitializing articulation...")
+                robot._reinitialize_physics()
+
         # 1. Teleport joints về initial
         if robot._articulation is not None and robot.inital_joint_positions is not None:
-            s2_joint_names = robot._articulation.dof_names
-            s2_joint_indices = [robot._articulation.get_dof_index(n) for n in s2_joint_names]
-            robot._articulation.set_joint_positions(
-                torch.tensor(robot.inital_joint_positions, dtype=torch.float32),
-                joint_indices=torch.tensor(s2_joint_indices, dtype=torch.int32)
-            )
-            if verbose: print("  → Teleported joints to initial")
+            try:
+                s2_joint_names = robot._articulation.dof_names
+                s2_joint_indices = [robot._articulation.get_dof_index(n) for n in s2_joint_names]
+                robot._articulation.set_joint_positions(
+                    torch.tensor(robot.inital_joint_positions, dtype=torch.float32),
+                    joint_indices=torch.tensor(s2_joint_indices, dtype=torch.int32)
+                )
+                if verbose: print("  → Teleported joints to initial")
+            except AttributeError as _ae:
+                if "_physics_view" in str(_ae):
+                    if verbose: print("  ⚠ set_joint_positions failed (_physics_view) — skipping teleport")
+                else:
+                    raise
         
         # 2. Clear EMA state
         if hasattr(robot, '_last_arm_positions'):
@@ -760,11 +773,16 @@ class PickAndPlaceStateMachine:
             print(f"[SANITY] roundtrip error XY: {roundtrip_err*100:.2f}cm")
             print(f"[SANITY] ⚠️ Hãy so sánh world_obj với [DEBUG_SCENE] output bên trên để xác nhận tọa độ khớp!")
                 
-            world_obj[2] = 1.0400
-            world_bin[2] = 1.0400
-            
+            # Clamp Z to valid table range instead of hardcoding 1.0400.
+            # Objects rest on table at ~1.04m world Z; allow ±5cm tolerance.
+            _TABLE_Z_MIN, _TABLE_Z_MAX = 0.98, 1.15
+            if not (_TABLE_Z_MIN <= world_obj[2] <= _TABLE_Z_MAX):
+                print(f"[FSM] ⚠ world_obj Z={world_obj[2]:.4f} outside [{_TABLE_Z_MIN},{_TABLE_Z_MAX}] "
+                      f"— clamping to table range")
+                world_obj[2] = max(_TABLE_Z_MIN, min(_TABLE_Z_MAX, world_obj[2]))
+
             obj_valid, msg = validate_position_in_workspace(world_obj.tolist())
-            if not obj_valid and ENABLE_WORKSPACE_VALIDATION: 
+            if not obj_valid and ENABLE_WORKSPACE_VALIDATION:
                 return self._fail("target_out_of_workspace")
 
             self.side = "right" if raw_obj[1] < 0 else "left"
@@ -836,6 +854,13 @@ class PickAndPlaceStateMachine:
                       f"({_bin_base_x_c:.3f},{_bin_base_y_c:.3f})")
             else:
                 print(f"[FSM] Bin XY reach {_bin_xy:.3f}m (OK)")
+
+            # Clamp bin Z to bin height range (bin center ~1.05m, accept 0.95–1.20m)
+            _BIN_Z_MIN, _BIN_Z_MAX = 0.95, 1.20
+            if not (_BIN_Z_MIN <= world_bin[2] <= _BIN_Z_MAX):
+                world_bin[2] = max(_BIN_Z_MIN, min(_BIN_Z_MAX, world_bin[2]))
+                print(f"[FSM] ⚠ Bin Z clamped to {world_bin[2]:.4f}m")
+            print(f"[FSM] Bin world Z={world_bin[2]:.4f}m  place fingertip_z={world_bin[2]+Z_OFFSET:.4f}m")
 
             self.T_place = np.eye(4)
             self.T_place[:3, :3] = Z_DOWN_R
@@ -953,11 +978,19 @@ class PickAndPlaceStateMachine:
             self._grasp_joint = _create_grasp_joint(
                 self.world, self.robot, self.object_prim_path, self.side)
             # FixedJoint addition triggers Isaac Sim physics rebuild which clears
-            # _physics_view on all Articulation instances. Reinitialize proactively
-            # so S3_LIFT does not hit AttributeError on get_joint_states().
+            # _physics_view on all Articulation instances. Wait more frames before
+            # reinit so the physics scene has time to stabilize first.
             if self._grasp_joint and hasattr(self.robot, '_reinitialize_physics'):
-                for _ in range(5): self.world.step(render=True)
-                self.robot._reinitialize_physics()
+                for _ in range(30): self.world.step(render=True)
+                ok = self.robot._reinitialize_physics()
+                if ok:
+                    # Re-sync IK solver after reinit so arm doesn't jump
+                    joints = self.robot.get_joint_states()
+                    if joints and self.robot.ik_solver:
+                        positions = joints['positions']
+                        if positions and isinstance(positions[0], list):
+                            positions = positions[0]
+                        self.robot.ik_solver.sync_joint_positions(joints['names'], positions)
 
         if self._grasp_joint:
             print("  [S2] ✓ Grasp confirmed via joint attachment")
@@ -1206,11 +1239,14 @@ def run_pipeline_from_person2(action_plan_yaml: str = None, robot=None, world=No
 
             is_first_plan = (plan_idx == 0)
             is_recovering = (retry_count > 0)
-            
-            # [FIX #2] Full reset trước mỗi plan đầu tiên hoặc khi retry
-            if robot is not None and (is_first_plan or is_recovering):
-                print(f"[Init] Teleport tay về Neutral + reset full state...")
-                reset_robot_state_full(robot, world, verbose=True)
+
+            # Always reset before each plan: ensures _physics_view is valid and
+            # joint state is clean after any FixedJoint mutations from prior plans.
+            if robot is not None:
+                verbose_reset = is_first_plan or is_recovering
+                if verbose_reset:
+                    print(f"[Init] Teleport tay về Neutral + reset full state...")
+                reset_robot_state_full(robot, world, verbose=verbose_reset)
 
             remaining = action_plans[plan_idx + 1:]
             fsm = PickAndPlaceStateMachine(robot, world, plan, motion_specs,

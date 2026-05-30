@@ -134,22 +134,80 @@ class RobotArticulation:
         if self._articulation is not None:
             self._articulation.cleanup()
 
+    def _rebuild_joint_indices(self):
+        """Rebuild all cached DOF index mappings after articulation recreation."""
+        dof_names = self._articulation.dof_names
+        # Finger indices
+        self.finger_joint_indices = []
+        for fname in self.finger_joint_names:
+            if fname in dof_names:
+                self.finger_joint_indices.append(self._articulation.get_dof_index(fname))
+        # Arm indices (only if IK was initialized)
+        if self._left_arm_isaac_indices is not None:
+            from DualArmIK import DualArmIK as _DAIK
+            self._left_arm_isaac_indices = [
+                self._articulation.get_dof_index(j) for j in _DAIK.LEFT_ARM_JOINTS if j in dof_names
+            ]
+            self._right_arm_isaac_indices = [
+                self._articulation.get_dof_index(j) for j in _DAIK.RIGHT_ARM_JOINTS if j in dof_names
+            ]
+        # Waist/legs indices
+        if self._waist_isaac_indices is not None:
+            _WAIST_LEGS = [
+                "waist_yaw_joint", "waist_pitch_joint",
+                "L_hip_pitch_joint", "L_hip_roll_joint", "L_hip_yaw_joint",
+                "R_hip_pitch_joint", "R_hip_roll_joint", "R_hip_yaw_joint",
+                "L_knee_pitch_joint", "R_knee_pitch_joint",
+                "L_ankle_pitch_joint", "L_ankle_roll_joint",
+                "R_ankle_pitch_joint", "R_ankle_roll_joint",
+            ]
+            self._waist_legs_isaac_indices = []
+            self._waist_legs_init_positions = []
+            for jname in _WAIST_LEGS:
+                try:
+                    self._waist_legs_isaac_indices.append(self._articulation.get_dof_index(jname))
+                    self._waist_legs_init_positions.append(0.0)
+                except Exception:
+                    pass
+            self._waist_isaac_indices = self._waist_legs_isaac_indices
+            self._waist_init_positions = self._waist_legs_init_positions
+
     def _reinitialize_physics(self) -> bool:
         """Reinitialize articulation physics view after a USD stage change.
 
-        Creating a FixedJoint (or removing prims) during active simulation triggers an
-        Isaac Sim internal physics rebuild that clears _physics_view on all existing
-        Articulation instances. Call this to restore the handle without rebuilding
-        the full robot object.
+        Creating a FixedJoint during active simulation triggers an Isaac Sim internal
+        physics rebuild that deletes _physics_view on all Articulation instances.
+        Strategy:
+          1. Inject _physics_view=None guard so initialize() doesn't throw AttributeError
+             when it tries to call destroy() on a missing attribute.
+          2. If that still fails, recreate the Articulation wrapper from scratch and
+             rebuild all cached DOF index mappings.
         """
         if self._articulation is None:
             return False
+
+        # Strategy 1: patch missing attribute then call initialize()
         try:
+            if not hasattr(self._articulation, '_physics_view'):
+                self._articulation._physics_view = None
             self._articulation.initialize()
             print("[Robot] Articulation physics view reinitialized.")
             return True
         except Exception as e:
-            print(f"[Robot] Articulation reinit failed: {e}")
+            print(f"[Robot] Articulation reinit (patch) failed: {e}")
+
+        # Strategy 2: recreate the wrapper from scratch
+        try:
+            self._articulation = Articulation(
+                prim_paths_expr=self.prim_path,
+                name=self.name,
+            )
+            self._articulation.initialize()
+            self._rebuild_joint_indices()
+            print("[Robot] Articulation physics view reinitialized via fresh instance.")
+            return True
+        except Exception as e2:
+            print(f"[Robot] Articulation reinit (fresh) failed: {e2}")
             return False
 
     def get_joint_states(self):
@@ -518,9 +576,32 @@ class RobotArticulation:
             )
         )
 
+    def _apply_gripper_action(self, target_pos: list, control_finger_indices: torch.Tensor):
+        """Apply gripper action with automatic physics-view recovery on AttributeError."""
+        from isaacsim.core.utils.types import ArticulationActions
+        try:
+            self._articulation.apply_action(
+                ArticulationActions(
+                    joint_positions=torch.tensor([target_pos], dtype=torch.float32),
+                    joint_indices=control_finger_indices,
+                )
+            )
+        except AttributeError as e:
+            if "_physics_view" not in str(e):
+                raise
+            print(f"[Robot] gripper apply_action _physics_view missing — reinitializing...")
+            if self._reinitialize_physics():
+                self._articulation.apply_action(
+                    ArticulationActions(
+                        joint_positions=torch.tensor([target_pos], dtype=torch.float32),
+                        joint_indices=control_finger_indices,
+                    )
+                )
+            else:
+                print("[Robot] gripper apply_action: reinit failed, skipping.")
+
     def close_gripper(self, side: Optional[str] = None, task_name: Optional[str] = None):
         """Close gripper on specified side (without world.step, safe to call in callback)"""
-        from isaacsim.core.utils.types import ArticulationActions
         target_pos = [self.gripper_close_width] * 2
 
         if side == "left":
@@ -531,16 +612,10 @@ class RobotArticulation:
             control_finger_indices = torch.tensor(self.finger_joint_indices, dtype=torch.int32)
             target_pos = target_pos * 2
 
-        self._articulation.apply_action(
-            ArticulationActions(
-                joint_positions=torch.tensor([target_pos], dtype=torch.float32),
-                joint_indices=control_finger_indices,
-            )
-        )
+        self._apply_gripper_action(target_pos, control_finger_indices)
 
     def open_gripper(self, side: Optional[str] = None, task_name: Optional[str] = None):
         """Open gripper on specified side (without world.step, safe to call in callback)"""
-        from isaacsim.core.utils.types import ArticulationActions
         target_pos = [self.gripper_open_width] * 2
 
         if side == "left":
@@ -551,9 +626,4 @@ class RobotArticulation:
             control_finger_indices = torch.tensor(self.finger_joint_indices, dtype=torch.int32)
             target_pos = target_pos * 2
 
-        self._articulation.apply_action(
-            ArticulationActions(
-                joint_positions=torch.tensor([target_pos], dtype=torch.float32),
-                joint_indices=control_finger_indices,
-            )
-        )
+        self._apply_gripper_action(target_pos, control_finger_indices)
