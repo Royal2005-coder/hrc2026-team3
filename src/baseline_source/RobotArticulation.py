@@ -363,10 +363,12 @@ class RobotArticulation:
         else:
             self._ik_warn_counter = 0
 
-        # Include waist in apply_action to avoid dual-controller conflict
+        # Include waist/legs in apply_action — track current position as target
+        # so the PD drive has zero spring force (no oscillation), only damping.
         if self._waist_isaac_indices:
+            current_waist = [float(isaac_positions[i]) for i in self._waist_isaac_indices]
             all_indices.extend(self._waist_isaac_indices)
-            all_positions.extend(self._waist_init_positions)
+            all_positions.extend(current_waist)
 
         if len(all_indices) > 0:
             self._articulation.apply_action(

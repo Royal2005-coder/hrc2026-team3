@@ -370,15 +370,46 @@ def load_action_plans_from_scene(template_file: str = None) -> list:
         def _world_to_base(w):
             return np.array([w[1] + 0.20, -w[0] + 0.70, w[2] - 0.9005])
 
-        # Read bin position
-        bin_world = _prim_world_pos("/Root/Box")
+        # Read bin position — try multiple candidate prim paths, then scan by name
+        _BIN_CANDIDATES = [
+            "/Root/Box", "/World/Box", "/Root/Bin", "/World/Bin",
+            "/Root/sorting_bin", "/World/sorting_bin",
+            "/Root/Tray", "/World/Tray", "/Root/Container", "/World/Container",
+            "/Root/basket", "/World/basket",
+        ]
+        bin_world = None
+        bin_found_at = None
+        for _bp in _BIN_CANDIDATES:
+            _w = _prim_world_pos(_bp)
+            if _w is not None:
+                bin_world = _w
+                bin_found_at = _bp
+                break
+
         if bin_world is None:
-            print("[SCENE_LOAD] /Root/Box not found — using JSON bin positions")
+            # Broad scan: find any prim with bin/box/tray in its name at table height
+            _bin_kw = ["bin", "box", "tray", "basket", "container", "sort"]
+            for prim in stage.TraverseAll():
+                _pname = prim.GetName().lower()
+                if any(_k in _pname for _k in _bin_kw):
+                    _path = str(prim.GetPath())
+                    _w = _prim_world_pos(_path)
+                    if _w is not None and 0.85 < _w[2] < 1.30:
+                        bin_world = _w
+                        bin_found_at = _path
+                        print(f"[SCENE_LOAD] Bin found by name-scan: {_path}")
+                        break
+
+        if bin_world is None:
+            print("[SCENE_LOAD] ⚠ Bin prim not found in stage — using JSON fallback")
             bin_base = None
         else:
             bin_base = _world_to_base(bin_world)
-            print(f"[SCENE_LOAD] Bin  world=({bin_world[0]:.4f},{bin_world[1]:.4f},{bin_world[2]:.4f})"
-                  f"  base=({bin_base[0]:.4f},{bin_base[1]:.4f},{bin_base[2]:.4f})")
+            _reach_xy = math.sqrt(bin_base[0]**2 + bin_base[1]**2)
+            print(f"[SCENE_LOAD] Bin at '{bin_found_at}': "
+                  f"world=({bin_world[0]:.3f},{bin_world[1]:.3f},{bin_world[2]:.3f})"
+                  f"  base=({bin_base[0]:.3f},{bin_base[1]:.3f},{bin_base[2]:.3f})"
+                  f"  XY-reach={_reach_xy:.3f}m")
 
         # Read object positions: /Replicator/Ref_Xform_01 … Ref_Xform_20
         obj_list = []
@@ -396,12 +427,38 @@ def load_action_plans_from_scene(template_file: str = None) -> list:
             print("[SCENE_LOAD] No Replicator objects found — using JSON fallback")
             return template_plans
 
+        # If bin not found in stage, try task1_workpieces.json as second fallback
+        _workpieces_fallback_bin = None
+        if bin_base is None:
+            _wp_paths = [
+                Path(__file__).parent.parent.parent / "task1_workpieces.json",
+                Path("/home/ubuntu/thu/task1_workpieces.json"),
+                Path("task1_workpieces.json"),
+            ]
+            for _wp in _wp_paths:
+                if _wp.exists():
+                    try:
+                        import json as _json
+                        with open(_wp) as _f:
+                            _wdata = _json.load(_f)
+                        _bp_world = _wdata["workpieces"][0].get("bin_position", [[]])[0]
+                        if len(_bp_world) == 3:
+                            _bp_world = np.array(_bp_world, dtype=float)
+                            _workpieces_fallback_bin = _world_to_base(_bp_world).tolist()
+                            print(f"[SCENE_LOAD] Bin from {_wp.name}: "
+                                  f"world={_bp_world.tolist()} base={_workpieces_fallback_bin}")
+                    except Exception as _e:
+                        print(f"[SCENE_LOAD] workpieces fallback error: {_e}")
+                    break
+
         plans = []
         for idx, (path, w_obj, b_obj) in enumerate(obj_list):
             tmpl = template_plans[idx] if idx < len(template_plans) else {}
-            # Use actual bin_base if found, otherwise template bin position
+            # Priority: stage scan > workpieces.json > template JSON > hardcoded default
             if bin_base is not None:
                 bin_pos = bin_base.tolist()
+            elif _workpieces_fallback_bin is not None:
+                bin_pos = _workpieces_fallback_bin
             else:
                 bin_pos = tmpl.get("bin_pose_base", {}).get("position_m", [0.50, -0.50, 0.14])
             bin_quat = tmpl.get("bin_pose_base", {}).get("quaternion_xyzw", [0, 0, 0, 1])
@@ -762,6 +819,24 @@ class PickAndPlaceStateMachine:
             self.T_high_approach[2, 3] = SAFE_FLY_HEIGHT
 
             # BIN PLACE: z_down, wrist above bin
+            # Clamp bin XY to max reachable radius so IK has a chance to converge
+            _MAX_BIN_XY_BASE = 0.48  # conservative arm XY reach in base frame
+            _bin_base_x = world_bin[1] + 0.20   # base x = world_y + 0.20
+            _bin_base_y = -world_bin[0] + 0.70  # base y = -world_x + 0.70
+            _bin_xy = math.sqrt(_bin_base_x**2 + _bin_base_y**2)
+            if _bin_xy > _MAX_BIN_XY_BASE:
+                _scale = _MAX_BIN_XY_BASE / _bin_xy
+                _bin_base_x_c = _bin_base_x * _scale
+                _bin_base_y_c = _bin_base_y * _scale
+                # Convert clamped base coords back to world
+                world_bin[0] = -_bin_base_y_c + 0.70   # world_x = -base_y + 0.70
+                world_bin[1] = _bin_base_x_c - 0.20    # world_y = base_x - 0.20
+                print(f"[FSM] ⚠ Bin XY reach {_bin_xy:.3f}m > {_MAX_BIN_XY_BASE}m limit — "
+                      f"clamped base:({_bin_base_x:.3f},{_bin_base_y:.3f}) → "
+                      f"({_bin_base_x_c:.3f},{_bin_base_y_c:.3f})")
+            else:
+                print(f"[FSM] Bin XY reach {_bin_xy:.3f}m (OK)")
+
             self.T_place = np.eye(4)
             self.T_place[:3, :3] = Z_DOWN_R
             self.T_place[0, 3] = world_bin[0]
@@ -779,12 +854,14 @@ class PickAndPlaceStateMachine:
             # Debug + reach check
             ik_grasp_debug = _matrix_to_base_ik(self.T_grasp)
             ik_pre_debug   = _matrix_to_base_ik(self.T_pre_grasp)
+            ik_place_debug = _matrix_to_base_ik(self.T_high_place)
             x_b, y_b, z_b = ik_pre_debug[0], ik_pre_debug[1], ik_pre_debug[2]
             reach_dist = np.sqrt(x_b**2 + y_b**2 + z_b**2)
             print(f"[FSM] T_grasp world Z={self.T_grasp[2,3]:.4f}m  fingertip_z={world_obj[2]+Z_OFFSET:.4f}m")
             print(f"[FSM] T_grasp base: x={ik_grasp_debug[0]:.3f}, y={ik_grasp_debug[1]:.3f}, z={ik_grasp_debug[2]:.3f}")
             print(f"[FSM] Pre-grasp base coords: x={x_b:.3f}, y={y_b:.3f}, z={z_b:.3f}")
             print(f"[FSM] Reach distance from base: {reach_dist:.3f}m")
+            print(f"[FSM] Bin high-place base: x={ik_place_debug[0]:.3f}, y={ik_place_debug[1]:.3f}, z={ik_place_debug[2]:.3f}")
 
             if self.robot: self.robot.open_gripper(side=self.side)
 
@@ -899,11 +976,14 @@ class PickAndPlaceStateMachine:
     def _state_s4_transfer(self):
         print("[FSM] State: S4_TRANSFER [MoveJ] -> fly to bin (joint space)")
         ik_high_place = _matrix_to_base_ik(self.T_high_place)
+        px, py, pz = ik_high_place[0], ik_high_place[1], ik_high_place[2]
+        print(f"  bin high-place target base: x={px:.3f}, y={py:.3f}, z={pz:.3f} "
+              f"| XY-reach={math.sqrt(px**2+py**2):.3f}m")
         success, _, reason = execute_stage(
             self.robot, self.world, "s4_transfer", ik_high_place, self.side,
-            step_size=0.030, max_steps=2000,
-            pos_tol=0.10, rot_tol=0.40,
-            timeout_sec=60.0)
+            step_size=0.030, max_steps=800,   # reduced from 2000 → fail fast if unreachable
+            pos_tol=0.12, rot_tol=0.45,
+            timeout_sec=30.0)
         if success: self.state = "S5_LOWER_BIN"
         else: self._fail(f"s4_transfer_fail: {reason}")
 
