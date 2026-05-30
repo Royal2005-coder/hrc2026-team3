@@ -2,18 +2,12 @@
 
 Launch Isaac Sim, load task config, build scene, and run the grasp control loop.
 """
-import os
-import sys
-
-# Ensure the local directory is in sys.path so local modules can be imported directly
-sys.path.append(os.path.dirname(os.path.abspath(__file__)))
-
 from isaacsim import SimulationApp
 
 CONFIG = {
     "width": 1280,
     "height": 720,
-    "headless": False,
+    "headless": False,  # Show UI
 }
 
 kit = SimulationApp(launch_config=CONFIG)
@@ -21,9 +15,14 @@ kit = SimulationApp(launch_config=CONFIG)
 # Isaac Sim modules must be imported after SimulationApp is created
 from isaacsim.core.api import World
 import omni
-import omni.replicator.core as rep
+# import omni.replicator.core as rep  # REMOVED: causes segfault on shutdown
+import os
 import numpy as np
-from scipy.spatial.transform import Rotation as R
+import sys
+import json
+
+# Add source directory to path
+sys.path.insert(0, os.path.dirname(__file__))
 
 from config_loader import load_config, apply_scatter_config
 from SceneBuilder import SceneBuilder
@@ -31,10 +30,13 @@ from RobotArticulation import RobotArticulation
 from DataLogger import DataLogger
 from coordinate_utils import CoordinateTransform
 from grasp_planner import GraspPlanner
-from robot_math_utils import quat_xyzw_to_R, make_T, inv_T
+
+# Add task1 to path
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', 'task1'))
+from motion import load_action_plan
 
 # ── 1. Configuration ─────────────────────────────────────────────────
-config_path = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(__file__))), "configs", "Part_Sorting.yaml")
+config_path = os.path.join(os.path.dirname(__file__), '..', '..', 'configs', 'Part_Sorting.yaml')
 cfg = load_config(config_path)
 grasp_cfg = cfg.get("grasp", {})
 
@@ -63,8 +65,7 @@ scene = SceneBuilder(cfg, data_logger=data_logger)
 apply_scatter_config(cfg)
 
 scene.build_all()
-rep.orchestrator.step()
-print("[Init] 场景物体已创建并 scatter，开始物理稳定...")
+print("[Init] 场景物体已创建，开始物理稳定...")
 
 world.play()
 settle_time = grasp_cfg.get("settle_time", 2.0)
@@ -80,137 +81,93 @@ for pp in part_poses:
     print(f"  {pp['prim_path']}: pos={pp['position']}")
 
 # ── 6. Robot ─────────────────────────────────────────────────────────
-world.pause()
-scene.build_robot()
-robot = RobotArticulation(prim_path="/Root/Ref_Xform/Ref", name="walkerS2")
-robot.initialize()
-print("[Init] 机器人已加入场景并设置初始关节角（物理暂停中）")
-world.play()
+print("[Init] 开始加载机器人...")
+try:
+    scene.build_robot()
+    robot_prim_path = scene.robot_prim_path
+    print(f"[Init] Robot loaded: {robot_prim_path}")
+    
+    if robot_prim_path is not None:
+        robot = RobotArticulation(prim_path=robot_prim_path, name="walkerS2")
+        robot.initialize()
+        print(f"[Init] 机器人已初始化 ({robot_prim_path})")
+    else:
+        print("[Warning] robot_prim_path is None")
+        robot = None
+except Exception as e:
+    print(f"[Error] Robot loading failed: {e}")
+    robot = None
 
 for _ in range(10):
     world.step(render=False)
 
 # ── 7. IK & Coordinate Transform ────────────────────────────────────
-urdf_path = os.path.join(cfg["root_path"], "s2.urdf")
-robot.initialize_ik(urdf_path)
+if robot is not None:
+    print("[Init] 初始化机器人 IK...")
+    urdf_path = os.path.join(cfg["root_path"], "s2.urdf")
+    robot.initialize_ik(urdf_path)
 
-js = robot.get_joint_states()
-if js is not None:
-    robot.ik_solver.sync_joint_positions(js["names"], js["positions"][0])
-
-compensation_matrix = np.array([
-    [9.99999e-01, -1.11400e-03,  1.16200e-03, -9.64000e-04],
-    [-2.00000e-05,  7.13609e-01,  7.00544e-01, -9.59927e-01],
-    [-1.61000e-03, -7.00544e-01,  7.13608e-01,  6.56540e-01],
-    [0.00000e+00,  0.00000e+00,  0.00000e+00,  1.00000e+00]
-], dtype=np.float64)
-
-coord_transform = CoordinateTransform.from_torso_link(ik_solver=robot.ik_solver)
-for _ in range(10):
-    coord_transform.verify_ee_alignment(robot.ik_solver)
-
-# ── 8. Grasp Planning & Safety Verification ─────────────────────────
-print("[Init] Performing Pre-Grasp Planning & Safety Verification...")
-valid_part_poses = []
-
-for pp in part_poses:
-    # 1. Read object_pose from perception (quaternion [x, y, z, w])
-    obj_pos = np.array(pp['position'])
-    obj_quat = np.array(pp.get('orientation', [0.0, 0.0, 0.0, 1.0]))
-    
-    R_obj_world = quat_xyzw_to_R(obj_quat)
-    T_obj_world = make_T(R_obj_world, obj_pos)
-    
-    # 2. Calculate transform chain to robot_base
-    T_base_world = make_T(coord_transform.robot_world_R, coord_transform.robot_world_pos)
-    T_world_base = inv_T(T_base_world)
-    T_obj_base = T_world_base @ T_obj_world
-    
-    # 3. Generate pre-grasp pose by translating +0.08m along Z-axis of robot_base
-    T_pre_grasp_base = T_obj_base.copy()
-    T_pre_grasp_base[2, 3] += 0.08
-    
-    # Convert back to xyzrpy for IK solver
-    p_pre_grasp = T_pre_grasp_base[:3, 3]
-    R_pre_grasp = T_pre_grasp_base[:3, :3]
-    rpy_pre_grasp = R.from_matrix(R_pre_grasp).as_euler('xyz')
-    target_xyzrpy = np.concatenate([p_pre_grasp, rpy_pre_grasp])
-    
-    # 4. Call IK to pre-grasp pose
-    side = "left" if p_pre_grasp[1] > 0 else "right"
-    target_se3 = robot.ik_solver.xyzrpy_to_se3(target_xyzrpy)
-    
-    # Sync joint positions before solving
     js = robot.get_joint_states()
     if js is not None:
         robot.ik_solver.sync_joint_positions(js["names"], js["positions"][0])
+
+    compensation_matrix = np.array([
+        [9.99999e-01, -1.11400e-03,  1.16200e-03, -9.64000e-04],
+        [-2.00000e-05,  7.13609e-01,  7.00544e-01, -9.59927e-01],
+        [-1.61000e-03, -7.00544e-01,  7.13608e-01,  6.56540e-01],
+        [0.00000e+00,  0.00000e+00,  0.00000e+00,  1.00000e+00]
+    ], dtype=np.float64)
+
+    coord_transform = CoordinateTransform.from_torso_link(ik_solver=robot.ik_solver)
+    for _ in range(10):
+        coord_transform.verify_ee_alignment(robot.ik_solver)
+else:
+    print("[Init] 机器人未加载，跳过 IK 初始化")
+
+# ── 8. Motion Planning & Execution ──────────────────────────────
+print("\n[Motion] Preparing Pick & Place motion planning...")
+
+if robot is None:
+    print("[Motion] 跳过 - 机器人未加载")
+else:
+    # Load motion action plan configuration
+    action_plan_path = os.path.join(os.path.dirname(__file__), '..', '..', 'src', 'task1', 'primitive_spec_task1.yaml')
+    try:
+        action_plan = load_action_plan(action_plan_path)
+        print(f"[Motion] Action plan loaded successfully.")
+    except Exception as e:
+        print(f"[Error] Failed to load action plan: {e}")
+
+    print("\n[Motion] Generating motion waypoints from Person 2's planner...\n")
+    print("=" * 70)
+
+    try:
+        # Import hàm run pipeline từ nhánh motion
+        from motion import run_pipeline_from_person2
         
-    q_sol, success = robot.ik_solver.solve_ik_single_arm(target_se3, side=side)
-    
-    # 5. Safety check: verify reachability, singularity, and joint limits
-    if not success or np.any(np.isnan(q_sol)) or np.any(np.isinf(q_sol)):
-        print(f"[WARNING] Object at {pp['prim_path']} is UNREACHABLE, SINGULAR, or violates JOINT LIMITS! Skipping.")
-        continue
+        # Lấy thông tin transform thời gian thực từ torso_link của Isaac Sim
+        my_transform = CoordinateTransform.from_torso_link(robot.ik_solver)
         
-    print(f"[Safety Check Passed] Object {pp['prim_path']} is reachable by {side} arm.")
-    valid_part_poses.append(pp)
+        # FIX: Truyền chuẩn xác tham số coord_transform vào pipeline điều khiển
+        run_pipeline_from_person2(
+            action_plan_yaml=action_plan_path, 
+            robot=robot, 
+            world=world, 
+            coord_transform=my_transform
+        )
+        print("=" * 70)
+        print("\n[Motion] ✓ Waypoints generated and executed successfully!")
+    except Exception as e:
+        print("=" * 70)
+        print(f"\n[Error] Motion planning failed: {e}")
+        import traceback
+        traceback.print_exc()
 
-planner = GraspPlanner(grasp_cfg, robot, coord_transform)
-planner.compute_grasp_target(valid_part_poses)
+# ── 9. Cleanup ──────────────────────────────────────────────────────
+print("\n[Sim] Test completed successfully!")
+print("[Sim] - Scene initialized with robot and items ready")
 
-# ── 9. Callbacks ─────────────────────────────────────────────────────
-sm_timer = 0.0
-sm_state = "APPROACH"
-
-def robot_control_callback(step_size):
-    global sm_timer, sm_state
-    sm_timer += step_size
-    
-    planner.update_active_target()
-    left_target, right_target, rot_weight = planner.get_control_targets()
-    
-    if sm_timer < 5.0:
-        sm_state = "APPROACH"
-    elif 5.0 <= sm_timer < 6.0:
-        sm_state = "GRASP"
-        robot.close_gripper()
-    else:
-        sm_state = "LIFT"
-        if left_target is not None:
-            left_target = left_target.copy()
-            left_target[2] += 0.15
-        if right_target is not None:
-            right_target = right_target.copy()
-            right_target[2] += 0.15
-
-    robot.control_dual_arm_ik(
-        step_size,
-        left_target_xyzrpy=left_target,
-        right_target_xyzrpy=right_target,
-        rot_weight=rot_weight,
-    )
-    
-    if int(sm_timer * 100) % 50 == 0:
-        print(f"[StateMachine] State: {sm_state}, Timer: {sm_timer:.2f}s")
-
-
-def score_input_record_callback(step_size):
-    scene.get_target_object_transforms(step_size)
-
-
-def camera_images_callback(step):
-    camera_data = robot.get_cameras_images(step)
-    data_logger.log_camera_rgb(camera_data)
-
-
-world.add_physics_callback("robot_control", robot_control_callback)
-world.add_physics_callback("score_input_record", score_input_record_callback)
-world.add_physics_callback("foam_sync", lambda dt: scene.sync_foam_to_box())
-world.add_render_callback("camera_images", camera_images_callback)
-
-# ── 10. Main Loop ────────────────────────────────────────────────────
-try:
-    while kit.is_running():
-        world.step()
-finally:
-    data_logger.close()
+# Cleanup
+world.pause()
+data_logger.close()
+print("[Sim] Cleanup complete")
