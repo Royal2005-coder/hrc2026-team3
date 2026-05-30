@@ -137,7 +137,9 @@ if robot is not None:
 
     js = robot.get_joint_states()
     if js is not None:
-        robot.ik_solver.sync_joint_positions(js["names"], js["positions"][0])
+        _pos = js["positions"]
+        robot.ik_solver.sync_joint_positions(
+            js["names"], _pos[0] if isinstance(_pos[0], list) else _pos)
 
     compensation_matrix = np.array([
         [9.99999e-01, -1.11400e-03,  1.16200e-03, -9.64000e-04],

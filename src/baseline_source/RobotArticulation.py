@@ -444,7 +444,8 @@ class RobotArticulation:
             return
 
         isaac_names = joints['names']
-        isaac_positions = joints['positions'][0]  # shape: (N,)
+        _pos = joints['positions']
+        isaac_positions = _pos[0] if (_pos and isinstance(_pos[0], list)) else _pos
 
         # 2. 求解双臂 IK
         ik_result = self.ik_solver.solve_dual_arm(

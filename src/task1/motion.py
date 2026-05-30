@@ -799,7 +799,16 @@ class PickAndPlaceStateMachine:
             if not obj_valid and ENABLE_WORKSPACE_VALIDATION:
                 print(f"[FSM] ⚠ Workspace validation still failed after clamp: {msg} — proceeding anyway")
 
-            self.side = "right" if raw_obj[1] < 0 else "left"
+            # Arm selection: both bins are at base_y ≈ -0.5 (right side of robot).
+            # Only the right arm shoulder (base ≈ (0, -0.3)) can reach the bin
+            # (shoulder→bin ≈ 0.60m).  Left arm shoulder (base ≈ (0, +0.3)) would
+            # need to cross 0.94m — beyond reach.
+            # Objects in scatter area (base_y ≈ [-0.10, +0.20]) are all reachable by
+            # the right arm.  Switch to left only if object is very far left (>0.35).
+            if raw_obj[1] > 0.35:
+                self.side = "left"
+            else:
+                self.side = "right"
             
             tcp_offset = np.array([0.0, 0.0, 0.0], dtype=float)
             config_paths = [
@@ -825,16 +834,19 @@ class PickAndPlaceStateMachine:
                 print(f"[FSM] Warning: TCP offset is zero (default) - gripper may not touch target!")
 
             # z_down approach for both grasp and place — avoids diagonal_45 singularities
-            # tcp_z: distance from wrist flange to fingertip along tool-Z
-            tcp_z = float(tcp_offset[2]) if tcp_offset[2] > 0.01 else 0.12
+            # tcp_z: distance from sixforce_link (EE frame) to fingertip along tool-Z (downward).
+            # Config tcp_offset=[0,0,0] means no override → use measured 0.13m default.
+            # Tune this if the gripper is consistently above (increase) or below (decrease) target.
+            tcp_z = float(tcp_offset[2]) if tcp_offset[2] > 0.01 else 0.13
             print(f"[FSM] z_down approach: tcp_z={tcp_z:.3f}m")
 
             Z_DOWN_R = _make_diagonal_R(0)  # z_down rotation: tool-Z = [0,0,-1] in world
             app_offset = self.specs.get("approach_offset_m", 0.08)
             Z_OFFSET = self.specs.get("grasp_z_offset_m", 0.0)
-            # SAFE_FLY_HEIGHT must be > T_grasp world Z (obj_z + tcp_z + Z_OFFSET ≈ 1.14–1.18m)
-            # to ensure S3_LIFT clears the object and table. Keep at 1.25m.
-            SAFE_FLY_HEIGHT = 1.25
+            # SAFE_FLY_HEIGHT must clear both the grasped object AND the bin top wall.
+            # Box scale Z=0.36 → half-height=0.18m, box center z=1.05 → top≈1.23m.
+            # Use 1.40m to give ≥17cm clearance over the bin opening.
+            SAFE_FLY_HEIGHT = 1.40
 
             # GRASP: wrist directly above fingertip target, z_down orientation
             # wrist_z = obj_z + tcp_z + Z_OFFSET  →  fingertip_z = obj_z + Z_OFFSET
@@ -853,8 +865,10 @@ class PickAndPlaceStateMachine:
             self.T_high_approach[2, 3] = SAFE_FLY_HEIGHT
 
             # BIN PLACE: z_down, wrist above bin
-            # Clamp bin XY to max reachable radius so IK has a chance to converge
-            _MAX_BIN_XY_BASE = 0.48  # conservative arm XY reach in base frame
+            # Clamp bin XY only when truly out of reach.
+            # Right arm shoulder ≈ (0, -0.3) → bin at (0.5, -0.5) is ~0.60m away.
+            # Arm length ≈ 0.70m, so 0.72m XY from base origin is achievable.
+            _MAX_BIN_XY_BASE = 0.72  # max arm XY reach from base origin (m)
             _bin_base_x = world_bin[1] + 0.20   # base x = world_y + 0.20
             _bin_base_y = -world_bin[0] + 0.70  # base y = -world_x + 0.70
             _bin_xy = math.sqrt(_bin_base_x**2 + _bin_base_y**2)
@@ -930,21 +944,38 @@ class PickAndPlaceStateMachine:
             pos_tol=0.06, rot_tol=0.40,
             timeout_sec=90.0,
         )
-        if success:
-            try:
-                joints = self.robot.get_joint_states()
-                positions = joints['positions']
-                if positions and isinstance(positions[0], list):
-                    positions = positions[0]
-                self.robot.ik_solver.sync_joint_positions(joints['names'], positions)
-                actual_se3 = self.robot.ik_solver.get_ee_pose(self.side)
-                actual_z = actual_se3.rotation[:, 2]
-                print(f"  [S1 POST] EE Z-axis in base: {actual_z.round(3).tolist()} (expect ≈[0,0,-1])")
-            except Exception as e:
-                print(f"  [S1 POST] Could not read EE state: {e}")
-            self.state = "S2_GRASP"
-        else:
-            self._fail(f"s1_pregrasp_fail: {reason}")
+
+        # Arm fallback: if primary arm fails IK (stuck/timeout), try the other arm.
+        if not success:
+            alt_side = "left" if self.side == "right" else "right"
+            print(f"  [S1] Primary arm '{self.side}' failed ({reason}). Trying '{alt_side}' arm...")
+            if self.robot:
+                self.robot.open_gripper(side=alt_side)
+            success_alt, _, reason_alt = execute_stage(
+                self.robot, self.world, "s1_alt", ik_pre, alt_side,
+                step_size=0.025, max_steps=3000,
+                pos_tol=0.06, rot_tol=0.40,
+                timeout_sec=90.0,
+            )
+            if success_alt:
+                self.side = alt_side
+                success = True
+                print(f"  [S1] ✓ Fallback to '{alt_side}' arm succeeded")
+            else:
+                return self._fail(f"s1_pregrasp_fail_both_arms: {reason} / {reason_alt}")
+
+        try:
+            joints = self.robot.get_joint_states()
+            positions = joints['positions']
+            if positions and isinstance(positions[0], list):
+                positions = positions[0]
+            self.robot.ik_solver.sync_joint_positions(joints['names'], positions)
+            actual_se3 = self.robot.ik_solver.get_ee_pose(self.side)
+            actual_z = actual_se3.rotation[:, 2]
+            print(f"  [S1 POST] EE Z-axis in base: {actual_z.round(3).tolist()} (expect ≈[0,0,-1])")
+        except Exception as e:
+            print(f"  [S1 POST] Could not read EE state: {e}")
+        self.state = "S2_GRASP"
 
     def _state_s2_grasp(self):
         print("[FSM] State: S2_GRASP [z_down] -> descend straight to T_grasp")
@@ -953,8 +984,8 @@ class PickAndPlaceStateMachine:
         success, err = move_interpolated(
             self.robot, self.world, self.T_pre_grasp, self.T_grasp,
             self.side, "s2_grasp_down",
-            num_steps=20, max_sim_steps=400, pos_tol=0.015, rot_tol=0.30,
-            step_size=0.010, interp_rotation=False)
+            num_steps=25, max_sim_steps=600, pos_tol=0.020, rot_tol=0.40,
+            step_size=0.008, interp_rotation=False)
         if not success: return self._fail("collision_on_grasp")
 
         # Settle + verify wrist Z before closing
@@ -1022,11 +1053,12 @@ class PickAndPlaceStateMachine:
         ik_high = _matrix_to_base_ik(self.T_high_approach)
         success, _, reason = execute_stage(
             self.robot, self.world, "s3_lift", ik_high, self.side,
-            step_size=0.025, max_steps=1500,
-            pos_tol=0.08, rot_tol=0.40,
-            timeout_sec=45.0)
-        if success: self.state = "S4_TRANSFER"
-        else: self._fail(f"s3_lift_fail: {reason}")
+            step_size=0.025, max_steps=2000,
+            pos_tol=0.10, rot_tol=0.50,
+            timeout_sec=60.0)
+        if not success:
+            print(f"  [S3] ⚠ Lift incomplete ({reason}) — proceeding anyway")
+        self.state = "S4_TRANSFER"
 
     def _state_s4_transfer(self):
         print("[FSM] State: S4_TRANSFER [MoveJ] -> fly to bin (joint space)")
@@ -1044,33 +1076,39 @@ class PickAndPlaceStateMachine:
             if hasattr(self.robot.ik_solver, '_left_fail_count'):
                 self.robot.ik_solver._left_fail_count = 0
 
-        # pos_tol=0.15m: bin high-approach is transit only; 15cm accuracy sufficient
-        # before S5_LOWER_BIN does the precise descent. Previous 0.12m was too tight —
-        # IK converges to ~0.127m at diagonal bin positions for the right arm.
+        # pos_tol=0.20m: S4 is transit only; S5 does the precise descent.
+        # Proceed to S5 on timeout/stuck (best-effort placement near bin) — only
+        # hard-fail if we never moved at all (IK init error).
         success, _, reason = execute_stage(
             self.robot, self.world, "s4_transfer", ik_high_place, self.side,
-            step_size=0.030, max_steps=1200,
-            pos_tol=0.15, rot_tol=0.50,
-            timeout_sec=45.0)
-        if success: self.state = "S5_LOWER_BIN"
-        else: self._fail(f"s4_transfer_fail: {reason}")
+            step_size=0.030, max_steps=2000,
+            pos_tol=0.20, rot_tol=0.60,
+            timeout_sec=90.0)
+        if not success:
+            print(f"  [S4] ⚠ Transfer incomplete ({reason}) — proceeding best-effort to S5")
+        self.state = "S5_LOWER_BIN"
 
     def _state_s5_lower_bin(self):
         print("[FSM] State: S5_LOWER_BIN [z_down] -> lower straight to T_place")
-        # z_down orientation throughout — no singularity risk.
-        # High→pre_place first, then pre_place→place for finer control near bin.
+        # High→pre_place first, then pre_place→place.  Both are best-effort: even if
+        # the arm doesn't fully reach T_place, we still release the object so it falls
+        # into the bin (bin is open-top, release above bin is enough).
         success, err = move_interpolated(
             self.robot, self.world, self.T_high_place, self.T_pre_place,
             self.side, "s5_lower_pre",
-            num_steps=20, max_sim_steps=300, pos_tol=0.06, rot_tol=0.35)
-        if not success: return self._fail("collision_at_bin_pre")
+            num_steps=20, max_sim_steps=400, pos_tol=0.10, rot_tol=0.50)
+        if not success:
+            print("  [S5] Pre-lower stuck — releasing above bin (best-effort)")
+            self.state = "S6_RELEASE"
+            return
 
         success, err = move_interpolated(
             self.robot, self.world, self.T_pre_place, self.T_place,
             self.side, "s5_lower_final",
-            num_steps=15, max_sim_steps=300, pos_tol=0.020, rot_tol=0.35)
-        if success: self.state = "S6_RELEASE"
-        else: self._fail("collision_at_bin")
+            num_steps=15, max_sim_steps=400, pos_tol=0.030, rot_tol=0.50)
+        if not success:
+            print("  [S5] Final lower stuck — releasing at current position (best-effort)")
+        self.state = "S6_RELEASE"
 
     def _state_s6_release(self):
         print("[FSM] State: S6_RELEASE -> open gripper, release object")
