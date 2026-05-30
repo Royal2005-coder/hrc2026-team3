@@ -952,6 +952,12 @@ class PickAndPlaceStateMachine:
         if self.robot and self.world:
             self._grasp_joint = _create_grasp_joint(
                 self.world, self.robot, self.object_prim_path, self.side)
+            # FixedJoint addition triggers Isaac Sim physics rebuild which clears
+            # _physics_view on all Articulation instances. Reinitialize proactively
+            # so S3_LIFT does not hit AttributeError on get_joint_states().
+            if self._grasp_joint and hasattr(self.robot, '_reinitialize_physics'):
+                for _ in range(5): self.world.step(render=True)
+                self.robot._reinitialize_physics()
 
         if self._grasp_joint:
             print("  [S2] ✓ Grasp confirmed via joint attachment")

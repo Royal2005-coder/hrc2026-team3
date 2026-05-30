@@ -134,15 +134,51 @@ class RobotArticulation:
         if self._articulation is not None:
             self._articulation.cleanup()
 
+    def _reinitialize_physics(self) -> bool:
+        """Reinitialize articulation physics view after a USD stage change.
+
+        Creating a FixedJoint (or removing prims) during active simulation triggers an
+        Isaac Sim internal physics rebuild that clears _physics_view on all existing
+        Articulation instances. Call this to restore the handle without rebuilding
+        the full robot object.
+        """
+        if self._articulation is None:
+            return False
+        try:
+            self._articulation.initialize()
+            print("[Robot] Articulation physics view reinitialized.")
+            return True
+        except Exception as e:
+            print(f"[Robot] Articulation reinit failed: {e}")
+            return False
+
     def get_joint_states(self):
         if self._articulation is None:
             return None
-            
-        joint_names = self._articulation.dof_names
-        joint_positions = self._articulation.get_joint_positions().tolist()
-        joint_velocities = self._articulation.get_joint_velocities().tolist()
-        joint_efforts = self._articulation.get_measured_joint_efforts().tolist()
-        
+
+        try:
+            joint_names = self._articulation.dof_names
+            joint_positions = self._articulation.get_joint_positions().tolist()
+            joint_velocities = self._articulation.get_joint_velocities().tolist()
+            joint_efforts = self._articulation.get_measured_joint_efforts().tolist()
+        except AttributeError as e:
+            if "_physics_view" in str(e):
+                # Physics view was cleared by a stage mutation (e.g. FixedJoint added).
+                # Reinitialize and retry once.
+                print(f"[Robot] _physics_view missing in get_joint_states — reinitializing... ({e})")
+                if not self._reinitialize_physics():
+                    return None
+                try:
+                    joint_names = self._articulation.dof_names
+                    joint_positions = self._articulation.get_joint_positions().tolist()
+                    joint_velocities = self._articulation.get_joint_velocities().tolist()
+                    joint_efforts = self._articulation.get_measured_joint_efforts().tolist()
+                except Exception as retry_e:
+                    print(f"[Robot] get_joint_states retry failed: {retry_e}")
+                    return None
+            else:
+                raise
+
         return {
             'names': joint_names,
             'positions': joint_positions,
