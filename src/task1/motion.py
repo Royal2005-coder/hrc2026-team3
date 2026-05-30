@@ -63,6 +63,14 @@ def load_workspace_bounds_from_yaml(config_path: Path) -> dict:
 
 WORKSPACE_BOUNDS = load_workspace_bounds_from_yaml(Path("/home/ubuntu/thu/configs/planner.yaml"))
 
+# Bin world positions per part type [x, y, z] in Isaac Sim world frame.
+# PartA → box at y=+0.3 (from Part_Sorting.yaml box_position).
+# PartB → symmetric bin at y=−0.3.
+_PART_BIN_WORLD = {
+    "PartA": [1.2,  0.3, 1.05],
+    "PartB": [1.2, -0.3, 1.05],
+}
+
 def validate_position_in_workspace(position_m: list, bounds: dict = None) -> tuple:
     if bounds is None: bounds = WORKSPACE_BOUNDS
     x, y, z = position_m
@@ -405,40 +413,54 @@ def load_action_plans_from_scene(template_file: str = None) -> list:
             print("[SCENE_LOAD] No Replicator objects found — using JSON fallback")
             return template_plans
 
-        # If bin not found in stage, try task1_workpieces.json as second fallback
-        _workpieces_fallback_bin = None
-        if bin_base is None:
-            _wp_paths = [
-                Path(__file__).parent.parent.parent / "task1_workpieces.json",
-                Path("/home/ubuntu/thu/task1_workpieces.json"),
-                Path("task1_workpieces.json"),
-            ]
-            for _wp in _wp_paths:
-                if _wp.exists():
-                    try:
-                        import json as _json
-                        with open(_wp) as _f:
-                            _wdata = _json.load(_f)
-                        _bp_world = _wdata["workpieces"][0].get("bin_position", [[]])[0]
-                        if len(_bp_world) == 3:
-                            _bp_world = np.array(_bp_world, dtype=float)
-                            _workpieces_fallback_bin = _world_to_base(_bp_world).tolist()
-                            print(f"[SCENE_LOAD] Bin from {_wp.name}: "
-                                  f"world={_bp_world.tolist()} base={_workpieces_fallback_bin}")
-                    except Exception as _e:
-                        print(f"[SCENE_LOAD] workpieces fallback error: {_e}")
-                    break
+        # Load part type map from task1_workpieces.json (written by main_fixed.py after settle)
+        # Maps prim_path or prim_name → "PartA" | "PartB"
+        _type_map = {}
+        _wp_type_paths = [
+            Path(__file__).parent.parent.parent / "task1_workpieces.json",
+            Path("/home/ubuntu/thu/task1_workpieces.json"),
+            Path("task1_workpieces.json"),
+        ]
+        for _wp_t in _wp_type_paths:
+            if _wp_t.exists():
+                try:
+                    import json as _json
+                    with open(_wp_t) as _f:
+                        _wdata = _json.load(_f)
+                    for _w in _wdata.get("workpieces", []):
+                        _pp = _w.get("prim_path") or f"/Replicator/{_w.get('id', '')}"
+                        _tp = _w.get("type", "PartA")
+                        _type_map[_pp] = _tp
+                        if _w.get("id"):
+                            _type_map[_w["id"]] = _tp
+                    print(f"[SCENE_LOAD] Type map from {_wp_t.name}: "
+                          f"{ {k.split('/')[-1]: v for k, v in _type_map.items()} }")
+                except Exception as _e:
+                    print(f"[SCENE_LOAD] Type map error: {_e}")
+                break
 
         plans = []
         for idx, (path, w_obj, b_obj) in enumerate(obj_list):
             tmpl = template_plans[idx] if idx < len(template_plans) else {}
-            # Priority: stage scan > workpieces.json > template JSON > hardcoded default
-            if bin_base is not None:
-                bin_pos = bin_base.tolist()
-            elif _workpieces_fallback_bin is not None:
-                bin_pos = _workpieces_fallback_bin
+
+            # Determine part type: type map → index fallback (first half PartA, rest PartB)
+            prim_name = path.split("/")[-1]
+            part_type = _type_map.get(path) or _type_map.get(prim_name)
+            if part_type is None:
+                part_type = "PartA" if idx < max(len(obj_list) // 2, 1) else "PartB"
+                print(f"[SCENE_LOAD] {prim_name}: type unknown — index fallback → {part_type}")
             else:
-                bin_pos = tmpl.get("bin_pose_base", {}).get("position_m", [0.50, -0.50, 0.14])
+                print(f"[SCENE_LOAD] {prim_name}: type={part_type}")
+
+            # Bin position: use stage-scanned bin only for PartA (config has one physical box).
+            # PartB always goes to symmetric bin at y=−0.3.
+            if bin_base is not None and part_type == "PartA":
+                bin_pos = bin_base.tolist()
+            else:
+                _bin_world_typed = np.array(_PART_BIN_WORLD.get(part_type, _PART_BIN_WORLD["PartA"]))
+                bin_pos = _world_to_base(_bin_world_typed).tolist()
+            print(f"[SCENE_LOAD] {prim_name} [{part_type}] bin_base={[round(v,3) for v in bin_pos]}")
+
             bin_quat = tmpl.get("bin_pose_base", {}).get("quaternion_xyzw", [0, 0, 0, 1])
             obj_quat = tmpl.get("object_pose_base", {}).get("quaternion_xyzw", [0, 0, 0, 1])
             grasp_hint = dict(tmpl.get("grasp_hint", {}))
@@ -451,8 +473,8 @@ def load_action_plans_from_scene(template_file: str = None) -> list:
             plans.append({
                 "plan_id": tmpl.get("plan_id", f"plan_{idx+1:04d}"),
                 "primitive": "pick_place",
-                "object_id": tmpl.get("object_id", f"obj_{idx:03d}"),
-                "class_id": tmpl.get("class_id", "unknown"),
+                "object_id": tmpl.get("object_id", prim_name),
+                "class_id": part_type,
                 "prim_path": path,
                 "object_pose_base": {"position_m": b_obj.tolist(), "quaternion_xyzw": obj_quat},
                 "bin_pose_base":    {"position_m": bin_pos,         "quaternion_xyzw": bin_quat},

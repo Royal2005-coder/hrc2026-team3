@@ -77,8 +77,36 @@ print(f"[Init] 物理稳定完成 ({settle_time}s, {settle_steps} steps)")
 # ── 5. Query Part Poses ──────────────────────────────────────────────
 part_poses = scene.get_parts_world_poses()
 print(f"[Init] 查询到 {len(part_poses)} 个零件")
+
+# Bin world positions per part type (Isaac Sim world frame)
+_BIN_WORLD_BY_TYPE = {
+    "PartA": [1.2,  0.3, 1.05],   # from Part_Sorting.yaml box_position
+    "PartB": [1.2, -0.3, 1.05],   # symmetric bin for PartB
+}
+
+workpieces_out = {
+    "task_number": cfg.get("task_number", 1),
+    "total_workpieces": len(part_poses),
+    "workpieces": [],
+}
 for pp in part_poses:
-    print(f"  {pp['prim_path']}: pos={pp['position']}")
+    part_type = pp.get("type", "PartA")
+    prim_id = pp["prim_path"].split("/")[-1]
+    bin_world = _BIN_WORLD_BY_TYPE.get(part_type, _BIN_WORLD_BY_TYPE["PartA"])
+    workpieces_out["workpieces"].append({
+        "id": prim_id,
+        "prim_path": pp["prim_path"],
+        "type": part_type,
+        "position": pp["position"],
+        "quaternion": pp["orientation"],
+        "bin_position": [bin_world],
+    })
+    print(f"  {prim_id} [{part_type}] pos={pp['position']} → bin={bin_world}")
+
+_wp_json_path = os.path.join(os.path.dirname(__file__), '..', '..', 'task1_workpieces.json')
+with open(_wp_json_path, 'w') as _f:
+    json.dump(workpieces_out, _f, indent=2)
+print(f"[Init] task1_workpieces.json 已更新 ({len(part_poses)} 个零件，含类型+bin信息)")
 
 # ── 6. Robot ─────────────────────────────────────────────────────────
 print("[Init] 开始加载机器人...")

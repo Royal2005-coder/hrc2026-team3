@@ -190,6 +190,9 @@ class SceneBuilder:
             num_to_create = self.part_cfg.get('num_parts', 2) # 每种创建几个
 
             self.parts_list = []
+            # Track how many PartA created first so _extract_parts_prim_paths can assign types
+            self._num_parts_a = num_to_create
+            self._num_parts_b = num_to_create
 
             # 1. 为 Part A 随机选择资产并创建
             for i in range(num_to_create):
@@ -238,6 +241,10 @@ class SceneBuilder:
         self._rigid_body_paths = []
         self._parts_rigid_prims = []
         self._rigid_prims_initialized = False
+        self._parts_type_map = {}  # prim_path → "PartA" | "PartB"
+
+        num_a = getattr(self, '_num_parts_a', 0)
+        global_idx = 0
 
         for part_rep in self.parts_list:
             try:
@@ -249,12 +256,16 @@ class SceneBuilder:
                     for prim in prims_in:
                         path = str(prim.GetPath())
                         self.parts_prim_paths.append(path)
+                        # First num_a entries → PartA, rest → PartB
+                        self._parts_type_map[path] = "PartA" if global_idx < num_a else "PartB"
+                        global_idx += 1
             except Exception as e:
                 print(f"[SceneBuilder] 提取零件路径失败: {e}")
 
         # 永久保存初始路径，重置时复用
         self._initial_parts_prim_paths = list(self.parts_prim_paths)
         print(f"[SceneBuilder] 提取到 {len(self.parts_prim_paths)} 个零件路径: {self.parts_prim_paths}")
+        print(f"[SceneBuilder] 零件类型: { {p.split('/')[-1]: t for p, t in self._parts_type_map.items()} }")
 
     def _ensure_rigid_prims(self):
         """确保 SingleRigidPrim 缓存已创建（延迟初始化）。
@@ -343,6 +354,7 @@ class SceneBuilder:
                     'prim_path': prim_path,
                     'position': pos,
                     'orientation': [float(qi[0]), float(qi[1]), float(qi[2]), float(qr)],
+                    'type': getattr(self, '_parts_type_map', {}).get(prim_path, 'unknown'),
                 })
                 # Debug: print if position is still [0,0,0]
                 if abs(pos[0]) < 1e-6 and abs(pos[1]) < 1e-6 and abs(pos[2]) < 1e-6:
