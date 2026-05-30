@@ -247,35 +247,11 @@ def verify_grasp_success(robot, side, min_finger_gap_m: float = 0.004) -> bool:
         return True
 
 
-def _find_gripper_link(stage, robot_prim_path: str, side: str) -> str:
-    """Find the wrist/palm link prim path for the given arm side."""
-    prefix = side[0].upper()  # 'L' or 'R'
-    # Search robot subtree for wrist or finger prim
-    keywords_priority = [
-        f"{prefix}_wrist_roll_link", f"{prefix}_wrist_link",
-        f"{prefix}_palm_link", f"{prefix}_hand_link",
-        f"{prefix}_finger1_link", f"{prefix}_finger1",
-    ]
-    robot_root = stage.GetPrimAtPath(robot_prim_path)
-    if robot_root.IsValid():
-        for kw in keywords_priority:
-            full_path = f"{robot_prim_path}/{kw}"
-            if stage.GetPrimAtPath(full_path).IsValid():
-                return full_path
-    # Broad search
-    search_keywords = [f"{prefix}_wrist", f"{prefix}_finger1", f"{prefix}_palm", f"{prefix}_hand"]
-    for prim in stage.TraverseAll():
-        path = str(prim.GetPath())
-        if not path.startswith(robot_prim_path):
-            continue
-        for kw in search_keywords:
-            if kw.lower() in path.lower():
-                return path
-    return None
 
-
-def _create_grasp_joint(world, robot_prim_path: str, object_prim_path: str, side: str):
+def _create_grasp_joint(world, robot, object_prim_path: str, side: str):
     """Attach object to robot gripper via USD FixedJoint for reliable sim grasping.
+    Uses pre-cached gripper link path (set at initialize_ik time) to avoid
+    stage.TraverseAll during active simulation.
     Returns joint_path string on success, None on failure.
     """
     try:
@@ -283,9 +259,12 @@ def _create_grasp_joint(world, robot_prim_path: str, object_prim_path: str, side
         from isaacsim.core.utils.stage import get_current_stage
         stage = get_current_stage()
 
-        grip_link = _find_gripper_link(stage, robot_prim_path, side)
+        # Use cached gripper link (populated by initialize_ik at startup)
+        grip_link = None
+        if hasattr(robot, '_gripper_link_cache'):
+            grip_link = robot._gripper_link_cache.get(side)
         if grip_link is None:
-            print(f"  [GRASP_JOINT] ⚠ Gripper link not found for side={side} under {robot_prim_path}")
+            print(f"  [GRASP_JOINT] ⚠ No cached gripper link for side={side} — skip attachment")
             return None
 
         obj_prim = stage.GetPrimAtPath(object_prim_path)
@@ -294,7 +273,6 @@ def _create_grasp_joint(world, robot_prim_path: str, object_prim_path: str, side
             return None
 
         joint_path = f"{grip_link}/grasp_attach"
-        # Remove existing joint if any
         existing = stage.GetPrimAtPath(joint_path)
         if existing.IsValid():
             stage.RemovePrim(existing.GetPath())
@@ -948,10 +926,10 @@ class PickAndPlaceStateMachine:
             for _ in range(80): self.world.step(render=True)
 
         # Attach object via USD FixedJoint for reliable simulation grasping
-        robot_prim = getattr(self.robot, 'prim_path', None)
-        if robot_prim and self.world:
+        # Pass robot object (not prim_path) so cached gripper link is used
+        if self.robot and self.world:
             self._grasp_joint = _create_grasp_joint(
-                self.world, robot_prim, self.object_prim_path, self.side)
+                self.world, self.robot, self.object_prim_path, self.side)
 
         if self._grasp_joint:
             print("  [S2] ✓ Grasp confirmed via joint attachment")

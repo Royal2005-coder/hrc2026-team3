@@ -167,7 +167,19 @@ else:
 print("\n[Sim] Test completed successfully!")
 print("[Sim] - Scene initialized with robot and items ready")
 
-# Cleanup
+# Remove any lingering grasp_attach FixedJoints before shutdown
+try:
+    from isaacsim.core.utils.stage import get_current_stage
+    _stage = get_current_stage()
+    for _prim in list(_stage.TraverseAll()):
+        if _prim.GetName() == "grasp_attach":
+            _stage.RemovePrim(_prim.GetPath())
+except Exception:
+    pass
+
 world.pause()
 data_logger.close()
-print("[Sim] Cleanup complete")
+
+# Must call kit.close() before Python exits — otherwise OmniGraph atexit
+# handlers run on a dirty state and produce a segfault.
+kit.close()

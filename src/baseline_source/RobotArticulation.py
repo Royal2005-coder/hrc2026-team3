@@ -278,6 +278,38 @@ class RobotArticulation:
         right_neutral = [self._joint_value_map.get(j, 0.0) for j in DualArmIK.RIGHT_ARM_JOINTS]
         self.ik_solver.set_neutral_config(left_neutral, right_neutral)
 
+        # Cache gripper link prim paths now (safe at init time, avoids
+        # stage.TraverseAll during active simulation which can race OmniGraph)
+        self._gripper_link_cache = {}
+        try:
+            from isaacsim.core.utils.stage import get_current_stage as _gcs
+            _stage = _gcs()
+            for _side, _prefix in [('left', 'L'), ('right', 'R')]:
+                _candidates = [
+                    f"{self.prim_path}/{_prefix}_wrist_roll_link",
+                    f"{self.prim_path}/{_prefix}_wrist_link",
+                    f"{self.prim_path}/{_prefix}_palm_link",
+                    f"{self.prim_path}/{_prefix}_hand_link",
+                    f"{self.prim_path}/{_prefix}_finger1_link",
+                    f"{self.prim_path}/{_prefix}_finger1",
+                ]
+                for _c in _candidates:
+                    if _stage.GetPrimAtPath(_c).IsValid():
+                        self._gripper_link_cache[_side] = _c
+                        print(f"[DualArmIK] Gripper link ({_side}): {_c}")
+                        break
+                if _side not in self._gripper_link_cache:
+                    # Broad search — only at init time, safe to traverse
+                    _kw = f"{_prefix}_wrist", f"{_prefix}_finger1", f"{_prefix}_palm"
+                    for _p in _stage.TraverseAll():
+                        _path = str(_p.GetPath())
+                        if _path.startswith(self.prim_path) and any(_k in _path for _k in _kw):
+                            self._gripper_link_cache[_side] = _path
+                            print(f"[DualArmIK] Gripper link ({_side}) via scan: {_path}")
+                            break
+        except Exception as _e:
+            print(f"[DualArmIK] Gripper link cache error: {_e}")
+
         print(f"[DualArmIK] 初始化完成  左臂 {len(self._left_arm_isaac_indices)} DOF, "
               f"右臂 {len(self._right_arm_isaac_indices)} DOF, "
               f"腰部腿部锁定 {len(self._waist_legs_isaac_indices)} DOF")
