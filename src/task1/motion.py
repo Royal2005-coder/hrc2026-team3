@@ -595,15 +595,18 @@ def _matrix_to_base_ik(T: np.ndarray) -> list:
 
 def execute_stage(robot, world, stage_name, target_pose, gripper_side,
                   gripper_state="open", step_size=0.016, max_steps=2000,
-                  pos_tol=0.05, rot_tol=0.15, timeout_sec=60.0, verbose=True):
+                  pos_tol=0.05, rot_tol=0.15, timeout_sec=60.0, verbose=True,
+                  ik_pos_tol=0.005, ik_rot_tol=0.01):
     """[FIX #1] Tự check is_reached qua FK thay vì dựa vào return của control_dual_arm_ik.
-    
+
     Key insight: solver dùng tolerance chặt (5e-3) bên trong để converge sâu,
     còn mình check ở ngoài với tolerance lỏng hơn để break sớm khi đủ tốt.
+    ik_rot_tol: internal IK rotation tolerance — use 0.15-0.30 for transit stages
+    (S3/S4/S7) where exact orientation is not required. Default 0.01 for precision.
     """
     left_target = target_pose if gripper_side == "left" else None
     right_target = target_pose if gripper_side == "right" else None
-    
+
     start_time = time.time()
     steps = 0
     last_pos_err = None
@@ -620,8 +623,8 @@ def execute_stage(robot, world, stage_name, target_pose, gripper_side,
             step_size,
             left_target_xyzrpy=left_target,
             right_target_xyzrpy=right_target,
-            pos_tol=0.005,   # solver-internal tolerance (chặt)
-            rot_tol=0.01,
+            pos_tol=ik_pos_tol,
+            rot_tol=ik_rot_tol,
         )
         world.step(render=True)
         steps += 1
@@ -690,12 +693,13 @@ def execute_stage(robot, world, stage_name, target_pose, gripper_side,
 # Alias: execute_stage_fsm dùng cùng logic
 def execute_stage_fsm(robot, world, stage_name, target_pose, gripper_side,
                       step_size=0.016, max_steps=200, pos_tol=0.04, rot_tol=0.2,
-                      timeout_sec=60.0, verbose=True):
+                      timeout_sec=60.0, verbose=True, ik_rot_tol=0.01):
     """Wrapper for FSM state machine - same logic as execute_stage."""
     return execute_stage(robot, world, stage_name, target_pose, gripper_side,
                          step_size=step_size, max_steps=max_steps,
                          pos_tol=pos_tol, rot_tol=rot_tol,
-                         timeout_sec=timeout_sec, verbose=verbose)
+                         timeout_sec=timeout_sec, verbose=verbose,
+                         ik_rot_tol=ik_rot_tol)
 
 
 def _slerp_R(R0: np.ndarray, R1: np.ndarray, t: float) -> np.ndarray:
@@ -711,7 +715,8 @@ def move_interpolated(robot, world, T_start, T_end, side, stage_name,
                       pos_tol=0.08, rot_tol=0.20,
                       step_size=0.016,
                       writer=None, object_id="",
-                      interp_rotation=False) -> tuple:
+                      interp_rotation=False,
+                      ik_rot_tol=0.01) -> tuple:
     """Interpolate from T_start to T_end in Cartesian space.
 
     interp_rotation=True: SLERP rotation from T_start to T_end (for orientation transitions).
@@ -732,7 +737,8 @@ def move_interpolated(robot, world, T_start, T_end, side, stage_name,
         is_success, _, _ = execute_stage_fsm(
             robot, world, stage_name=f"{stage_name}_pt{i}", target_pose=ik_input_base,
             gripper_side=side, step_size=step_size,
-            max_steps=max_sim_steps, pos_tol=pos_tol, rot_tol=rot_tol, verbose=False
+            max_steps=max_sim_steps, pos_tol=pos_tol, rot_tol=rot_tol, verbose=False,
+            ik_rot_tol=ik_rot_tol,
         )
         if not is_success:
             print(f"  ✗ [{stage_name}] stuck at pt {i}/{num_steps}")
@@ -1079,6 +1085,12 @@ class PickAndPlaceStateMachine:
                         if positions and isinstance(positions[0], list):
                             positions = positions[0]
                         self.robot.ik_solver.sync_joint_positions(joints['names'], positions)
+                # Reset IK fail counters so S3 doesn't inherit a "continuously failing" state
+                if self.robot.ik_solver:
+                    if hasattr(self.robot.ik_solver, '_right_fail_count'):
+                        self.robot.ik_solver._right_fail_count = 0
+                    if hasattr(self.robot.ik_solver, '_left_fail_count'):
+                        self.robot.ik_solver._left_fail_count = 0
 
         if self._grasp_joint:
             print("  [S2] ✓ Grasp confirmed via joint attachment")
@@ -1100,28 +1112,29 @@ class PickAndPlaceStateMachine:
                     if positions and isinstance(positions[0], list):
                         positions = positions[0]
                     self.robot.ik_solver.sync_joint_positions(joints['names'], positions)
+                # Reset fail counters: S2 FixedJoint creation may leave counter elevated
+                if hasattr(self.robot.ik_solver, '_right_fail_count'):
+                    self.robot.ik_solver._right_fail_count = 0
+                if hasattr(self.robot.ik_solver, '_left_fail_count'):
+                    self.robot.ik_solver._left_fail_count = 0
             except Exception as _e:
                 print(f"  [S3] IK sync warning: {_e}")
         ik_high = _matrix_to_base_ik(self.T_high_approach)
+        # ik_rot_tol=0.15: lift is transit — exact z_down not needed, avoids warm-start resets
         success, _, reason = execute_stage(
             self.robot, self.world, "s3_lift", ik_high, self.side,
             step_size=0.025, max_steps=2000,
             pos_tol=0.10, rot_tol=0.50,
-            timeout_sec=20.0)
+            timeout_sec=20.0,
+            ik_rot_tol=0.15)
         if not success:
             print(f"  [S3] ⚠ Lift incomplete ({reason}) — proceeding anyway")
         self.state = "S4_TRANSFER"
 
     def _state_s4_transfer(self):
         print("[FSM] State: S4_TRANSFER [MoveJ] -> fly to bin (joint space)")
-        ik_high_place = _matrix_to_base_ik(self.T_high_place)
-        px, py, pz = ik_high_place[0], ik_high_place[1], ik_high_place[2]
-        print(f"  bin high-place target base: x={px:.3f}, y={py:.3f}, z={pz:.3f} "
-              f"| XY-reach={math.sqrt(px**2+py**2):.3f}m")
 
         # Sync IK warm-start to post-lift joint state and reset fail counters.
-        # Without this, the solver may revert to a neutral warm-start that is far
-        # from the current arm pose, causing IK to stall and S4 to time out.
         if self.robot and self.robot.ik_solver:
             try:
                 joints = self.robot.get_joint_states()
@@ -1137,14 +1150,36 @@ class PickAndPlaceStateMachine:
             if hasattr(self.robot.ik_solver, '_left_fail_count'):
                 self.robot.ik_solver._left_fail_count = 0
 
-        # pos_tol=0.20m: S4 is transit only; S5 does the precise descent.
-        # Proceed to S5 on timeout/stuck (best-effort placement near bin) — only
-        # hard-fail if we never moved at all (IK init error).
+        # Build transfer target: bin XY position + CURRENT arm orientation.
+        # z_down orientation at the bin position is often kinematically infeasible
+        # (rot_err stuck at π/2 for PartB bins), causing IK warm-start resets and
+        # S4 timeout. The object is held by FixedJoint so orientation during transit
+        # doesn't affect the grasp. S5 will re-approach with z_down.
+        ik_high_place = _matrix_to_base_ik(self.T_high_place)  # [x,y,z, roll,pitch,yaw]
+        if self.robot and self.robot.ik_solver:
+            try:
+                current_se3 = self.robot.ik_solver.get_ee_pose(self.side)
+                current_rpy = DualArmIK.se3_to_xyzrpy(current_se3)
+                ik_high_place[3] = float(current_rpy[3])  # roll
+                ik_high_place[4] = float(current_rpy[4])  # pitch
+                ik_high_place[5] = float(current_rpy[5])  # yaw
+                print(f"  [S4] Using current EE orientation (rpy={[round(float(v),3) for v in current_rpy[3:]]})")
+            except Exception as _e:
+                print(f"  [S4] Could not read current orientation ({_e}) — using z_down target")
+
+        px, py, pz = ik_high_place[0], ik_high_place[1], ik_high_place[2]
+        print(f"  bin high-place target base: x={px:.3f}, y={py:.3f}, z={pz:.3f} "
+              f"| XY-reach={math.sqrt(px**2+py**2):.3f}m")
+
+        # pos_tol=0.20m, rot_tol=1.50rad: S4 is transit only; S5 does the precise descent.
+        # ik_rot_tol=0.30: allow IK to accept orientations within 17° — avoids warm-start
+        # resets that freeze arm movement when exact orientation is unachievable.
         success, _, reason = execute_stage(
             self.robot, self.world, "s4_transfer", ik_high_place, self.side,
             step_size=0.030, max_steps=2000,
-            pos_tol=0.20, rot_tol=0.60,
-            timeout_sec=45.0)
+            pos_tol=0.20, rot_tol=1.50,
+            timeout_sec=45.0,
+            ik_rot_tol=0.30)
         if not success:
             print(f"  [S4] ⚠ Transfer incomplete ({reason}) — proceeding best-effort to S5")
         self.state = "S5_LOWER_BIN"
@@ -1154,10 +1189,13 @@ class PickAndPlaceStateMachine:
         # High→pre_place first, then pre_place→place.  Both are best-effort: even if
         # the arm doesn't fully reach T_place, we still release the object so it falls
         # into the bin (bin is open-top, release above bin is enough).
+        # interp_rotation=True + ik_rot_tol=0.15: S4 may have left arm with non-z_down
+        # orientation; SLERP gradually transitions to z_down as we descend.
         success, err = move_interpolated(
             self.robot, self.world, self.T_high_place, self.T_pre_place,
             self.side, "s5_lower_pre",
-            num_steps=20, max_sim_steps=150, pos_tol=0.10, rot_tol=0.50)
+            num_steps=20, max_sim_steps=150, pos_tol=0.10, rot_tol=0.50,
+            interp_rotation=True, ik_rot_tol=0.15)
         if not success:
             print("  [S5] Pre-lower stuck — releasing above bin (best-effort)")
             self.state = "S6_RELEASE"
@@ -1166,7 +1204,8 @@ class PickAndPlaceStateMachine:
         success, err = move_interpolated(
             self.robot, self.world, self.T_pre_place, self.T_place,
             self.side, "s5_lower_final",
-            num_steps=15, max_sim_steps=150, pos_tol=0.030, rot_tol=0.50)
+            num_steps=15, max_sim_steps=150, pos_tol=0.030, rot_tol=0.50,
+            ik_rot_tol=0.10)
         if not success:
             print("  [S5] Final lower stuck — releasing at current position (best-effort)")
         self.state = "S6_RELEASE"
@@ -1250,8 +1289,9 @@ class PickAndPlaceStateMachine:
         execute_stage(
             self.robot, self.world, "s7_retreat", ik_retreat, self.side,
             step_size=0.030, max_steps=1500,
-            pos_tol=0.12, rot_tol=0.50,
-            timeout_sec=12.0)
+            pos_tol=0.12, rot_tol=0.80,
+            timeout_sec=12.0,
+            ik_rot_tol=0.20)
         self.state = "VERIFY"  # luôn tiếp tục kể cả khi retreat không hoàn hảo
 
     def _state_verify(self):
