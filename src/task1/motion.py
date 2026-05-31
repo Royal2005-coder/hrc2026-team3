@@ -277,7 +277,7 @@ def _create_grasp_joint(world, robot, object_prim_path: str, side: str):
     Returns joint_path string on success, None on failure.
     """
     try:
-        from pxr import UsdPhysics, Sdf
+        from pxr import UsdPhysics, UsdGeom, Usd, Sdf, Gf
         from isaacsim.core.utils.stage import get_current_stage
         stage = get_current_stage()
 
@@ -302,6 +302,35 @@ def _create_grasp_joint(world, robot, object_prim_path: str, side: str):
         joint = UsdPhysics.FixedJoint.Define(stage, joint_path)
         joint.CreateBody0Rel().SetTargets([Sdf.Path(grip_link)])
         joint.CreateBody1Rel().SetTargets([Sdf.Path(object_prim_path)])
+
+        # Set joint local frames so the constraint already holds at current poses.
+        # Without this, USD physics sees "disjointed body transforms" (wrist and object
+        # are at different world positions) and SNAPS both bodies together — this
+        # violently jerks the arm out of its z_down grasp orientation, causing
+        # S3_LIFT to face rot_err≈1.0 rad and stall for the full timeout.
+        #
+        # Formula: L0=identity (joint frame at body0/wrist origin),
+        #          L1 = W0 × W1⁻¹  (wrist world transform expressed in object local frame)
+        # Verification: L0×W0 = W0  and  L1×W1 = (W0×W1⁻¹)×W1 = W0  → frames coincide ✓
+        try:
+            wrist_prim = stage.GetPrimAtPath(grip_link)
+            W0 = UsdGeom.Xformable(wrist_prim).ComputeLocalToWorldTransform(Usd.TimeCode.Default())
+            W1 = UsdGeom.Xformable(obj_prim).ComputeLocalToWorldTransform(Usd.TimeCode.Default())
+            L1 = W0 * W1.GetInverse()
+
+            t = L1.ExtractTranslation()
+            q = L1.ExtractRotationQuat()
+            im = q.GetImaginary()
+
+            joint.CreateLocalPos0Attr().Set(Gf.Vec3f(0.0, 0.0, 0.0))
+            joint.CreateLocalRot0Attr().Set(Gf.Quatf(1.0, Gf.Vec3f(0.0, 0.0, 0.0)))
+            joint.CreateLocalPos1Attr().Set(Gf.Vec3f(float(t[0]), float(t[1]), float(t[2])))
+            joint.CreateLocalRot1Attr().Set(Gf.Quatf(
+                float(q.GetReal()), Gf.Vec3f(float(im[0]), float(im[1]), float(im[2]))))
+            print(f"  [GRASP_JOINT] No-snap frames set: L1_t=({float(t[0]):.3f},{float(t[1]):.3f},{float(t[2]):.3f})")
+        except Exception as _fe:
+            print(f"  [GRASP_JOINT] ⚠ Could not set joint frames ({_fe}) — snap may occur")
+
         print(f"  [GRASP_JOINT] ✓ Attached: {object_prim_path} → {grip_link}")
         return joint_path
     except Exception as e:
