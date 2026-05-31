@@ -984,8 +984,8 @@ class PickAndPlaceStateMachine:
         success, err = move_interpolated(
             self.robot, self.world, self.T_pre_grasp, self.T_grasp,
             self.side, "s2_grasp_down",
-            num_steps=25, max_sim_steps=600, pos_tol=0.020, rot_tol=0.40,
-            step_size=0.008, interp_rotation=False)
+            num_steps=15, max_sim_steps=250, pos_tol=0.020, rot_tol=0.40,
+            step_size=0.015, interp_rotation=False)
         if not success: return self._fail("collision_on_grasp")
 
         # Settle + verify wrist Z before closing
@@ -1096,7 +1096,7 @@ class PickAndPlaceStateMachine:
         success, err = move_interpolated(
             self.robot, self.world, self.T_high_place, self.T_pre_place,
             self.side, "s5_lower_pre",
-            num_steps=20, max_sim_steps=400, pos_tol=0.10, rot_tol=0.50)
+            num_steps=20, max_sim_steps=150, pos_tol=0.10, rot_tol=0.50)
         if not success:
             print("  [S5] Pre-lower stuck — releasing above bin (best-effort)")
             self.state = "S6_RELEASE"
@@ -1105,7 +1105,7 @@ class PickAndPlaceStateMachine:
         success, err = move_interpolated(
             self.robot, self.world, self.T_pre_place, self.T_place,
             self.side, "s5_lower_final",
-            num_steps=15, max_sim_steps=400, pos_tol=0.030, rot_tol=0.50)
+            num_steps=15, max_sim_steps=150, pos_tol=0.030, rot_tol=0.50)
         if not success:
             print("  [S5] Final lower stuck — releasing at current position (best-effort)")
         self.state = "S6_RELEASE"
@@ -1115,6 +1115,19 @@ class PickAndPlaceStateMachine:
         if self._grasp_joint:
             _remove_grasp_joint(self.world, self._grasp_joint)
             self._grasp_joint = None
+            # Removing a FixedJoint triggers physics rebuild that clears _physics_view —
+            # same issue as after creating the joint in S2_GRASP. Reinitialize here too.
+            if self.world:
+                for _ in range(30): self.world.step(render=True)
+            if self.robot and hasattr(self.robot, '_reinitialize_physics'):
+                ok = self.robot._reinitialize_physics()
+                if ok and self.robot.ik_solver:
+                    joints = self.robot.get_joint_states()
+                    if joints:
+                        positions = joints['positions']
+                        if positions and isinstance(positions[0], list):
+                            positions = positions[0]
+                        self.robot.ik_solver.sync_joint_positions(joints['names'], positions)
             if self.world:
                 for _ in range(10): self.world.step(render=True)
         if self.robot: self.robot.open_gripper(side=self.side)
@@ -1319,7 +1332,16 @@ def run_pipeline_from_person2(action_plan_yaml: str = None, robot=None, world=No
             fsm = PickAndPlaceStateMachine(robot, world, plan, motion_specs,
                                            coord_transform, writer,
                                            remaining_plans=remaining)
-            result = fsm.run()
+            try:
+                result = fsm.run()
+            except Exception as _fsm_exc:
+                import traceback as _tb
+                print(f"❌ [FSM CRASH] {plan_id}: {_fsm_exc}")
+                _tb.print_exc()
+                result = PrimitiveResult(
+                    primitive_name="pick_place", success=False,
+                    elapsed_s=0.0, retry_count=0,
+                    failure_reason=f"fsm_crash: {_fsm_exc}", metrics={})
             
             if result.success:
                 final_event = PrimitiveEvent.SUCCESS
