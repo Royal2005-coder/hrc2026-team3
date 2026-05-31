@@ -65,11 +65,11 @@ def load_workspace_bounds_from_yaml(config_path: Path) -> dict:
 WORKSPACE_BOUNDS = load_workspace_bounds_from_yaml(Path("/home/ubuntu/thu/configs/planner.yaml"))
 
 # Bin world positions per part type [x, y, z] in Isaac Sim world frame.
-# PartA → box at y=+0.3 (from Part_Sorting.yaml box_position).
-# PartB → symmetric bin at y=−0.3.
+# Part_Sorting.yaml defines ONE physical box at [1.2, 0.3, 1.05].
+# Both PartA and PartB go to this same box; PartB is offset slightly within.
 _PART_BIN_WORLD = {
     "PartA": [1.2,  0.3, 1.05],
-    "PartB": [1.2, -0.3, 1.05],
+    "PartB": [1.1,  0.3, 1.05],  # same physical bin, slightly less reach (XY=0.640m)
 }
 
 def validate_position_in_workspace(position_m: list, bounds: dict = None) -> tuple:
@@ -495,8 +495,8 @@ def load_action_plans_from_scene(template_file: str = None) -> list:
             else:
                 print(f"[SCENE_LOAD] {prim_name}: type={part_type}")
 
-            # Bin position: use stage-scanned bin only for PartA (config has one physical box).
-            # PartB always goes to symmetric bin at y=−0.3.
+            # Bin position: use stage-scanned bin for PartA; _PART_BIN_WORLD for PartB.
+            # Both types target the same physical box; PartB uses a slightly less reach offset.
             if bin_base is not None and part_type == "PartA":
                 bin_pos = bin_base.tolist()
             else:
@@ -596,13 +596,19 @@ def _matrix_to_base_ik(T: np.ndarray) -> list:
 def execute_stage(robot, world, stage_name, target_pose, gripper_side,
                   gripper_state="open", step_size=0.016, max_steps=2000,
                   pos_tol=0.05, rot_tol=0.15, timeout_sec=60.0, verbose=True,
-                  ik_pos_tol=0.005, ik_rot_tol=0.01):
+                  ik_pos_tol=0.005, ik_rot_tol=0.01,
+                  ik_rot_weight=1.0, ik_null_weight=0.1, ik_max_iter=150):
     """[FIX #1] Tự check is_reached qua FK thay vì dựa vào return của control_dual_arm_ik.
 
     Key insight: solver dùng tolerance chặt (5e-3) bên trong để converge sâu,
     còn mình check ở ngoài với tolerance lỏng hơn để break sớm khi đủ tốt.
-    ik_rot_tol: internal IK rotation tolerance — use 0.15-0.30 for transit stages
-    (S3/S4/S7) where exact orientation is not required. Default 0.01 for precision.
+
+    ik_rot_weight: IK orientation weight (1.0=full, 0.01≈position-only). Lowering
+      this stops the solver wasting iterations on orientation, which is critical
+      for transit stages (S3/S4/S7) where exact orientation is irrelevant.
+    ik_null_weight: null-space pull toward neutral (0=disabled). Setting to 0 prevents
+      the solver from dragging the arm back to the neutral "hip" pose during transit.
+    ik_max_iter: IK iterations per call (default 150; use 300 for hard targets).
     """
     left_target = target_pose if gripper_side == "left" else None
     right_target = target_pose if gripper_side == "right" else None
@@ -625,6 +631,9 @@ def execute_stage(robot, world, stage_name, target_pose, gripper_side,
             right_target_xyzrpy=right_target,
             pos_tol=ik_pos_tol,
             rot_tol=ik_rot_tol,
+            rot_weight=ik_rot_weight,
+            null_weight=ik_null_weight,
+            max_iter=ik_max_iter,
         )
         world.step(render=True)
         steps += 1
@@ -693,13 +702,17 @@ def execute_stage(robot, world, stage_name, target_pose, gripper_side,
 # Alias: execute_stage_fsm dùng cùng logic
 def execute_stage_fsm(robot, world, stage_name, target_pose, gripper_side,
                       step_size=0.016, max_steps=200, pos_tol=0.04, rot_tol=0.2,
-                      timeout_sec=60.0, verbose=True, ik_rot_tol=0.01):
+                      timeout_sec=60.0, verbose=True, ik_rot_tol=0.01,
+                      ik_rot_weight=1.0, ik_null_weight=0.1, ik_max_iter=150):
     """Wrapper for FSM state machine - same logic as execute_stage."""
     return execute_stage(robot, world, stage_name, target_pose, gripper_side,
                          step_size=step_size, max_steps=max_steps,
                          pos_tol=pos_tol, rot_tol=rot_tol,
                          timeout_sec=timeout_sec, verbose=verbose,
-                         ik_rot_tol=ik_rot_tol)
+                         ik_rot_tol=ik_rot_tol,
+                         ik_rot_weight=ik_rot_weight,
+                         ik_null_weight=ik_null_weight,
+                         ik_max_iter=ik_max_iter)
 
 
 def _slerp_R(R0: np.ndarray, R1: np.ndarray, t: float) -> np.ndarray:
@@ -716,7 +729,8 @@ def move_interpolated(robot, world, T_start, T_end, side, stage_name,
                       step_size=0.016,
                       writer=None, object_id="",
                       interp_rotation=False,
-                      ik_rot_tol=0.01) -> tuple:
+                      ik_rot_tol=0.01,
+                      ik_rot_weight=1.0, ik_null_weight=0.1, ik_max_iter=150) -> tuple:
     """Interpolate from T_start to T_end in Cartesian space.
 
     interp_rotation=True: SLERP rotation from T_start to T_end (for orientation transitions).
@@ -739,6 +753,7 @@ def move_interpolated(robot, world, T_start, T_end, side, stage_name,
             gripper_side=side, step_size=step_size,
             max_steps=max_sim_steps, pos_tol=pos_tol, rot_tol=rot_tol, verbose=False,
             ik_rot_tol=ik_rot_tol,
+            ik_rot_weight=ik_rot_weight, ik_null_weight=ik_null_weight, ik_max_iter=ik_max_iter,
         )
         if not is_success:
             print(f"  ✗ [{stage_name}] stuck at pt {i}/{num_steps}")
@@ -1120,13 +1135,14 @@ class PickAndPlaceStateMachine:
             except Exception as _e:
                 print(f"  [S3] IK sync warning: {_e}")
         ik_high = _matrix_to_base_ik(self.T_high_approach)
-        # ik_rot_tol=0.15: lift is transit — exact z_down not needed, avoids warm-start resets
+        # rot_weight=0.3: prioritize position (lift height) over exact orientation.
+        # null_weight=0.0: disable pull toward neutral — stops arm from going to "hip" mid-lift.
         success, _, reason = execute_stage(
             self.robot, self.world, "s3_lift", ik_high, self.side,
-            step_size=0.025, max_steps=2000,
-            pos_tol=0.10, rot_tol=0.50,
-            timeout_sec=20.0,
-            ik_rot_tol=0.15)
+            step_size=0.025, max_steps=4000,
+            pos_tol=0.08, rot_tol=0.50,
+            timeout_sec=60.0,
+            ik_rot_tol=0.15, ik_rot_weight=0.3, ik_null_weight=0.0, ik_max_iter=300)
         if not success:
             print(f"  [S3] ⚠ Lift incomplete ({reason}) — proceeding anyway")
         self.state = "S4_TRANSFER"
@@ -1171,31 +1187,57 @@ class PickAndPlaceStateMachine:
         print(f"  bin high-place target base: x={px:.3f}, y={py:.3f}, z={pz:.3f} "
               f"| XY-reach={math.sqrt(px**2+py**2):.3f}m")
 
-        # pos_tol=0.20m, rot_tol=1.50rad: S4 is transit only; S5 does the precise descent.
-        # ik_rot_tol=0.30: allow IK to accept orientations within 17° — avoids warm-start
-        # resets that freeze arm movement when exact orientation is unachievable.
+        # pos_tol=0.08m: arm must be within 8cm of bin before S5 descends.
+        # ik_rot_weight=0.01: essentially position-only IK — orientation completely relaxed.
+        # ik_null_weight=0.0: disable null-space pull toward neutral (stops "arm goes to hip" behavior).
+        # ik_max_iter=300: more iterations per call to find solutions for hard configurations.
         success, _, reason = execute_stage(
             self.robot, self.world, "s4_transfer", ik_high_place, self.side,
-            step_size=0.030, max_steps=2000,
-            pos_tol=0.20, rot_tol=1.50,
-            timeout_sec=45.0,
-            ik_rot_tol=0.30)
+            step_size=0.030, max_steps=4000,
+            pos_tol=0.08, rot_tol=1.50,
+            timeout_sec=60.0,
+            ik_rot_tol=0.30, ik_rot_weight=0.01, ik_null_weight=0.0, ik_max_iter=300)
         if not success:
             print(f"  [S4] ⚠ Transfer incomplete ({reason}) — proceeding best-effort to S5")
         self.state = "S5_LOWER_BIN"
 
     def _state_s5_lower_bin(self):
         print("[FSM] State: S5_LOWER_BIN [z_down] -> lower straight to T_place")
-        # High→pre_place first, then pre_place→place.  Both are best-effort: even if
-        # the arm doesn't fully reach T_place, we still release the object so it falls
-        # into the bin (bin is open-top, release above bin is enough).
-        # interp_rotation=True + ik_rot_tol=0.15: S4 may have left arm with non-z_down
-        # orientation; SLERP gradually transitions to z_down as we descend.
+
+        # Use the ACTUAL current EE pose as T_start (not fixed T_high_place matrix).
+        # S4 may have left the arm slightly off from T_high_place; using the actual
+        # position lets the interpolation start from where the arm really is.
+        T_start_s5 = self.T_high_place.copy()  # fallback
+        if self.robot and self.robot.ik_solver:
+            try:
+                joints = self.robot.get_joint_states()
+                if joints:
+                    positions = joints['positions']
+                    if positions and isinstance(positions[0], list):
+                        positions = positions[0]
+                    self.robot.ik_solver.sync_joint_positions(joints['names'], positions)
+                ee_se3 = self.robot.ik_solver.get_ee_pose(self.side)
+                p_base = ee_se3.translation
+                R_base = ee_se3.rotation
+                p_world = np.array([-p_base[1] + 0.70, p_base[0] - 0.20, p_base[2] + 0.9005])
+                R_world = _R_W2B.T @ R_base
+                T_start_s5 = np.eye(4)
+                T_start_s5[:3, :3] = R_world
+                T_start_s5[:3, 3] = p_world
+                z_start = T_start_s5[2, 3]
+                z_target = self.T_pre_place[2, 3]
+                print(f"  [S5] Actual EE world Z={z_start:.3f}m → pre_place Z={z_target:.3f}m")
+            except Exception as _e:
+                print(f"  [S5] Cannot get current EE ({_e}) — using T_high_place as start")
+
+        # SLERP from current orientation to z_down as we descend.
+        # null_weight=0: keep arm in current configuration, don't drift back to neutral.
         success, err = move_interpolated(
-            self.robot, self.world, self.T_high_place, self.T_pre_place,
+            self.robot, self.world, T_start_s5, self.T_pre_place,
             self.side, "s5_lower_pre",
-            num_steps=20, max_sim_steps=150, pos_tol=0.10, rot_tol=0.50,
-            interp_rotation=True, ik_rot_tol=0.15)
+            num_steps=20, max_sim_steps=200, pos_tol=0.08, rot_tol=0.50,
+            interp_rotation=True, ik_rot_tol=0.12,
+            ik_rot_weight=0.5, ik_null_weight=0.0, ik_max_iter=300)
         if not success:
             print("  [S5] Pre-lower stuck — releasing above bin (best-effort)")
             self.state = "S6_RELEASE"
@@ -1204,8 +1246,8 @@ class PickAndPlaceStateMachine:
         success, err = move_interpolated(
             self.robot, self.world, self.T_pre_place, self.T_place,
             self.side, "s5_lower_final",
-            num_steps=15, max_sim_steps=150, pos_tol=0.030, rot_tol=0.50,
-            ik_rot_tol=0.10)
+            num_steps=15, max_sim_steps=200, pos_tol=0.025, rot_tol=0.40,
+            ik_rot_tol=0.08, ik_rot_weight=0.8, ik_null_weight=0.0, ik_max_iter=300)
         if not success:
             print("  [S5] Final lower stuck — releasing at current position (best-effort)")
         self.state = "S6_RELEASE"
@@ -1288,10 +1330,10 @@ class PickAndPlaceStateMachine:
                 pass
         execute_stage(
             self.robot, self.world, "s7_retreat", ik_retreat, self.side,
-            step_size=0.030, max_steps=1500,
-            pos_tol=0.12, rot_tol=0.80,
-            timeout_sec=12.0,
-            ik_rot_tol=0.20)
+            step_size=0.030, max_steps=3000,
+            pos_tol=0.10, rot_tol=0.80,
+            timeout_sec=30.0,
+            ik_rot_tol=0.20, ik_rot_weight=0.2, ik_null_weight=0.0, ik_max_iter=300)
         self.state = "VERIFY"  # luôn tiếp tục kể cả khi retreat không hoàn hảo
 
     def _state_verify(self):

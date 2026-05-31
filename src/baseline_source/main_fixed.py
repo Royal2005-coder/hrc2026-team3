@@ -79,7 +79,7 @@ print(f"[Init] Found {len(part_poses)} parts:")
 
 _BIN_WORLD_BY_TYPE = {
     "PartA": [1.2,  0.3, 1.05],   # from Part_Sorting.yaml box_position
-    "PartB": [1.2, -0.3, 1.05],   # symmetric target position for PartB
+    "PartB": [1.1,  0.3, 1.05],   # same physical bin, slightly less reach
 }
 
 workpieces_out = {
