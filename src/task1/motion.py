@@ -1051,6 +1051,17 @@ class PickAndPlaceStateMachine:
 
     def _state_s3_lift(self):
         print("[FSM] State: S3_LIFT [MoveJ] -> raise to SAFE_FLY_HEIGHT (joint space)")
+        # Sync IK warm-start to post-grasp joint state (physics may have reinitialized in S2)
+        if self.robot and self.robot.ik_solver:
+            try:
+                joints = self.robot.get_joint_states()
+                if joints:
+                    positions = joints['positions']
+                    if positions and isinstance(positions[0], list):
+                        positions = positions[0]
+                    self.robot.ik_solver.sync_joint_positions(joints['names'], positions)
+            except Exception as _e:
+                print(f"  [S3] IK sync warning: {_e}")
         ik_high = _matrix_to_base_ik(self.T_high_approach)
         success, _, reason = execute_stage(
             self.robot, self.world, "s3_lift", ik_high, self.side,
@@ -1068,10 +1079,19 @@ class PickAndPlaceStateMachine:
         print(f"  bin high-place target base: x={px:.3f}, y={py:.3f}, z={pz:.3f} "
               f"| XY-reach={math.sqrt(px**2+py**2):.3f}m")
 
-        # Reset IK warm-start fail counter so the solver uses the post-S3_LIFT joint
-        # config as warm-start instead of reverting to neutral (which is far from the
-        # diagonal bin approach position and causes repeated IK failures).
+        # Sync IK warm-start to post-lift joint state and reset fail counters.
+        # Without this, the solver may revert to a neutral warm-start that is far
+        # from the current arm pose, causing IK to stall and S4 to time out.
         if self.robot and self.robot.ik_solver:
+            try:
+                joints = self.robot.get_joint_states()
+                if joints:
+                    positions = joints['positions']
+                    if positions and isinstance(positions[0], list):
+                        positions = positions[0]
+                    self.robot.ik_solver.sync_joint_positions(joints['names'], positions)
+            except Exception as _e:
+                print(f"  [S4] IK sync warning: {_e}")
             if hasattr(self.robot.ik_solver, '_right_fail_count'):
                 self.robot.ik_solver._right_fail_count = 0
             if hasattr(self.robot.ik_solver, '_left_fail_count'):
@@ -1084,7 +1104,7 @@ class PickAndPlaceStateMachine:
             self.robot, self.world, "s4_transfer", ik_high_place, self.side,
             step_size=0.030, max_steps=2000,
             pos_tol=0.20, rot_tol=0.60,
-            timeout_sec=90.0)
+            timeout_sec=45.0)
         if not success:
             print(f"  [S4] ⚠ Transfer incomplete ({reason}) — proceeding best-effort to S5")
         self.state = "S5_LOWER_BIN"
@@ -1116,36 +1136,49 @@ class PickAndPlaceStateMachine:
         if self._grasp_joint:
             _remove_grasp_joint(self.world, self._grasp_joint)
             self._grasp_joint = None
-            # Let physics fully propagate the joint removal before touching the gripper.
             if self.world:
-                for _ in range(60): self.world.step(render=True)
+                for _ in range(30): self.world.step(render=True)
+            # Joint removal triggers Isaac Sim physics rebuild (same as joint creation in S2),
+            # clearing _physics_view. Reinit proactively so set_joint_positions has a valid
+            # physics view — without this, the call silently fails and gripper stays closed.
+            if self.robot and hasattr(self.robot, '_reinitialize_physics'):
+                self.robot._reinitialize_physics()
+            if self.world:
+                for _ in range(30): self.world.step(render=True)
+
+        def _try_teleport_open():
+            dof_names = self.robot._articulation.dof_names
+            prefix = "L" if self.side == "left" else "R"
+            f_names = [f"{prefix}_finger1_joint", f"{prefix}_finger2_joint"]
+            f_idx = [self.robot._articulation.get_dof_index(n)
+                     for n in f_names if n in dof_names]
+            if not f_idx:
+                print(f"  [S6] ⚠ No {prefix} finger joints found in DOF list")
+                return False
+            open_w = getattr(self.robot, 'gripper_open_width', -0.0215)
+            self.robot._articulation.set_joint_positions(
+                torch.tensor([[open_w] * len(f_idx)], dtype=torch.float32),
+                joint_indices=torch.tensor(f_idx, dtype=torch.int32)
+            )
+            print(f"  [S6] ✓ Gripper teleported open: {f_names} → {open_w:.4f}m")
+            return True
 
         # Primary: set_joint_positions teleports fingers directly — bypasses PD drive
         # so it works even if apply_action/drive stiffness is unreliable after reinit.
         _opened = False
         if self.robot and self.robot._articulation:
             try:
-                dof_names = self.robot._articulation.dof_names
-                prefix = "L" if self.side == "left" else "R"
-                f_names = [f"{prefix}_finger1_joint", f"{prefix}_finger2_joint"]
-                f_idx = [self.robot._articulation.get_dof_index(n)
-                         for n in f_names if n in dof_names]
-                if f_idx:
-                    open_w = getattr(self.robot, 'gripper_open_width', -0.0215)
-                    self.robot._articulation.set_joint_positions(
-                        torch.tensor([[open_w] * len(f_idx)], dtype=torch.float32),
-                        joint_indices=torch.tensor(f_idx, dtype=torch.int32)
-                    )
-                    print(f"  [S6] ✓ Gripper teleported open: {f_names} → {open_w:.4f}m")
-                    _opened = True
-                else:
-                    print(f"  [S6] ⚠ No {prefix} finger joints found in DOF list")
+                _opened = _try_teleport_open()
             except AttributeError as _ae:
                 if "_physics_view" in str(_ae) and hasattr(self.robot, '_reinitialize_physics'):
-                    print(f"  [S6] _physics_view missing — reinitializing before open...")
+                    print(f"  [S6] _physics_view still missing — reinitializing again...")
                     self.robot._reinitialize_physics()
                     if self.world:
                         for _ in range(30): self.world.step(render=True)
+                    try:
+                        _opened = _try_teleport_open()
+                    except Exception as _retry_e:
+                        print(f"  [S6] set_joint_positions still failed after reinit: {_retry_e}")
                 else:
                     print(f"  [S6] set_joint_positions AttributeError: {_ae}")
             except Exception as _e:
