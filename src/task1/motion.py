@@ -7,6 +7,7 @@ import yaml
 import sys
 import time
 import types
+import torch
 from pathlib import Path
 from enum import Enum
 from collections import namedtuple
@@ -1115,22 +1116,44 @@ class PickAndPlaceStateMachine:
         if self._grasp_joint:
             _remove_grasp_joint(self.world, self._grasp_joint)
             self._grasp_joint = None
-            # Removing a FixedJoint triggers physics rebuild that clears _physics_view —
-            # same issue as after creating the joint in S2_GRASP. Reinitialize here too.
+            # Let physics fully propagate the joint removal before touching the gripper.
             if self.world:
-                for _ in range(30): self.world.step(render=True)
-            if self.robot and hasattr(self.robot, '_reinitialize_physics'):
-                ok = self.robot._reinitialize_physics()
-                if ok and self.robot.ik_solver:
-                    joints = self.robot.get_joint_states()
-                    if joints:
-                        positions = joints['positions']
-                        if positions and isinstance(positions[0], list):
-                            positions = positions[0]
-                        self.robot.ik_solver.sync_joint_positions(joints['names'], positions)
-            if self.world:
-                for _ in range(10): self.world.step(render=True)
-        if self.robot: self.robot.open_gripper(side=self.side)
+                for _ in range(60): self.world.step(render=True)
+
+        # Primary: set_joint_positions teleports fingers directly — bypasses PD drive
+        # so it works even if apply_action/drive stiffness is unreliable after reinit.
+        _opened = False
+        if self.robot and self.robot._articulation:
+            try:
+                dof_names = self.robot._articulation.dof_names
+                prefix = "L" if self.side == "left" else "R"
+                f_names = [f"{prefix}_finger1_joint", f"{prefix}_finger2_joint"]
+                f_idx = [self.robot._articulation.get_dof_index(n)
+                         for n in f_names if n in dof_names]
+                if f_idx:
+                    open_w = getattr(self.robot, 'gripper_open_width', -0.0215)
+                    self.robot._articulation.set_joint_positions(
+                        torch.tensor([[open_w] * len(f_idx)], dtype=torch.float32),
+                        joint_indices=torch.tensor(f_idx, dtype=torch.int32)
+                    )
+                    print(f"  [S6] ✓ Gripper teleported open: {f_names} → {open_w:.4f}m")
+                    _opened = True
+                else:
+                    print(f"  [S6] ⚠ No {prefix} finger joints found in DOF list")
+            except AttributeError as _ae:
+                if "_physics_view" in str(_ae) and hasattr(self.robot, '_reinitialize_physics'):
+                    print(f"  [S6] _physics_view missing — reinitializing before open...")
+                    self.robot._reinitialize_physics()
+                    if self.world:
+                        for _ in range(30): self.world.step(render=True)
+                else:
+                    print(f"  [S6] set_joint_positions AttributeError: {_ae}")
+            except Exception as _e:
+                print(f"  [S6] set_joint_positions error: {_e}")
+
+        # Backup: PD drive via open_gripper API
+        if self.robot:
+            self.robot.open_gripper(side=self.side)
         if self.world:
             for _ in range(60): self.world.step(render=True)
         self.state = "S7_RETREAT"
