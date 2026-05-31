@@ -608,8 +608,12 @@ def execute_stage(robot, world, stage_name, target_pose, gripper_side,
     steps = 0
     last_pos_err = None
     stuck_counter = 0
+    stall_counter = 0   # counts checks where improvement exists but is too slow to matter
     check_interval = 5  # check FK mỗi 5 steps
-    
+    # Minimum useful improvement per check (5 steps). Below this the arm is "stalled":
+    # making progress in principle but will never reach the goal before timeout.
+    MIN_USEFUL_RATE = 2e-3
+
     while steps < max_steps:
         # Gọi controller — apply_action xảy ra bên trong, ignore return value
         robot.control_dual_arm_ik(
@@ -622,7 +626,7 @@ def execute_stage(robot, world, stage_name, target_pose, gripper_side,
         world.step(render=True)
         steps += 1
         elapsed = time.time() - start_time
-        
+
         # Tự check is_reached qua FK
         if steps % check_interval == 0:
             result = _check_reached_via_fk(robot, target_pose, gripper_side, pos_tol, rot_tol)
@@ -631,30 +635,37 @@ def execute_stage(robot, world, stage_name, target_pose, gripper_side,
             else:
                 is_reached = result
                 pos_err, rot_err = None, None
-            
+
             if is_reached:
                 settle_frames = 10 if verbose else 1
                 for _ in range(settle_frames): world.step(render=True)
-                if verbose: 
+                if verbose:
                     print(f"  ✓ [{stage_name}] reached in {steps} steps "
                           f"(pos_err={pos_err:.4f}m, rot_err={rot_err:.4f}rad)" if pos_err is not None
                           else f"  ✓ [{stage_name}] reached in {steps} steps")
                 return True, elapsed, None
-            
-            # Detect stuck: pos_err không giảm trong nhiều check liên tiếp
+
+            # Detect stuck/stall: exit early rather than waiting for full timeout.
             if pos_err is not None:
-                if last_pos_err is not None and abs(last_pos_err - pos_err) < 1e-4:
-                    stuck_counter += 1
+                improvement = (last_pos_err - pos_err) if last_pos_err is not None else MIN_USEFUL_RATE
+                if last_pos_err is not None and abs(improvement) < 1e-4:
+                    stuck_counter += 1   # no movement at all
                 else:
                     stuck_counter = 0
+                # Stall: improvement exists but below useful rate and still outside tolerance
+                if last_pos_err is not None and pos_err > pos_tol and improvement < MIN_USEFUL_RATE:
+                    stall_counter += 1
+                else:
+                    stall_counter = 0
                 last_pos_err = pos_err
 
-                # Exit sớm khi arm bị stuck thật sự (300 steps không cải thiện)
-                if stuck_counter > 60:
+                # Exit on stuck (300 steps no change) or stall (400 steps slow crawl)
+                if stuck_counter > 60 or stall_counter > 80:
+                    reason_out = "stuck" if stuck_counter > 60 else "stalled"
                     if verbose:
-                        print(f"  ✗ [{stage_name}] STUCK at step {steps} "
-                              f"(pos_err={pos_err:.4f}m, rot_err={rot_err:.4f}rad — no improvement)")
-                    return False, elapsed, "stuck"
+                        print(f"  ✗ [{stage_name}] {reason_out.upper()} at step {steps} "
+                              f"(pos_err={pos_err:.4f}m, rot_err={rot_err:.4f}rad)")
+                    return False, elapsed, reason_out
 
                 # Log progress every 50 steps
                 if verbose and steps % 50 == 0:
@@ -1096,7 +1107,7 @@ class PickAndPlaceStateMachine:
             self.robot, self.world, "s3_lift", ik_high, self.side,
             step_size=0.025, max_steps=2000,
             pos_tol=0.10, rot_tol=0.50,
-            timeout_sec=60.0)
+            timeout_sec=20.0)
         if not success:
             print(f"  [S3] ⚠ Lift incomplete ({reason}) — proceeding anyway")
         self.state = "S4_TRANSFER"
@@ -1166,14 +1177,14 @@ class PickAndPlaceStateMachine:
             _remove_grasp_joint(self.world, self._grasp_joint)
             self._grasp_joint = None
             if self.world:
-                for _ in range(30): self.world.step(render=True)
+                for _ in range(15): self.world.step(render=True)
             # Joint removal triggers Isaac Sim physics rebuild (same as joint creation in S2),
             # clearing _physics_view. Reinit proactively so set_joint_positions has a valid
             # physics view — without this, the call silently fails and gripper stays closed.
             if self.robot and hasattr(self.robot, '_reinitialize_physics'):
                 self.robot._reinitialize_physics()
             if self.world:
-                for _ in range(30): self.world.step(render=True)
+                for _ in range(15): self.world.step(render=True)
 
         def _try_teleport_open():
             dof_names = self.robot._articulation.dof_names
@@ -1217,17 +1228,30 @@ class PickAndPlaceStateMachine:
         if self.robot:
             self.robot.open_gripper(side=self.side)
         if self.world:
-            for _ in range(60): self.world.step(render=True)
+            for _ in range(30): self.world.step(render=True)
         self.state = "S7_RETREAT"
 
     def _state_s7_retreat(self):
         print("[FSM] State: S7_RETREAT [MoveJ] -> raise back to SAFE_FLY_HEIGHT (joint space)")
-        ik_retreat = _matrix_to_base_ik(self.T_high_place)
+        # Retreat to T_high_approach (above original object, always reachable since S3 visited it).
+        # Avoid T_high_place (above bin): for bins near/at workspace limit the IK fails completely
+        # and stalls for the full timeout — adding 45s of dead time per plan.
+        ik_retreat = _matrix_to_base_ik(self.T_high_approach)
+        if self.robot and self.robot.ik_solver:
+            try:
+                joints = self.robot.get_joint_states()
+                if joints:
+                    positions = joints['positions']
+                    if positions and isinstance(positions[0], list):
+                        positions = positions[0]
+                    self.robot.ik_solver.sync_joint_positions(joints['names'], positions)
+            except Exception:
+                pass
         execute_stage(
             self.robot, self.world, "s7_retreat", ik_retreat, self.side,
             step_size=0.030, max_steps=1500,
-            pos_tol=0.12, rot_tol=0.40,
-            timeout_sec=45.0)
+            pos_tol=0.12, rot_tol=0.50,
+            timeout_sec=12.0)
         self.state = "VERIFY"  # luôn tiếp tục kể cả khi retreat không hoàn hảo
 
     def _state_verify(self):
