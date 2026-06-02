@@ -1024,6 +1024,14 @@ class PickAndPlaceStateMachine:
         # converges to a local minimum where position is correct but wrist stays
         # horizontal (gripper pointing sideways) instead of pointing straight down.
         # Teleporting the physical joint seeds the warm-start so IK stays in z_down.
+        #
+        # Also patch IK solver's q_initial and q_neutral:
+        #   - q_initial: used by _reset_arm_warmstart() when IK fails 30× in a row.
+        #     Without this patch, the reset puts wrist back to 0 → arm flips horizontal
+        #     after ~1 second (the symptom the user observed).
+        #   - q_neutral: used by null-space optimization to pull joints toward "resting".
+        #     Without this patch, null-space pulls wrist back toward 0 whenever
+        #     null_weight > 0.
         _prefix = "R" if self.side == "right" else "L"
         _wp_name = f"{_prefix}_wrist_pitch_joint"
         if self.robot and self.robot._articulation:
@@ -1039,6 +1047,28 @@ class PickAndPlaceStateMachine:
                     for _ in range(10):
                         self.world.step(render=True)
                     print(f"  [S1] Wrist {_wp_name} pre-bent to z_down ({-math.pi/2:.3f} rad)")
+
+                    # Patch IK solver references so resets/null-space preserve z_down
+                    if self.robot.ik_solver:
+                        try:
+                            from DualArmIK import DualArmIK as _DAIK
+                            # (a) q_initial: so _reset_arm_warmstart() resets to wrist=-π/2
+                            if self.robot.ik_solver.q_initial is not None:
+                                _jid = self.robot.ik_solver.model.getJointId(_wp_name)
+                                _q_wp = self.robot.ik_solver.model.joints[_jid].idx_q
+                                self.robot.ik_solver.q_initial[_q_wp] = -math.pi / 2
+                            # (b) q_neutral: so null-space pull targets z_down not horizontal
+                            _arm_joints = (_DAIK.RIGHT_ARM_JOINTS if self.side == 'right'
+                                           else _DAIK.LEFT_ARM_JOINTS)
+                            if _wp_name in _arm_joints:
+                                _arm_idx = _arm_joints.index(_wp_name)
+                                _q_neu = (self.robot.ik_solver.q_neutral_right if self.side == 'right'
+                                          else self.robot.ik_solver.q_neutral_left)
+                                if _q_neu is not None:
+                                    _q_neu[_arm_idx] = -math.pi / 2
+                            print(f"  [S1] IK q_initial & q_neutral patched to z_down ({self.side})")
+                        except Exception as _qe:
+                            print(f"  [S1] IK warm-start patch failed: {_qe}")
                 except Exception as _e:
                     print(f"  [S1] Wrist pre-bend failed ({_e}) — IK may not achieve z_down")
 
@@ -1085,11 +1115,12 @@ class PickAndPlaceStateMachine:
             print(f"  [S1/P1] Primary arm '{self.side}' failed ({err1}). Trying '{alt_side}'...")
             if self.robot:
                 self.robot.open_gripper(side=alt_side)
-            # Pre-bend alt_side wrist to z_down as well
+            # Pre-bend alt_side wrist + patch IK references (same fix as primary side)
             _alt_wp_name = f"{'R' if alt_side == 'right' else 'L'}_wrist_pitch_joint"
             if self.robot and self.robot._articulation and _alt_wp_name in self.robot._articulation.dof_names:
                 try:
                     import torch as _torch
+                    from DualArmIK import DualArmIK as _DAIK
                     _alt_wp_idx = self.robot._articulation.get_dof_index(_alt_wp_name)
                     self.robot._articulation.set_joint_positions(
                         _torch.tensor([[-math.pi / 2]], dtype=_torch.float32),
@@ -1097,6 +1128,19 @@ class PickAndPlaceStateMachine:
                     )
                     for _ in range(5):
                         self.world.step(render=True)
+                    if self.robot.ik_solver:
+                        if self.robot.ik_solver.q_initial is not None:
+                            _ajid = self.robot.ik_solver.model.getJointId(_alt_wp_name)
+                            _aq_wp = self.robot.ik_solver.model.joints[_ajid].idx_q
+                            self.robot.ik_solver.q_initial[_aq_wp] = -math.pi / 2
+                        _a_joints = (_DAIK.RIGHT_ARM_JOINTS if alt_side == 'right'
+                                     else _DAIK.LEFT_ARM_JOINTS)
+                        if _alt_wp_name in _a_joints:
+                            _ai = _a_joints.index(_alt_wp_name)
+                            _aq_neu = (self.robot.ik_solver.q_neutral_right if alt_side == 'right'
+                                       else self.robot.ik_solver.q_neutral_left)
+                            if _aq_neu is not None:
+                                _aq_neu[_ai] = -math.pi / 2
                 except Exception:
                     pass
             success_alt, err_alt = move_interpolated(
