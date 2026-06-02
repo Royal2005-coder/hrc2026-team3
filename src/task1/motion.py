@@ -1257,15 +1257,14 @@ class PickAndPlaceStateMachine:
         if self._grasp_joint:
             _remove_grasp_joint(self.world, self._grasp_joint)
             self._grasp_joint = None
+            # Joint removal triggers physics rebuild; 3 frames is enough for the scene
+            # graph to stabilize before reinit — no need for a long settle here.
             if self.world:
-                for _ in range(15): self.world.step(render=True)
-            # Joint removal triggers Isaac Sim physics rebuild (same as joint creation in S2),
-            # clearing _physics_view. Reinit proactively so set_joint_positions has a valid
-            # physics view — without this, the call silently fails and gripper stays closed.
+                for _ in range(3): self.world.step(render=True)
             if self.robot and hasattr(self.robot, '_reinitialize_physics'):
                 self.robot._reinitialize_physics()
             if self.world:
-                for _ in range(15): self.world.step(render=True)
+                for _ in range(3): self.world.step(render=True)
 
         def _try_teleport_open():
             dof_names = self.robot._articulation.dof_names
@@ -1295,7 +1294,7 @@ class PickAndPlaceStateMachine:
                     print(f"  [S6] _physics_view still missing — reinitializing again...")
                     self.robot._reinitialize_physics()
                     if self.world:
-                        for _ in range(30): self.world.step(render=True)
+                        for _ in range(5): self.world.step(render=True)
                     try:
                         _opened = _try_teleport_open()
                     except Exception as _retry_e:
@@ -1308,8 +1307,10 @@ class PickAndPlaceStateMachine:
         # Backup: PD drive via open_gripper API
         if self.robot:
             self.robot.open_gripper(side=self.side)
+        # Teleport already opened the fingers instantly; 5 frames lets physics
+        # register the new finger positions before S7 starts moving the arm.
         if self.world:
-            for _ in range(30): self.world.step(render=True)
+            for _ in range(5): self.world.step(render=True)
         self.state = "S7_RETREAT"
 
     def _state_s7_retreat(self):
