@@ -895,34 +895,44 @@ class PickAndPlaceStateMachine:
             if np.allclose(tcp_offset, [0, 0, 0]):
                 print(f"[FSM] Warning: TCP offset is zero (default) - gripper may not touch target!")
 
-            # z_down approach for both grasp and place — avoids diagonal_45 singularities
-            # tcp_z: distance from sixforce_link (EE frame) to fingertip along tool-Z (downward).
-            # Config tcp_offset=[0,0,0] means no override → use measured 0.13m default.
-            # Tune this if the gripper is consistently above (increase) or below (decrease) target.
-            tcp_z = float(tcp_offset[2]) if tcp_offset[2] > 0.01 else 0.13
-            print(f"[FSM] z_down approach: tcp_z={tcp_z:.3f}m")
+            # tcp_z: distance from sixforce_link (EE) to fingertip along tool-Z.
+            tcp_z = float(tcp_offset[2]) if tcp_offset[2] > 0.01 else 0.22
+            print(f"[FSM] tcp_z={tcp_z:.3f}m")
 
-            Z_DOWN_R = _make_diagonal_R(0)  # z_down rotation: tool-Z = [0,0,-1] in world
+            Z_DOWN_R = _make_diagonal_R(0)  # z_down: tool-Z=[0,0,-1]; kept for bin-place targets
             app_offset = self.specs.get("approach_offset_m", 0.08)
             Z_OFFSET = self.specs.get("grasp_z_offset_m", 0.0)
-            # SAFE_FLY_HEIGHT must clear both the grasped object AND the bin top wall.
-            # Box scale Z=0.36 → half-height=0.18m, box center z=1.05 → top≈1.23m.
-            # Use 1.40m to give ≥17cm clearance over the bin opening.
             SAFE_FLY_HEIGHT = 1.40
 
-            # GRASP: wrist directly above fingertip target, z_down orientation
-            # wrist_z = obj_z + tcp_z + Z_OFFSET  →  fingertip_z = obj_z + Z_OFFSET
+            # Choose grasp orientation based on wrist XY reach to object.
+            # z_down reach limit ≈ 0.46m. Objects in the scatter area (world_y up to 0.30m)
+            # land at base_x = world_y + 0.20 ≈ 0.50m — past the limit — causing the IK to
+            # find an elbow-up solution (joints 1&2 at limit, joint 3 past 90°) that cannot
+            # descend to grasp. diagonal_45 tilts tool-Z to [0,+0.707,-0.707], moving the
+            # wrist 0.707*tcp_z ≈ 0.156m closer to the robot body, cutting XY reach to ~0.34m.
+            _obj_base_x = world_obj[1] + 0.20   # base_x = world_y + 0.20
+            _obj_base_y = -world_obj[0] + 0.70  # base_y = -world_x + 0.70
+            _obj_xy_reach = math.sqrt(_obj_base_x**2 + _obj_base_y**2)
+            tilt_deg = 45 if _obj_xy_reach > 0.44 else 0
+            print(f"[FSM] Object base XY reach={_obj_xy_reach:.3f}m "
+                  f"→ {'diagonal_45' if tilt_deg else 'z_down'} grasp approach")
+            APPROACH_R = _make_diagonal_R(tilt_deg)
+            tool_Z_dir = APPROACH_R[:, 2]  # world frame: [0,0,-1] or [0,+0.707,-0.707]
+
+            # GRASP wrist: fingertip = wrist + tcp_z*tool_Z_dir  →  wrist = obj - tcp_z*tool_Z_dir
             self.T_grasp = np.eye(4)
-            self.T_grasp[:3, :3] = Z_DOWN_R
-            self.T_grasp[0, 3] = world_obj[0]
-            self.T_grasp[1, 3] = world_obj[1]
-            self.T_grasp[2, 3] = world_obj[2] + tcp_z + Z_OFFSET
+            self.T_grasp[:3, :3] = APPROACH_R
+            self.T_grasp[0, 3] = world_obj[0] - tcp_z * tool_Z_dir[0]
+            self.T_grasp[1, 3] = world_obj[1] - tcp_z * tool_Z_dir[1]
+            self.T_grasp[2, 3] = world_obj[2] - tcp_z * tool_Z_dir[2] + Z_OFFSET
 
-            # PRE-GRASP: directly above grasp, same XY
+            # PRE-GRASP: retract app_offset along approach axis (opposite to tool_Z_dir)
             self.T_pre_grasp = self.T_grasp.copy()
-            self.T_pre_grasp[2, 3] += app_offset
+            self.T_pre_grasp[0, 3] -= app_offset * tool_Z_dir[0]
+            self.T_pre_grasp[1, 3] -= app_offset * tool_Z_dir[1]
+            self.T_pre_grasp[2, 3] -= app_offset * tool_Z_dir[2]
 
-            # HIGH APPROACH: safe fly height
+            # HIGH APPROACH: safe fly height above grasp XY
             self.T_high_approach = self.T_grasp.copy()
             self.T_high_approach[2, 3] = SAFE_FLY_HEIGHT
 
@@ -974,7 +984,7 @@ class PickAndPlaceStateMachine:
             ik_place_debug = _matrix_to_base_ik(self.T_high_place)
             x_b, y_b, z_b = ik_pre_debug[0], ik_pre_debug[1], ik_pre_debug[2]
             reach_dist = np.sqrt(x_b**2 + y_b**2 + z_b**2)
-            print(f"[FSM] T_grasp world Z={self.T_grasp[2,3]:.4f}m  fingertip_z={world_obj[2]+Z_OFFSET:.4f}m")
+            print(f"[FSM] T_grasp wrist world=({self.T_grasp[0,3]:.4f},{self.T_grasp[1,3]:.4f},{self.T_grasp[2,3]:.4f})  fingertip≈obj_z={world_obj[2]+Z_OFFSET:.4f}m")
             print(f"[FSM] T_grasp base: x={ik_grasp_debug[0]:.3f}, y={ik_grasp_debug[1]:.3f}, z={ik_grasp_debug[2]:.3f}")
             print(f"[FSM] Pre-grasp base coords: x={x_b:.3f}, y={y_b:.3f}, z={z_b:.3f}")
             print(f"[FSM] Reach distance from base: {reach_dist:.3f}m")
