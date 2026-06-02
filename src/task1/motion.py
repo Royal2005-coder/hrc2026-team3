@@ -1125,15 +1125,32 @@ class PickAndPlaceStateMachine:
         self.state = "S2_GRASP"
 
     def _state_s2_grasp(self):
-        print("[FSM] State: S2_GRASP [z_down] -> descend straight to T_grasp")
-        # T_pre_grasp and T_grasp share same XY and z_down orientation.
-        # Pure vertical descent — S1 3-phase approach ensures arm is NOT at full extension,
-        # so elbow can bend further to allow the 8cm descent.
-        # ik_null_weight=0.0: disable null-space pull so the arm doesn't retract mid-descent.
-        # ik_rot_weight=0.8: maintain z_down orientation during descent.
+        print("[FSM] State: S2_GRASP -> sweep to above-grasp, then pure vertical descent")
+        # With diagonal_45, T_pre_grasp is BEHIND the object (wrist Y < object Y).
+        # Descending directly along tool_Z_dir=[0,+0.707,-0.707] sweeps the forearm
+        # forward-and-down over the table surface, causing the wrist body to collide
+        # with the table before the fingertip reaches the object.
+        #
+        # Fix: split into two phases to eliminate the diagonal forward sweep:
+        #   Phase 1 — horizontal sweep from T_pre_grasp to T_above_grasp
+        #             (same XY as T_grasp, same Z as T_pre_grasp — arm stays high)
+        #   Phase 2 — pure vertical descent from T_above_grasp to T_grasp
+        #             (no forward movement; arm lowers straight down, no table sweep)
+        # For z_down, tool_Z_dir=[0,0,-1] → T_above_grasp == T_pre_grasp → Phase 1 is a no-op.
+        T_above_grasp = self.T_grasp.copy()
+        T_above_grasp[2, 3] = self.T_pre_grasp[2, 3]  # grasp XY, pre_grasp Z
+
+        success1, _err1 = move_interpolated(
+            self.robot, self.world, self.T_pre_grasp, T_above_grasp,
+            self.side, "s2_sweep_above",
+            num_steps=8, max_sim_steps=200, pos_tol=0.025, rot_tol=0.40,
+            step_size=0.010, interp_rotation=False,
+            ik_rot_weight=0.8, ik_null_weight=0.0, ik_max_iter=200)
+        _start_p2 = T_above_grasp if success1 else self.T_pre_grasp
+
         success, err = move_interpolated(
-            self.robot, self.world, self.T_pre_grasp, self.T_grasp,
-            self.side, "s2_grasp_down",
+            self.robot, self.world, _start_p2, self.T_grasp,
+            self.side, "s2_descend",
             num_steps=15, max_sim_steps=350, pos_tol=0.010, rot_tol=0.40,
             step_size=0.010, interp_rotation=False,
             ik_rot_weight=0.8, ik_null_weight=0.0, ik_max_iter=250)
