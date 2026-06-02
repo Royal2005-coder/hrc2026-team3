@@ -14,6 +14,9 @@ from collections import namedtuple
 from dataclasses import dataclass
 from typing import Optional
 
+# DualArmIK lives in baseline_source alongside main_fixed.py.
+# Add both the relative path (for standalone use) and legacy dev-machine path as fallback.
+sys.path.append(str(Path(__file__).parent.parent / 'baseline_source'))
 sys.path.append('/home/ubuntu/vinh/Ubtech_sim_ref/source')
 from DualArmIK import DualArmIK
 
@@ -913,10 +916,18 @@ class PickAndPlaceStateMachine:
             _obj_base_x = world_obj[1] + 0.20   # base_x = world_y + 0.20
             _obj_base_y = -world_obj[0] + 0.70  # base_y = -world_x + 0.70
             _obj_xy_reach = math.sqrt(_obj_base_x**2 + _obj_base_y**2)
-            tilt_deg = 0  # z_down: always approach from top
-            print(f"[FSM] Object base XY reach={_obj_xy_reach:.3f}m → z_down grasp approach (from top)")
+            # Adaptive tilt: z_down for close objects, diagonal_45 for far ones.
+            # z_down reach limit ≈ 0.46m; beyond that the arm hits joint limits and
+            # the IK settles at a near-horizontal orientation instead of pointing down.
+            _Z_DOWN_LIMIT = 0.46
+            if _obj_xy_reach > _Z_DOWN_LIMIT:
+                tilt_deg = 45
+                print(f"[FSM] Object XY reach={_obj_xy_reach:.3f}m > {_Z_DOWN_LIMIT}m → diagonal_45 approach (gripper tilted 45° down)")
+            else:
+                tilt_deg = 0
+                print(f"[FSM] Object XY reach={_obj_xy_reach:.3f}m ≤ {_Z_DOWN_LIMIT}m → z_down approach (gripper pointing straight down)")
             APPROACH_R = _make_diagonal_R(tilt_deg)
-            tool_Z_dir = APPROACH_R[:, 2]  # world frame: [0,0,-1] or [0,+0.707,-0.707]
+            tool_Z_dir = APPROACH_R[:, 2]  # world frame: [0,0,-1] for z_down, [0,+0.707,-0.707] for 45°
 
             # GRASP wrist: fingertip = wrist + tcp_z*tool_Z_dir  →  wrist = obj - tcp_z*tool_Z_dir
             self.T_grasp = np.eye(4)
