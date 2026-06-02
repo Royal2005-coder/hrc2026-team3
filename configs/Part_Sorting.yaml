@@ -51,7 +51,7 @@ grasp:
   reach_time: 2.0
   hold_time: 1.0
   lift_time: 2.0
-  tcp_offset: [0.0, 0.0, 0.22]  # sixforce_link to fingertip along tool-Z (m). URDF: R_sixforce_joint y=0.297m + gripper ≈ 0.22m measured
+  tcp_offset: [0.0, 0.0, 0.0]   # sixforce_link 局部坐标系下 TCP 的偏移 (m)
   ik_rot_weight: 1.0
   # 物体散布区域 (世界坐标)，确保物体同时位于机器人相机视野和手臂可达范围内
   # 机器人位于 (0.6, -0.2, 0.958)，朝 +y 方向；桌面 z≈1.0m

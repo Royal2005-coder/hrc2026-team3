@@ -14,9 +14,6 @@ from collections import namedtuple
 from dataclasses import dataclass
 from typing import Optional
 
-# DualArmIK lives in baseline_source alongside main_fixed.py.
-# Add both the relative path (for standalone use) and legacy dev-machine path as fallback.
-sys.path.append(str(Path(__file__).parent.parent / 'baseline_source'))
 sys.path.append('/home/ubuntu/vinh/Ubtech_sim_ref/source')
 from DualArmIK import DualArmIK
 
@@ -898,47 +895,34 @@ class PickAndPlaceStateMachine:
             if np.allclose(tcp_offset, [0, 0, 0]):
                 print(f"[FSM] Warning: TCP offset is zero (default) - gripper may not touch target!")
 
-            # tcp_z: distance from sixforce_link (EE) to fingertip along tool-Z.
-            tcp_z = float(tcp_offset[2]) if tcp_offset[2] > 0.01 else 0.22
-            print(f"[FSM] tcp_z={tcp_z:.3f}m")
+            # z_down approach for both grasp and place — avoids diagonal_45 singularities
+            # tcp_z: distance from sixforce_link (EE frame) to fingertip along tool-Z (downward).
+            # Config tcp_offset=[0,0,0] means no override → use measured 0.13m default.
+            # Tune this if the gripper is consistently above (increase) or below (decrease) target.
+            tcp_z = float(tcp_offset[2]) if tcp_offset[2] > 0.01 else 0.13
+            print(f"[FSM] z_down approach: tcp_z={tcp_z:.3f}m")
 
-            Z_DOWN_R = _make_diagonal_R(0)  # z_down: tool-Z=[0,0,-1]; kept for bin-place targets
+            Z_DOWN_R = _make_diagonal_R(0)  # z_down rotation: tool-Z = [0,0,-1] in world
             app_offset = self.specs.get("approach_offset_m", 0.08)
             Z_OFFSET = self.specs.get("grasp_z_offset_m", 0.0)
+            # SAFE_FLY_HEIGHT must clear both the grasped object AND the bin top wall.
+            # Box scale Z=0.36 → half-height=0.18m, box center z=1.05 → top≈1.23m.
+            # Use 1.40m to give ≥17cm clearance over the bin opening.
             SAFE_FLY_HEIGHT = 1.40
 
-            # Adaptive grasp orientation based on wrist XY reach to object.
-            # z_down (tilt=0°): gripper straight down, reach limit ≈ 0.46m from base origin.
-            # diagonal_45 (tilt=45°): tool-Z=[0,+0.707,-0.707], reach ~0.34m — used for
-            # far objects where z_down hits elbow joint limits at table height.
-            _obj_base_x = world_obj[1] + 0.20   # base_x = world_y + 0.20
-            _obj_base_y = -world_obj[0] + 0.70  # base_y = -world_x + 0.70
-            _obj_xy_reach = math.sqrt(_obj_base_x**2 + _obj_base_y**2)
-            _Z_DOWN_MAX_XY = 0.46  # beyond this the arm hits joint limits in z_down at table height
-            if _obj_xy_reach <= _Z_DOWN_MAX_XY:
-                tilt_deg = 0
-                print(f"[FSM] Object XY reach={_obj_xy_reach:.3f}m ≤ {_Z_DOWN_MAX_XY}m → z_down (gripper straight down)")
-            else:
-                tilt_deg = 45
-                print(f"[FSM] Object XY reach={_obj_xy_reach:.3f}m > {_Z_DOWN_MAX_XY}m → diagonal_45 (45° forward-down)")
-            self.tilt_deg = tilt_deg  # stored for S1 wrist pre-bend
-            APPROACH_R = _make_diagonal_R(tilt_deg)
-            tool_Z_dir = APPROACH_R[:, 2]  # world frame: [0,0,-1] for z_down, [0,+0.707,-0.707] for 45°
-
-            # GRASP wrist: fingertip = wrist + tcp_z*tool_Z_dir  →  wrist = obj - tcp_z*tool_Z_dir
+            # GRASP: wrist directly above fingertip target, z_down orientation
+            # wrist_z = obj_z + tcp_z + Z_OFFSET  →  fingertip_z = obj_z + Z_OFFSET
             self.T_grasp = np.eye(4)
-            self.T_grasp[:3, :3] = APPROACH_R
-            self.T_grasp[0, 3] = world_obj[0] - tcp_z * tool_Z_dir[0]
-            self.T_grasp[1, 3] = world_obj[1] - tcp_z * tool_Z_dir[1]
-            self.T_grasp[2, 3] = world_obj[2] - tcp_z * tool_Z_dir[2] + Z_OFFSET
+            self.T_grasp[:3, :3] = Z_DOWN_R
+            self.T_grasp[0, 3] = world_obj[0]
+            self.T_grasp[1, 3] = world_obj[1]
+            self.T_grasp[2, 3] = world_obj[2] + tcp_z + Z_OFFSET
 
-            # PRE-GRASP: retract app_offset along approach axis (opposite to tool_Z_dir)
+            # PRE-GRASP: directly above grasp, same XY
             self.T_pre_grasp = self.T_grasp.copy()
-            self.T_pre_grasp[0, 3] -= app_offset * tool_Z_dir[0]
-            self.T_pre_grasp[1, 3] -= app_offset * tool_Z_dir[1]
-            self.T_pre_grasp[2, 3] -= app_offset * tool_Z_dir[2]
+            self.T_pre_grasp[2, 3] += app_offset
 
-            # HIGH APPROACH: safe fly height above grasp XY
+            # HIGH APPROACH: safe fly height
             self.T_high_approach = self.T_grasp.copy()
             self.T_high_approach[2, 3] = SAFE_FLY_HEIGHT
 
@@ -990,7 +974,7 @@ class PickAndPlaceStateMachine:
             ik_place_debug = _matrix_to_base_ik(self.T_high_place)
             x_b, y_b, z_b = ik_pre_debug[0], ik_pre_debug[1], ik_pre_debug[2]
             reach_dist = np.sqrt(x_b**2 + y_b**2 + z_b**2)
-            print(f"[FSM] T_grasp wrist world=({self.T_grasp[0,3]:.4f},{self.T_grasp[1,3]:.4f},{self.T_grasp[2,3]:.4f})  fingertip≈obj_z={world_obj[2]+Z_OFFSET:.4f}m")
+            print(f"[FSM] T_grasp world Z={self.T_grasp[2,3]:.4f}m  fingertip_z={world_obj[2]+Z_OFFSET:.4f}m")
             print(f"[FSM] T_grasp base: x={ik_grasp_debug[0]:.3f}, y={ik_grasp_debug[1]:.3f}, z={ik_grasp_debug[2]:.3f}")
             print(f"[FSM] Pre-grasp base coords: x={x_b:.3f}, y={y_b:.3f}, z={z_b:.3f}")
             print(f"[FSM] Reach distance from base: {reach_dist:.3f}m")
@@ -1009,178 +993,38 @@ class PickAndPlaceStateMachine:
         except Exception as e: return self._fail(f"init_error: {e}")
 
     def _state_s1_pregrasp(self):
-        print("[FSM] State: S1_PREGRASP -> overhead approach (fly above object, then descend straight down)")
-        # Overhead approach for z_down grasping:
-        #   Phase 1 → fly to T_high_approach (same XY as grasp, SAFE_FLY_HEIGHT)
-        #             At this height the arm is NOT at joint limits, so the IK CAN
-        #             achieve z_down (wrist_pitch bent down) without singularity.
-        #   Phase 2 → descend straight down to T_pre_grasp (8 cm above grasp)
-        #             Pure Z descent while holding z_down → elbow bends more but
-        #             never hits limits.
-        # This replaces the old 3-phase column+sweep which left the arm at full XY
-        # extension at table height, leaving no joint DOF to keep the wrist down.
+        print("[FSM] State: S1_PREGRASP -> T_pre_grasp (z_down)")
+        ik_pre = _matrix_to_base_ik(self.T_pre_grasp)
+        x_b, y_b, z_b, roll_b, pitch_b, yaw_b = ik_pre
+        print(f"  target base: x={x_b:.3f}, y={y_b:.3f}, z={z_b:.3f} | roll={roll_b:.3f} yaw={yaw_b:.3f}")
+        reach = math.sqrt(x_b**2 + y_b**2 + z_b**2)
+        print(f"  reach={reach:.3f}m")
 
-        # Pre-bend wrist to the approach-specific target angle before running any IK.
-        #   z_down (tilt=0°):    wrist_pitch = -π/2 → gripper pointing straight down
-        #   diagonal_45 (tilt=45°): wrist_pitch = -π/4 → gripper at ~45° forward-down
-        # Also patch q_initial and q_neutral in the IK solver so that:
-        #   - _reset_arm_warmstart() resets to the correct angle (not back to 0)
-        #   - null-space optimization pulls toward the correct angle
-        _tilt = getattr(self, 'tilt_deg', 0)
-        _wrist_target = -math.pi / 2 if _tilt == 0 else -math.pi / 4
-        _prefix = "R" if self.side == "right" else "L"
-        _wp_name = f"{_prefix}_wrist_pitch_joint"
-        if self.robot and self.robot._articulation:
-            _dof_names = self.robot._articulation.dof_names
-            if _wp_name in _dof_names:
-                try:
-                    import torch as _torch
-                    _wp_idx = self.robot._articulation.get_dof_index(_wp_name)
-                    self.robot._articulation.set_joint_positions(
-                        _torch.tensor([[_wrist_target]], dtype=_torch.float32),
-                        joint_indices=_torch.tensor([_wp_idx], dtype=_torch.int32)
-                    )
-                    for _ in range(10):
-                        self.world.step(render=True)
-                    _label = "z_down" if _tilt == 0 else "diagonal_45"
-                    print(f"  [S1] Wrist {_wp_name} pre-bent for {_label} ({_wrist_target:.3f} rad)")
-
-                    # Patch IK solver references so resets/null-space preserve the target angle
-                    if self.robot.ik_solver:
-                        try:
-                            from DualArmIK import DualArmIK as _DAIK
-                            # (a) q_initial: so _reset_arm_warmstart() resets to target angle
-                            if self.robot.ik_solver.q_initial is not None:
-                                _jid = self.robot.ik_solver.model.getJointId(_wp_name)
-                                _q_wp = self.robot.ik_solver.model.joints[_jid].idx_q
-                                self.robot.ik_solver.q_initial[_q_wp] = _wrist_target
-                            # (b) q_neutral: so null-space pull targets correct angle
-                            _arm_joints = (_DAIK.RIGHT_ARM_JOINTS if self.side == 'right'
-                                           else _DAIK.LEFT_ARM_JOINTS)
-                            if _wp_name in _arm_joints:
-                                _arm_idx = _arm_joints.index(_wp_name)
-                                _q_neu = (self.robot.ik_solver.q_neutral_right if self.side == 'right'
-                                          else self.robot.ik_solver.q_neutral_left)
-                                if _q_neu is not None:
-                                    _q_neu[_arm_idx] = _wrist_target
-                            print(f"  [S1] IK q_initial & q_neutral patched to {_label} ({self.side})")
-                        except Exception as _qe:
-                            print(f"  [S1] IK warm-start patch failed: {_qe}")
-                except Exception as _e:
-                    print(f"  [S1] Wrist pre-bend failed ({_e}) — IK may not achieve target orientation")
-
-        # Read current EE world-frame pose as 4×4 matrix (interpolation start point).
-        T_current = self.T_high_approach.copy()
-        T_current[2, 3] += 0.20   # safe fallback: slightly above T_high_approach
-        if self.robot and self.robot.ik_solver:
-            try:
-                joints = self.robot.get_joint_states()
-                positions = joints['positions']
-                if positions and isinstance(positions[0], list):
-                    positions = positions[0]
-                self.robot.ik_solver.sync_joint_positions(joints['names'], positions)
-                ee_se3 = self.robot.ik_solver.get_ee_pose(self.side)
-                p_b = np.array(ee_se3.translation)
-                R_b = np.array(ee_se3.rotation)
-                p_w = np.array([-p_b[1] + 0.70, p_b[0] - 0.20, p_b[2] + 0.9005])
-                T_current = np.eye(4)
-                T_current[:3, :3] = _R_W2B.T @ R_b
-                T_current[:3, 3]  = p_w
-            except Exception as e:
-                print(f"  [S1] FK read failed ({e}) — using T_high_approach+0.2 as start")
-
-        ik_high = _matrix_to_base_ik(self.T_high_approach)
-        ik_pre  = _matrix_to_base_ik(self.T_pre_grasp)
-        xh, yh, zh = ik_high[0], ik_high[1], ik_high[2]
-        xb, yb, zb = ik_pre[0], ik_pre[1], ik_pre[2]
-        print(f"  high_approach base: x={xh:.3f}, y={yh:.3f}, z={zh:.3f}")
-        print(f"  pre_grasp base:     x={xb:.3f}, y={yb:.3f}, z={zb:.3f}")
-
-        # Phase 1: Fly directly above object with z_down orientation.
-        # interp_rotation=True slerps from current arm rotation to z_down, guiding the
-        # IK to achieve wrist-down before the arm is at full forward extension.
-        success1, err1 = move_interpolated(
-            self.robot, self.world, T_current, self.T_high_approach,
-            self.side, "s1_fly_above",
-            num_steps=20, max_sim_steps=300, pos_tol=0.06, rot_tol=0.35,
-            step_size=0.018, interp_rotation=True,
-            ik_rot_weight=0.8, ik_null_weight=0.0, ik_max_iter=250,
+        success, _, reason = execute_stage(
+            self.robot, self.world, "s1_full", ik_pre, self.side,
+            step_size=0.025, max_steps=3000,
+            pos_tol=0.06, rot_tol=0.40,
+            timeout_sec=90.0,
         )
 
-        if not success1:
+        # Arm fallback: if primary arm fails IK (stuck/timeout), try the other arm.
+        if not success:
             alt_side = "left" if self.side == "right" else "right"
-            print(f"  [S1/P1] Primary arm '{self.side}' failed ({err1}). Trying '{alt_side}'...")
+            print(f"  [S1] Primary arm '{self.side}' failed ({reason}). Trying '{alt_side}' arm...")
             if self.robot:
                 self.robot.open_gripper(side=alt_side)
-            # Pre-bend alt_side wrist + patch IK references (same angle as primary side)
-            _alt_wrist_target = _wrist_target
-            _alt_wp_name = f"{'R' if alt_side == 'right' else 'L'}_wrist_pitch_joint"
-            if self.robot and self.robot._articulation and _alt_wp_name in self.robot._articulation.dof_names:
-                try:
-                    import torch as _torch
-                    from DualArmIK import DualArmIK as _DAIK
-                    _alt_wp_idx = self.robot._articulation.get_dof_index(_alt_wp_name)
-                    self.robot._articulation.set_joint_positions(
-                        _torch.tensor([[_alt_wrist_target]], dtype=_torch.float32),
-                        joint_indices=_torch.tensor([_alt_wp_idx], dtype=_torch.int32)
-                    )
-                    for _ in range(5):
-                        self.world.step(render=True)
-                    if self.robot.ik_solver:
-                        if self.robot.ik_solver.q_initial is not None:
-                            _ajid = self.robot.ik_solver.model.getJointId(_alt_wp_name)
-                            _aq_wp = self.robot.ik_solver.model.joints[_ajid].idx_q
-                            self.robot.ik_solver.q_initial[_aq_wp] = _alt_wrist_target
-                        _a_joints = (_DAIK.RIGHT_ARM_JOINTS if alt_side == 'right'
-                                     else _DAIK.LEFT_ARM_JOINTS)
-                        if _alt_wp_name in _a_joints:
-                            _ai = _a_joints.index(_alt_wp_name)
-                            _aq_neu = (self.robot.ik_solver.q_neutral_right if alt_side == 'right'
-                                       else self.robot.ik_solver.q_neutral_left)
-                            if _aq_neu is not None:
-                                _aq_neu[_ai] = _alt_wrist_target
-                except Exception:
-                    pass
-            success_alt, err_alt = move_interpolated(
-                self.robot, self.world, T_current, self.T_high_approach,
-                alt_side, "s1_fly_above_alt",
-                num_steps=20, max_sim_steps=300, pos_tol=0.06, rot_tol=0.35,
-                step_size=0.018, interp_rotation=True,
-                ik_rot_weight=0.8, ik_null_weight=0.0, ik_max_iter=250,
+            success_alt, _, reason_alt = execute_stage(
+                self.robot, self.world, "s1_alt", ik_pre, alt_side,
+                step_size=0.025, max_steps=3000,
+                pos_tol=0.06, rot_tol=0.40,
+                timeout_sec=90.0,
             )
             if success_alt:
                 self.side = alt_side
-                print(f"  [S1/P1] ✓ Fallback to '{alt_side}' succeeded")
+                success = True
+                print(f"  [S1] ✓ Fallback to '{alt_side}' arm succeeded")
             else:
-                # Last resort: direct IK (no interpolation, loose tolerances)
-                ok_d, _, r_d = execute_stage(
-                    self.robot, self.world, "s1_direct_high", ik_high, self.side,
-                    step_size=0.025, max_steps=3000,
-                    pos_tol=0.08, rot_tol=0.50, timeout_sec=90.0,
-                    ik_rot_weight=0.5, ik_null_weight=0.0, ik_max_iter=300,
-                )
-                if not ok_d:
-                    return self._fail(f"s1_fly_above_fail: {err1} / {err_alt} / {r_d}")
-
-        # Phase 2: Descend straight down to pre-grasp height (pure Z drop, z_down held).
-        print(f"  [Phase2] Descend: Z {self.T_high_approach[2,3]:.3f}m → {self.T_pre_grasp[2,3]:.3f}m")
-        success2, err2 = move_interpolated(
-            self.robot, self.world, self.T_high_approach, self.T_pre_grasp,
-            self.side, "s1_descend",
-            num_steps=15, max_sim_steps=250, pos_tol=0.04, rot_tol=0.30,
-            step_size=0.015, interp_rotation=False,
-            ik_rot_weight=0.9, ik_null_weight=0.0, ik_max_iter=250,
-        )
-        if not success2:
-            print(f"  [S1/P2] Descent failed ({err2}) — direct IK fallback to pre-grasp...")
-            ok2, _, r2 = execute_stage(
-                self.robot, self.world, "s1_direct_pre", ik_pre, self.side,
-                step_size=0.015, max_steps=2000,
-                pos_tol=0.06, rot_tol=0.40, timeout_sec=45.0,
-                ik_null_weight=0.0, ik_rot_weight=0.8,
-            )
-            if not ok2:
-                return self._fail(f"s1_pregrasp_fail: {r2}")
+                return self._fail(f"s1_pregrasp_fail_both_arms: {reason} / {reason_alt}")
 
         try:
             joints = self.robot.get_joint_states()
@@ -1189,42 +1033,21 @@ class PickAndPlaceStateMachine:
                 positions = positions[0]
             self.robot.ik_solver.sync_joint_positions(joints['names'], positions)
             actual_se3 = self.robot.ik_solver.get_ee_pose(self.side)
-            actual_z_ax = actual_se3.rotation[:, 2]
-            print(f"  [S1 POST] EE Z-axis in base: {actual_z_ax.round(3).tolist()} (expect ≈[0,0,-1])")
+            actual_z = actual_se3.rotation[:, 2]
+            print(f"  [S1 POST] EE Z-axis in base: {actual_z.round(3).tolist()} (expect ≈[0,0,-1])")
         except Exception as e:
             print(f"  [S1 POST] Could not read EE state: {e}")
         self.state = "S2_GRASP"
 
     def _state_s2_grasp(self):
-        print("[FSM] State: S2_GRASP -> sweep to above-grasp, then pure vertical descent")
-        # With diagonal_45, T_pre_grasp is BEHIND the object (wrist Y < object Y).
-        # Descending directly along tool_Z_dir=[0,+0.707,-0.707] sweeps the forearm
-        # forward-and-down over the table surface, causing the wrist body to collide
-        # with the table before the fingertip reaches the object.
-        #
-        # Fix: split into two phases to eliminate the diagonal forward sweep:
-        #   Phase 1 — horizontal sweep from T_pre_grasp to T_above_grasp
-        #             (same XY as T_grasp, same Z as T_pre_grasp — arm stays high)
-        #   Phase 2 — pure vertical descent from T_above_grasp to T_grasp
-        #             (no forward movement; arm lowers straight down, no table sweep)
-        # For z_down, tool_Z_dir=[0,0,-1] → T_above_grasp == T_pre_grasp → Phase 1 is a no-op.
-        T_above_grasp = self.T_grasp.copy()
-        T_above_grasp[2, 3] = self.T_pre_grasp[2, 3]  # grasp XY, pre_grasp Z
-
-        success1, _err1 = move_interpolated(
-            self.robot, self.world, self.T_pre_grasp, T_above_grasp,
-            self.side, "s2_sweep_above",
-            num_steps=8, max_sim_steps=200, pos_tol=0.025, rot_tol=0.40,
-            step_size=0.010, interp_rotation=False,
-            ik_rot_weight=0.8, ik_null_weight=0.0, ik_max_iter=200)
-        _start_p2 = T_above_grasp if success1 else self.T_pre_grasp
-
+        print("[FSM] State: S2_GRASP [z_down] -> descend straight to T_grasp")
+        # T_pre_grasp and T_grasp share same XY and z_down orientation.
+        # Move is purely vertical — no SLERP needed, avoids diagonal_45 singularity.
         success, err = move_interpolated(
-            self.robot, self.world, _start_p2, self.T_grasp,
-            self.side, "s2_descend",
-            num_steps=15, max_sim_steps=350, pos_tol=0.010, rot_tol=0.40,
-            step_size=0.010, interp_rotation=False,
-            ik_rot_weight=0.8, ik_null_weight=0.0, ik_max_iter=250)
+            self.robot, self.world, self.T_pre_grasp, self.T_grasp,
+            self.side, "s2_grasp_down",
+            num_steps=15, max_sim_steps=250, pos_tol=0.020, rot_tol=0.40,
+            step_size=0.015, interp_rotation=False)
         if not success: return self._fail("collision_on_grasp")
 
         # Settle + verify wrist Z before closing
@@ -1241,15 +1064,14 @@ class PickAndPlaceStateMachine:
             target_z_base = _matrix_to_base_ik(self.T_grasp)[2]
             z_err = actual_z_base - target_z_base
             print(f"  [S2 CHECK] wrist z_base: actual={actual_z_base:.3f} target={target_z_base:.3f} err={z_err:+.3f}m")
-            if z_err > 0.010:  # arm still >1cm above target — push down one more time
+            if z_err > 0.025:  # arm still >2.5cm above target — push down one more time
                 print(f"  [S2 CHECK] Arm {z_err*100:.1f}cm above grasp — correction step...")
                 ik_grasp = _matrix_to_base_ik(self.T_grasp)
                 execute_stage(
                     self.robot, self.world, "s2_correct",
                     ik_grasp, self.side,
-                    step_size=0.004, max_steps=800,
-                    pos_tol=0.008, rot_tol=0.5, timeout_sec=25.0,
-                    ik_null_weight=0.0)
+                    step_size=0.005, max_steps=600,
+                    pos_tol=0.015, rot_tol=0.5, timeout_sec=20.0)
         except Exception as e:
             print(f"  [S2 CHECK] Cannot verify: {e}")
 
@@ -1349,8 +1171,17 @@ class PickAndPlaceStateMachine:
         # (rot_err stuck at π/2 for PartB bins), causing IK warm-start resets and
         # S4 timeout. The object is held by FixedJoint so orientation during transit
         # doesn't affect the grasp. S5 will re-approach with z_down.
-        ik_high_place = _matrix_to_base_ik(self.T_high_place)  # [x,y,z, roll,pitch,yaw] — z_down orientation
-        print(f"  [S4] Targeting z_down orientation at bin high-place")
+        ik_high_place = _matrix_to_base_ik(self.T_high_place)  # [x,y,z, roll,pitch,yaw]
+        if self.robot and self.robot.ik_solver:
+            try:
+                current_se3 = self.robot.ik_solver.get_ee_pose(self.side)
+                current_rpy = DualArmIK.se3_to_xyzrpy(current_se3)
+                ik_high_place[3] = float(current_rpy[3])  # roll
+                ik_high_place[4] = float(current_rpy[4])  # pitch
+                ik_high_place[5] = float(current_rpy[5])  # yaw
+                print(f"  [S4] Using current EE orientation (rpy={[round(float(v),3) for v in current_rpy[3:]]})")
+            except Exception as _e:
+                print(f"  [S4] Could not read current orientation ({_e}) — using z_down target")
 
         px, py, pz = ik_high_place[0], ik_high_place[1], ik_high_place[2]
         print(f"  bin high-place target base: x={px:.3f}, y={py:.3f}, z={pz:.3f} "
@@ -1363,9 +1194,9 @@ class PickAndPlaceStateMachine:
         success, _, reason = execute_stage(
             self.robot, self.world, "s4_transfer", ik_high_place, self.side,
             step_size=0.030, max_steps=4000,
-            pos_tol=0.08, rot_tol=0.80,
+            pos_tol=0.08, rot_tol=1.50,
             timeout_sec=60.0,
-            ik_rot_tol=0.15, ik_rot_weight=0.3, ik_null_weight=0.0, ik_max_iter=300)
+            ik_rot_tol=0.30, ik_rot_weight=0.01, ik_null_weight=0.0, ik_max_iter=300)
         if not success:
             print(f"  [S4] ⚠ Transfer incomplete ({reason}) — proceeding best-effort to S5")
         self.state = "S5_LOWER_BIN"
@@ -1397,27 +1228,44 @@ class PickAndPlaceStateMachine:
             except Exception as _e:
                 print(f"  [S5] Cannot get current EE ({_e}) — using T_high_place as start")
 
-        # Phase 1: Descent to pre-place height with z_down orientation.
-        # S4 now targets z_down at T_high_place, so T_start_s5 should already be near
-        # z_down. Use interp_rotation=True to smoothly complete any remaining transition.
+        # Phase 0: Reorient to z_down at current height before descending.
+        # S4 uses current EE orientation (not z_down) to avoid IK failures during transit,
+        # leaving a large rotation error (~0.76 rad). Correcting orientation first with a
+        # single stable target avoids the IK warm-start resets that cause arm vibration.
+        T_reorient = T_start_s5.copy()
+        T_reorient[:3, :3] = self.T_pre_place[:3, :3]  # z_down rotation
+        ik_reorient = _matrix_to_base_ik(T_reorient)
+        reorient_ok, _, _ = execute_stage(
+            self.robot, self.world, "s5_reorient", ik_reorient, self.side,
+            step_size=0.020, max_steps=600,
+            pos_tol=0.12, rot_tol=0.18,
+            timeout_sec=12.0,
+            ik_rot_tol=0.15, ik_rot_weight=1.0, ik_null_weight=0.0, ik_max_iter=250)
+        if not reorient_ok:
+            print("  [S5] Reorient incomplete — proceeding with descent anyway")
+
+        # Phase 1: Straight descent to pre-place height.
+        # Position-only IK (ik_rot_weight≈0, ik_rot_tol large) guarantees the IK always
+        # converges and never resets warm-start, eliminating arm vibration during descent.
+        # interp_rotation=False keeps the arm's current orientation unchanged.
         success, err = move_interpolated(
-            self.robot, self.world, T_start_s5, self.T_pre_place,
+            self.robot, self.world, T_reorient, self.T_pre_place,
             self.side, "s5_lower_pre",
-            num_steps=10, max_sim_steps=150, pos_tol=0.06, rot_tol=0.50,
-            interp_rotation=True, ik_rot_tol=0.15,
-            ik_rot_weight=0.8, ik_null_weight=0.0, ik_max_iter=250)
+            num_steps=10, max_sim_steps=120, pos_tol=0.06, rot_tol=1.50,
+            interp_rotation=False, ik_rot_tol=0.40,
+            ik_rot_weight=0.05, ik_null_weight=0.0, ik_max_iter=200)
         if not success:
             print("  [S5] Pre-lower stuck — releasing above bin (best-effort)")
             self.state = "S6_RELEASE"
             return
 
-        # Phase 2: Final descent to T_place maintaining z_down
+        # Phase 2: Final descent to T_place
         success, err = move_interpolated(
             self.robot, self.world, self.T_pre_place, self.T_place,
             self.side, "s5_lower_final",
-            num_steps=8, max_sim_steps=150, pos_tol=0.03, rot_tol=0.40,
-            interp_rotation=False, ik_rot_tol=0.15,
-            ik_rot_weight=1.0, ik_null_weight=0.0, ik_max_iter=250)
+            num_steps=8, max_sim_steps=120, pos_tol=0.03, rot_tol=1.50,
+            interp_rotation=False, ik_rot_tol=0.40,
+            ik_rot_weight=0.05, ik_null_weight=0.0, ik_max_iter=200)
         if not success:
             print("  [S5] Final lower stuck — releasing at current position (best-effort)")
         self.state = "S6_RELEASE"
