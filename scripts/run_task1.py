@@ -73,6 +73,13 @@ MOTION_PARAMS = {
     "gripper_close_steps": 60,     # ~1s @ 60Hz
     "gripper_open_steps":  30,     # ~0.5s
     "timeout_s":           60.0,   # timeout per pick_place
+    # ── Wrist servo ──────────────────────────────────────────────────────────
+    # grasp_z_offset_m: khoảng cách từ centroid đến TOP SURFACE của vật (~half_height)
+    # Đo trong Isaac Sim: bbox_z_max - centroid_z. Thử 0.02–0.03 trước.
+    "grasp_z_offset_m":    0.02,   # TUNE: ~half height of object (m)
+    "servo_tol_px":        20,     # TUNE: pixel tolerance để coi là aligned
+    "servo_gain":          0.0003, # TUNE: pixel → metres (tăng nếu servo chậm)
+    "servo_max_steps":     300,    # timeout servo ~5s @ 60Hz
 }
 
 # N3 — Gripper (tune theo URDF finger joint limits)
