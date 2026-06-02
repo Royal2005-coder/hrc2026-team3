@@ -1204,7 +1204,9 @@ class PickAndPlaceStateMachine:
     def _state_s5_lower_bin(self):
         print("[FSM] State: S5_LOWER_BIN [z_down] -> lower straight to T_place")
 
-        # Get actual EE pose (S4 may leave arm slightly off T_high_place)
+        # Use the ACTUAL current EE pose as T_start (not fixed T_high_place matrix).
+        # S4 may have left the arm slightly off from T_high_place; using the actual
+        # position lets the interpolation start from where the arm really is.
         T_start_s5 = self.T_high_place.copy()  # fallback
         if self.robot and self.robot.ik_solver:
             try:
@@ -1228,44 +1230,24 @@ class PickAndPlaceStateMachine:
             except Exception as _e:
                 print(f"  [S5] Cannot get current EE ({_e}) — using T_high_place as start")
 
-        # Phase 0: Reorient to z_down at current height before descending.
-        # S4 uses current EE orientation (not z_down) to avoid IK failures during transit,
-        # leaving a large rotation error (~0.76 rad). Correcting orientation first with a
-        # single stable target avoids the IK warm-start resets that cause arm vibration.
-        T_reorient = T_start_s5.copy()
-        T_reorient[:3, :3] = self.T_pre_place[:3, :3]  # z_down rotation
-        ik_reorient = _matrix_to_base_ik(T_reorient)
-        reorient_ok, _, _ = execute_stage(
-            self.robot, self.world, "s5_reorient", ik_reorient, self.side,
-            step_size=0.020, max_steps=600,
-            pos_tol=0.12, rot_tol=0.18,
-            timeout_sec=12.0,
-            ik_rot_tol=0.15, ik_rot_weight=1.0, ik_null_weight=0.0, ik_max_iter=250)
-        if not reorient_ok:
-            print("  [S5] Reorient incomplete — proceeding with descent anyway")
-
-        # Phase 1: Straight descent to pre-place height.
-        # Position-only IK (ik_rot_weight≈0, ik_rot_tol large) guarantees the IK always
-        # converges and never resets warm-start, eliminating arm vibration during descent.
-        # interp_rotation=False keeps the arm's current orientation unchanged.
+        # SLERP from current orientation to z_down as we descend.
+        # null_weight=0: keep arm in current configuration, don't drift back to neutral.
         success, err = move_interpolated(
-            self.robot, self.world, T_reorient, self.T_pre_place,
+            self.robot, self.world, T_start_s5, self.T_pre_place,
             self.side, "s5_lower_pre",
-            num_steps=10, max_sim_steps=120, pos_tol=0.06, rot_tol=1.50,
-            interp_rotation=False, ik_rot_tol=0.40,
-            ik_rot_weight=0.05, ik_null_weight=0.0, ik_max_iter=200)
+            num_steps=20, max_sim_steps=200, pos_tol=0.08, rot_tol=0.50,
+            interp_rotation=True, ik_rot_tol=0.12,
+            ik_rot_weight=0.5, ik_null_weight=0.0, ik_max_iter=300)
         if not success:
             print("  [S5] Pre-lower stuck — releasing above bin (best-effort)")
             self.state = "S6_RELEASE"
             return
 
-        # Phase 2: Final descent to T_place
         success, err = move_interpolated(
             self.robot, self.world, self.T_pre_place, self.T_place,
             self.side, "s5_lower_final",
-            num_steps=8, max_sim_steps=120, pos_tol=0.03, rot_tol=1.50,
-            interp_rotation=False, ik_rot_tol=0.40,
-            ik_rot_weight=0.05, ik_null_weight=0.0, ik_max_iter=200)
+            num_steps=15, max_sim_steps=200, pos_tol=0.025, rot_tol=0.40,
+            ik_rot_tol=0.08, ik_rot_weight=0.8, ik_null_weight=0.0, ik_max_iter=300)
         if not success:
             print("  [S5] Final lower stuck — releasing at current position (best-effort)")
         self.state = "S6_RELEASE"
