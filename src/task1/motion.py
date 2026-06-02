@@ -917,10 +917,6 @@ class PickAndPlaceStateMachine:
             print(f"[FSM] Object base XY reach={_obj_xy_reach:.3f}m "
                   f"→ {'diagonal_45' if tilt_deg else 'z_down'} grasp approach")
             APPROACH_R = _make_diagonal_R(tilt_deg)
-            # Flip gripper 180° around tool-Z: maps tool-X [+1,0,0]→[-1,0,0] world
-            # = [0,+1,0] base frame, matching neutral wrist_roll (~0 rad) from the arm's
-            # resting pose. Without this, tool-X_base=[0,-1,0] forces wrist_roll≈90°.
-            APPROACH_R = APPROACH_R @ np.array([[-1., 0., 0.], [0., -1., 0.], [0., 0., 1.]])
             tool_Z_dir = APPROACH_R[:, 2]  # world frame: [0,0,-1] or [0,+0.707,-0.707]
 
             # GRASP wrist: fingertip = wrist + tcp_z*tool_Z_dir  →  wrist = obj - tcp_z*tool_Z_dir
