@@ -1,223 +1,408 @@
-"""
-planner.py — Task 1 N2: Object validation, selection, bin mapping, ActionPlan.
-
-N2 nhận perception output từ N1, validate, chọn object tốt nhất,
-map class_id → bin, tạo ActionPlan cho N3 thực thi.
-"""
+import yaml
 import math
-import json
-import time
-from datetime import datetime, timezone
+from typing import List, Optional, Tuple
+from src.task1.state import (
+    ObjectState, BinState, ActionPlan,
+    ObjectStatus, GraspHint, Pose
+)
+from src.task1.transform_utils import validate_transform
+from pathlib import Path
 
 
-# ── Failure reason enum ───────────────────────────────────────────────────────
-MISSING_FIELD        = "MISSING_FIELD"
-LOW_CONFIDENCE       = "LOW_CONFIDENCE"
-INVALID_POSITION     = "INVALID_POSITION"
-INVALID_QUATERNION   = "INVALID_QUATERNION"
-BAD_QUATERNION_NORM  = "BAD_QUATERNION_NORM"
-OUT_OF_WORKSPACE     = "OUT_OF_WORKSPACE"
-CLASS_NOT_MAPPED     = "CLASS_NOT_MAPPED"
-ALREADY_HANDLED      = "ALREADY_HANDLED"
-NO_VALID_OBJECT      = "NO_VALID_OBJECT"
-PLAN_ERROR           = "PLAN_ERROR"
+PLANNER_CONFIG_PATH = "configs/planner.yaml"
+BINS_CONFIG_PATH = "configs/bins.yaml"
 
 
-# ── Object state validator (N2 Step 3) ───────────────────────────────────────
-def validate_object_state(obj, min_confidence=0.70):
-    """Validate required fields + confidence. Returns (ok, failure_reason)."""
-    required = ["object_id", "class_id", "confidence", "pose_base", "grasp_hint"]
-    for key in required:
-        if key not in obj:
-            return False, f"{MISSING_FIELD}_{key.upper()}"
 
-    if obj.get("failure_reason"):
-        return False, str(obj["failure_reason"])
+# Default fallback configs
+DEFAULT_WORKSPACE_BOUNDS = {
+    "x": (-0.7, -0.4),
+    "y": (-0.4, 0.4),
+    "z": (0.5, 1.0),
+}
 
-    if float(obj["confidence"]) < min_confidence:
-        return False, LOW_CONFIDENCE
+DEFAULT_PLANNER = {
+    "confidence_threshold": 0.75,
+    "selection_strategy": "highest_confidence"
+}
 
-    pos  = obj["pose_base"].get("position_m")
-    quat = obj["pose_base"].get("quaternion_xyzw")
-
-    if pos is None or len(pos) != 3:
-        return False, INVALID_POSITION
-    if quat is None or len(quat) != 4:
-        return False, INVALID_QUATERNION
-    if any(not isinstance(v, (int, float)) for v in pos):
-        return False, INVALID_POSITION
-
-    return True, None
-
-
-# ── Pose sanity check (N2 Step 4) ────────────────────────────────────────────
-def is_pose_sane(obj, workspace):
-    """Check quaternion norm and position within workspace."""
-    quat = obj["pose_base"]["quaternion_xyzw"]
-    norm = math.sqrt(sum(float(x) ** 2 for x in quat))
-    if abs(norm - 1.0) > 0.15:
-        return False, BAD_QUATERNION_NORM
-
-    pos = obj.get("pos_world") or obj["pose_base"]["position_m"]
-    x, y, z = [float(v) for v in pos]
-
-    if not (workspace["x"][0] <= x <= workspace["x"][1]):
-        return False, OUT_OF_WORKSPACE
-    if not (workspace["y"][0] <= y <= workspace["y"][1]):
-        return False, OUT_OF_WORKSPACE
-    if not (workspace["z"][0] <= z <= workspace["z"][1]):
-        return False, OUT_OF_WORKSPACE
-
-    return True, None
+DEFAULT_BINS = {
+    "part_A": {
+        "bin_id": "bin_A",
+        "position_m": [-0.45, 0.25, 0.80],
+        "quaternion_xyzw": [0.0, 0.0, 0.0, 1.0],
+        "grasp_width_m": 0.045,
+        "description": "Blue bin — left side of table"
+    },
+    "part_B": {
+        "bin_id": "bin_B",
+        "position_m": [-0.45, -0.25, 0.80],
+        "quaternion_xyzw": [0.0, 0.0, 0.0, 1.0],
+        "grasp_width_m": 0.060,
+        "description": "Red bin — right side of table"
+    }
+}
 
 
-# ── Object scoring (N2 Step 5) ───────────────────────────────────────────────
-def score_object(obj):
-    """Higher score = better candidate. Prefer high confidence, near centre."""
-    conf = float(obj["confidence"])
-    pos  = obj.get("pos_world") or obj["pose_base"]["position_m"]
-    y    = float(pos[1])
-    lateral_penalty = 0.02 * abs(y - 0.3)
-    return conf - lateral_penalty
+# YAML loader
+def load_yaml_config(path: Path) -> dict:
+
+    with open(path, "r", encoding="utf-8") as f:
+        return yaml.safe_load(f)
+
+# Load planner config
+def load_planner_config():
+    try:
+        config = load_yaml_config(PLANNER_CONFIG_PATH)
+
+        planner_cfg = config.get("planner", {})
+        bounds_cfg = config.get("workspace_bounds", {})
+
+        planner = {
+            "confidence_threshold":
+                planner_cfg.get(
+                    "confidence_threshold",
+                    DEFAULT_PLANNER["confidence_threshold"]
+                ),
+
+            "selection_strategy":
+                planner_cfg.get(
+                    "selection_strategy",
+                    DEFAULT_PLANNER["selection_strategy"]
+                )
+        }
+
+        workspace_bounds = {
+            "x": tuple(bounds_cfg.get("x", DEFAULT_WORKSPACE_BOUNDS["x"])),
+            "y": tuple(bounds_cfg.get("y", DEFAULT_WORKSPACE_BOUNDS["y"])),
+            "z": tuple(bounds_cfg.get("z", DEFAULT_WORKSPACE_BOUNDS["z"])),
+        }
+
+        return planner, workspace_bounds
+
+    except Exception as e:
+        print(f"[WARN] Failed to load planner.yaml: {e}")
+        print("[WARN] Using default planner config.")
+
+        return DEFAULT_PLANNER, DEFAULT_WORKSPACE_BOUNDS
+
+# Load bins config
+def load_bins_config():
+    """
+    Load bins from bins.yaml
+    """
+
+    try:
+        config = load_yaml_config(BINS_CONFIG_PATH)
+
+        bins = config.get("bins")
+
+        if not bins:
+            raise ValueError("Missing 'bins' section")
+
+        return bins
+
+    except Exception as e:
+        print(f"[WARN] Failed to load bins.yaml: {e}")
+        print("[WARN] Using default bins config.")
+
+        return DEFAULT_BINS
 
 
-# ── Select next object ────────────────────────────────────────────────────────
-def select_next_object(objects, handled_ids, workspace, min_confidence=0.70):
-    """Return (best_obj, rejected_list). rejected_list = [(id, reason), ...]."""
-    candidates = []
-    rejected   = []
+PLANNER_CONFIG, WORKSPACE_BOUNDS = load_planner_config()
+
+CONFIDENCE_THRESHOLD = PLANNER_CONFIG["confidence_threshold"]
+
+SELECTION_STRATEGY = PLANNER_CONFIG["selection_strategy"]
+
+BINS = load_bins_config()
+
+GRASP_WIDTHS = {
+    class_id: bin_cfg["grasp_width_m"]
+    for class_id, bin_cfg in BINS.items()
+}
+
+# 1. parse_perception_frame
+def parse_perception_frame(frame: dict) -> List[ObjectState]:
+    """
+    Convert raw PerceptionFrame JSON from Person 1
+    into a list of ObjectState instances.
+
+    Args:
+        frame: raw dict from Person 1
+
+    Returns:
+        list of ObjectState (all PENDING)
+
+    Example:
+        objects = parse_perception_frame(frame)
+        # → [ObjectState(obj_001, part_A, ...), ObjectState(obj_002, ...)]
+    """
+    objects = []
+    for obj in frame.get("objects", []):
+        pose = Pose(
+            position_m=obj["pose_base"]["position_m"],
+            quaternion_xyzw=obj["pose_base"]["quaternion_xyzw"]
+        )
+        hint = GraspHint(
+            yaw_rad=obj["grasp_hint"]["yaw_rad"],
+            grasp_width_m=obj["grasp_hint"].get(
+                "grasp_width_m",
+                GRASP_WIDTHS.get(obj["class_id"], 0.05)
+            ),
+            approach_axis=obj["grasp_hint"]["approach_axis"]
+        )
+        state = ObjectState(
+            object_id=obj["object_id"],
+            class_id=obj["class_id"],
+            confidence=obj["confidence"],
+            pose=pose,
+            grasp_hint=hint,
+            status=ObjectStatus.PENDING,
+            failure_reason=obj.get("failure_reason")
+        )
+        objects.append(state)
+    return objects
+
+
+# 2. validate_objects
+
+def validate_objects(objects: List[ObjectState]) -> Tuple[List[ObjectState], List[ObjectState]]:
+    """
+    Split objects into accepted (valid) and rejected (invalid) lists.
+
+    Checks:
+      - confidence >= threshold
+      - failure_reason is None
+      - pose passes transform sanity (quaternion + bounds)
+      - class_id exists in bins.yaml
+
+    Args:
+        objects: list of ObjectState
+
+    Returns:
+        (accepted, rejected)
+
+    Example:
+        good, bad = validate_objects(objects)
+        # good → ready for selection
+        # bad  → logged and skipped
+    """
+    accepted = []
+    rejected = []
 
     for obj in objects:
-        oid = obj.get("object_id", "unknown")
 
-        if oid in handled_ids:
-            rejected.append((oid, ALREADY_HANDLED))
+        # Check 1: already failed by Person 1
+        if obj.failure_reason is not None:
+            obj.status = ObjectStatus.SKIPPED
+            obj.failure_reason = f"Person1 flagged: {obj.failure_reason}"
+            rejected.append(obj)
             continue
 
-        ok, reason = validate_object_state(obj, min_confidence)
-        if not ok:
-            rejected.append((oid, reason))
+        # Check 2: confidence threshold
+        if obj.confidence < CONFIDENCE_THRESHOLD:
+            obj.status = ObjectStatus.SKIPPED
+            obj.failure_reason = f"confidence {obj.confidence} < {CONFIDENCE_THRESHOLD}"
+            rejected.append(obj)
             continue
 
-        ok, reason = is_pose_sane(obj, workspace)
-        if not ok:
-            rejected.append((oid, reason))
+        # Check 3: pose sanity (quaternion valid + in bounds)
+        pose_ok, reason = validate_transform(
+            obj.pose.position_m,
+            obj.pose.quaternion_xyzw
+        )
+        if not pose_ok:
+            obj.status = ObjectStatus.SKIPPED
+            obj.failure_reason = f"pose invalid: {reason}"
+            rejected.append(obj)
             continue
 
-        candidates.append((score_object(obj), obj))
+        # Check 4: class_id known in bins
+        if obj.class_id not in BINS:
+            obj.status = ObjectStatus.SKIPPED
+            obj.failure_reason = f"unknown class_id: {obj.class_id}"
+            rejected.append(obj)
+            continue
+
+        accepted.append(obj)
+
+    return accepted, rejected
+
+
+# 3. select_object
+def _distance_to_robot(position: List[float]) -> float:
+    """Euclidean distance from robot base origin to object position."""
+    x, y, z = position
+    return math.sqrt(x**2 + y**2 + z**2)
+
+
+def select_object(
+    objects: List[ObjectState],
+    strategy: str = "highest_confidence"
+) -> Optional[ObjectState]:
+    """
+    Select the best next object from validated candidates.
+
+    Strategies:
+      "highest_confidence" → pick the object Person 1 is most sure about
+      "closest_distance"   → pick the object closest to robot base
+
+    Only considers objects with status == PENDING.
+
+    Args:
+        objects:  list of validated ObjectState
+        strategy: selection strategy string
+
+    Returns:
+        selected ObjectState, or None if list is empty
+
+    Example:
+        obj = select_object(accepted, strategy="highest_confidence")
+        # → ObjectState(obj_001, part_A, confidence=0.91)
+    """
+    candidates = [o for o in objects if o.status == ObjectStatus.PENDING]
 
     if not candidates:
-        return None, rejected
+        return None
 
-    candidates.sort(key=lambda x: x[0], reverse=True)
-    return candidates[0][1], rejected
+    if strategy == "highest_confidence":
+        selected = max(candidates, key=lambda o: o.confidence)
+
+    elif strategy == "closest_distance":
+        selected = min(
+            candidates,
+            key=lambda o: _distance_to_robot(o.pose.position_m)
+        )
+
+    else:
+        selected = max(candidates, key=lambda o: o.confidence)
+
+    selected.status = ObjectStatus.SELECTED
+    return selected
 
 
-# ── Bin mapping ───────────────────────────────────────────────────────────────
-def map_class_to_bin(class_id, class_to_bin):
-    if class_id not in class_to_bin:
-        raise ValueError(f"CLASS_NOT_MAPPED: {class_id}")
-    return class_to_bin[class_id]
+# 4. map_bin
+def map_bin(class_id: str) -> Optional[BinState]:
+    """
+    Convert bin configuration into BinState object.
 
+    Args:
+        class_id: object class id (e.g. part_A)
 
-# ── ActionPlan builder ────────────────────────────────────────────────────────
-def make_action_plan(obj, bins_config, retry_policy="retry_once_slow"):
-    """Create full ActionPlan for N3 motion primitive."""
-    bin_name = map_class_to_bin(obj["class_id"], bins_config["class_to_bin"])
-    bin_info = bins_config["bins"][bin_name]
+    Returns:
+        BinState or None if not found
+    """
 
+    bin_cfg = BINS.get(class_id)
+
+    if bin_cfg is None:
+        return None
+
+    pose = Pose(
+        position_m=bin_cfg["position_m"],
+        quaternion_xyzw=bin_cfg["quaternion_xyzw"]
+    )
+
+    return BinState(
+        bin_id=bin_cfg["bin_id"],
+        assigned_class=class_id,
+        pose=pose
+    )
+
+# 5. build_action_plan
+_plan_counter = 0
+
+def build_action_plan(obj: ObjectState, bin_state: BinState) -> ActionPlan:
+    """
+    Assemble a complete ActionPlan to send to Person 3.
+
+    Args:
+        obj:       selected ObjectState
+        bin_state: target BinState from map_bin()
+
+    Returns:
+        ActionPlan ready to send
+
+    Example:
+        plan = build_action_plan(obj_001, bin_a)
+        # → ActionPlan(plan_id="plan_0001", object_id="obj_001", ...)
+    """
+    global _plan_counter
+    _plan_counter += 1
+    plan_id = f"plan_{_plan_counter:04d}"
+
+    known_width = GRASP_WIDTHS.get(obj.class_id, obj.grasp_hint.grasp_width_m)
+    grasp = GraspHint(
+        yaw_rad=obj.grasp_hint.yaw_rad,
+        grasp_width_m=known_width,
+        approach_axis=obj.grasp_hint.approach_axis
+    )
+
+    return ActionPlan(
+        plan_id=plan_id,
+        object_id=obj.object_id,
+        class_id=obj.class_id,
+        object_pose=obj.pose,
+        target_bin=bin_state.bin_id,
+        bin_pose=bin_state.pose,
+        grasp_hint=grasp,
+        retry_policy="retry_once_slow",
+        timeout_s=20.0
+    )
+
+# 6. log_decision
+def log_decision(
+    step_id: int,
+    fsm_state: str,
+    obj: ObjectState,
+    bin_state: BinState,
+    reason: str = "highest_confidence_reachable",
+    failure_reason: Optional[str] = None
+) -> dict:
+    """
+    Build an eval log entry for Person 4.
+
+    Returns:
+        dict log entry
+    """
     return {
-        "primitive":        "pick_place",
-        "object_id":        obj["object_id"],
-        "class_id":         obj["class_id"],
-        "object_pose_base": obj["pose_base"],
-        "object_pos_world": obj.get("pos_world"),   # world frame — N3 dùng cho IK
-        "target_bin":       bin_name,
-        "bin_pose_base":    bin_info["pose_base"],
-        "bin_pos_world":    bin_info["pos_world"],   # world frame — N3 dùng cho IK
-        "grasp_hint":       obj["grasp_hint"],
-        "retry_policy":     retry_policy,
-        "timeout_s":        30.0,
+        "event": "planner_decision",
+        "episode_id": "ep_0001",
+        "step_id": step_id,
+        "fsm_state": fsm_state,
+        "selected_object_id": obj.object_id,
+        "selected_class_id": obj.class_id,
+        "selected_bin": bin_state.bin_id,
+        "object_confidence": obj.confidence,
+        "decision_reason": reason,
+        "failure_reason": failure_reason
     }
 
 
-# ── Planner trace logger ──────────────────────────────────────────────────────
-def log_event(path, event, **kwargs):
-    if path is None:
-        return
-    record = {"time": datetime.now(timezone.utc).isoformat(), "event": event, **kwargs}
-    with open(path, "a", encoding="utf-8") as f:
-        f.write(json.dumps(record, ensure_ascii=False) + "\n")
-
-
-# ── Task1Planner class ────────────────────────────────────────────────────────
-class Task1Planner:
+def run_planner(frame: dict, step_id: int = 0):
     """
-    N2 Planner: validate → select → plan → log.
-    Không tự gọi motion; trả ActionPlan để FSM/motion thực thi.
+    Full pipeline: frame → validate → select → map bin → ActionPlan + log.
+
+    Returns:
+        (ActionPlan, log_entry, rejected_list)
+        or (None, None, rejected_list) if no valid object found
     """
+    objects = parse_perception_frame(frame)
+    accepted, rejected = validate_objects(objects)
 
-    def __init__(self, bins_config, workspace, min_confidence=0.70, trace_path=None):
-        self.bins_config    = bins_config
-        self.workspace      = workspace
-        self.min_confidence = min_confidence
-        self.trace_path     = trace_path
-        self.handled_ids    = set()
-        self.retry_counts   = {}        # object_id → số lần retry
+    obj = select_object(accepted, strategy="highest_confidence")
+    if obj is None:
+        return None, None, rejected
 
-    def reset(self):
-        self.handled_ids.clear()
-        self.retry_counts.clear()
-        log_event(self.trace_path, "planner_reset")
+    bin_state = map_bin(obj.class_id)
+    if bin_state is None:
+        obj.status = ObjectStatus.FAILED
+        obj.failure_reason = f"No bin mapped for {obj.class_id}"
+        return None, None, rejected
 
-    def mark_handled(self, object_id):
-        self.handled_ids.add(object_id)
-        log_event(self.trace_path, "object_handled", object_id=object_id)
+    plan = build_action_plan(obj, bin_state)
+    log  = log_decision(step_id, "SELECT_OBJECT", obj, bin_state)
 
-    def can_retry(self, object_id, max_retries=1):
-        return self.retry_counts.get(object_id, 0) < max_retries
+    return plan, log, rejected
 
-    def increment_retry(self, object_id):
-        self.retry_counts[object_id] = self.retry_counts.get(object_id, 0) + 1
-
-    def plan(self, objects):
-        """
-        Select best object + create ActionPlan.
-        Returns (action_plan | None, info_dict).
-        """
-        obj, rejected = select_next_object(
-            objects,
-            handled_ids=self.handled_ids,
-            workspace=self.workspace,
-            min_confidence=self.min_confidence,
-        )
-
-        if rejected:
-            for oid, reason in rejected:
-                print(f"  [Planner] reject {oid}: {reason}")
-                log_event(self.trace_path, "object_rejected",
-                          object_id=oid, reason=reason)
-
-        if obj is None:
-            info = {"failure_reason": NO_VALID_OBJECT, "rejected": rejected}
-            log_event(self.trace_path, "plan_failed", **info)
-            return None, info
-
-        try:
-            action_plan = make_action_plan(obj, self.bins_config)
-        except Exception as e:
-            info = {"failure_reason": PLAN_ERROR, "error": str(e),
-                    "object_id": obj.get("object_id")}
-            log_event(self.trace_path, "plan_error", **info)
-            return None, info
-
-        info = {
-            "failure_reason": None,
-            "object_id":      obj["object_id"],
-            "class_id":       obj["class_id"],
-            "target_bin":     action_plan["target_bin"],
-        }
-        log_event(self.trace_path, "plan_created", **info)
-        print(f"  [Planner] plan → {obj['object_id']} ({obj['class_id']}) "
-              f"→ {action_plan['target_bin']}")
-        return action_plan, info

@@ -1,0 +1,59 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "PrimitiveResult",
+  "description": "Result returned by Person 3 (Motion Primitive) after executing an ActionPlan. FSM uses this to decide next state: verify / retry / fail.",
+  "type": "object",
+  "required": [
+    "plan_id",
+    "object_id",
+    "status"
+  ],
+  "additionalProperties": false,
+  "properties": {
+
+    "plan_id": {
+      "type": "string",
+      "description": "Must match the plan_id from the ActionPlan that was executed",
+      "pattern": "^plan_[0-9]{4}$",
+      "examples": ["plan_0001"]
+    },
+
+    "object_id": {
+      "type": "string",
+      "description": "Must match the object_id from the ActionPlan",
+      "examples": ["obj_001"]
+    },
+
+    "status": {
+      "type": "string",
+      "description": "Outcome of the motion primitive execution. FSM trigger mapping: SUCCESS→VERIFY, GRASP_FAIL→RETRY, DROP→RETRY, WRONG_BIN→FAIL, COLLISION→FAIL, TIMEOUT→RETRY",
+      "enum": [
+        "SUCCESS",
+        "GRASP_FAIL",
+        "DROP",
+        "WRONG_BIN",
+        "COLLISION",
+        "TIMEOUT"
+      ],
+      "examples": ["SUCCESS", "GRASP_FAIL"]
+    },
+
+    "failure_reason": {
+      "description": "Human-readable reason when status is not SUCCESS. Null on success.",
+      "oneOf": [
+        { "type": "string" },
+        { "type": "null" }
+      ],
+      "examples": [null, "gripper slipped", "object too smooth"]
+    },
+
+    "actual_bin": {
+      "description": "Filled only when status is WRONG_BIN. Records where object actually landed.",
+      "oneOf": [
+        { "type": "string", "enum": ["bin_A", "bin_B"] },
+        { "type": "null" }
+      ],
+      "examples": [null, "bin_B"]
+    }
+  }
+}

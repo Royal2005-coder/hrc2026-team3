@@ -1,179 +1,233 @@
-"""
-transform_utils.py — Coordinate-frame transforms for HRC2026 Task 1.
-
-Convention:
-    p_base = T_base_camera @ p_camera   (homogeneous)
-
-T_base_camera is a 4×4 matrix that maps points from the camera frame
-into the robot-base frame.
-"""
-
+import math
 import numpy as np
-from typing import Tuple
+from typing import List, Tuple, Optional
+import yaml
+
+DEFAULT_WORKSPACE_BOUNDS = {
+    "x": (-0.7, -0.4),
+    "y": (-0.4, 0.4),
+    "z": (0.5, 1.0),
+}
 
 
-# ---------------------------------------------------------------------------
-# Core helpers
-# ---------------------------------------------------------------------------
-def transform_point(T_ab: np.ndarray, p_b: np.ndarray) -> np.ndarray:
+def load_workspace_bounds() -> dict:
     """
-    Apply a 4×4 homogeneous transform to a 3-D point.
+    Load workspace bounds from configs/planner.yaml.
 
-    Parameters
-    ----------
-    T_ab : (4, 4) — transform from frame B to frame A.
-    p_b  : (3,)   — point expressed in frame B.
+    Returns:
+        dict:
+        {
+            "x": (min_x, max_x),
+            "y": (min_y, max_y),
+            "z": (min_z, max_z)
+        }
 
-    Returns
-    -------
-    np.ndarray (3,) — point expressed in frame A.
+    Falls back to DEFAULT_WORKSPACE_BOUNDS if:
+      - file does not exist
+      - yaml invalid
+      - required keys missing
     """
-    p_h = np.array([p_b[0], p_b[1], p_b[2], 1.0])
-    return (T_ab @ p_h)[:3]
+
+    try:
+
+        with open("configs/planner.yaml", "r", encoding="utf-8") as f:
+            config = yaml.safe_load(f)
+
+        bounds = config.get("workspace_bounds", {})
+
+        return {
+            "x": tuple(bounds["x"]),
+            "y": tuple(bounds["y"]),
+            "z": tuple(bounds["z"]),
+        }
+
+    except Exception as e:
+        print(f"[WARN] Failed to load planner.yaml: {e}")
+        print("[WARN] Using default workspace bounds.")
+
+        return DEFAULT_WORKSPACE_BOUNDS
 
 
-def invert_transform(T: np.ndarray) -> np.ndarray:
-    """Efficient inverse of a rigid-body 4×4 transform."""
-    R = T[:3, :3]
-    t = T[:3, 3]
-    T_inv = np.eye(4)
-    T_inv[:3, :3] = R.T
-    T_inv[:3, 3] = -R.T @ t
-    return T_inv
+WORKSPACE_BOUNDS = load_workspace_bounds()
+QUATERNION_NORM_TOLERANCE = 0.01
 
 
-# ---------------------------------------------------------------------------
-# Quaternion ↔ Rotation matrix  (xyzw convention)
-# ---------------------------------------------------------------------------
-def quaternion_to_rotation_matrix(q_xyzw: np.ndarray) -> np.ndarray:
-    """Convert quaternion [x, y, z, w] → 3×3 rotation matrix."""
-    x, y, z, w = q_xyzw
-    return np.array([
-        [1 - 2*(y*y + z*z),   2*(x*y - z*w),     2*(x*z + y*w)],
-        [2*(x*y + z*w),       1 - 2*(x*x + z*z), 2*(y*z - x*w)],
-        [2*(x*z - y*w),       2*(y*z + x*w),     1 - 2*(x*x + y*y)],
-    ])
-
-
-def rotation_matrix_to_quaternion(R: np.ndarray) -> np.ndarray:
-    """Convert 3×3 rotation matrix → quaternion [x, y, z, w]."""
-    tr = np.trace(R)
-    if tr > 0:
-        s = 0.5 / np.sqrt(tr + 1.0)
-        w = 0.25 / s
-        x = (R[2, 1] - R[1, 2]) * s
-        y = (R[0, 2] - R[2, 0]) * s
-        z = (R[1, 0] - R[0, 1]) * s
-    elif R[0, 0] > R[1, 1] and R[0, 0] > R[2, 2]:
-        s = 2.0 * np.sqrt(1.0 + R[0, 0] - R[1, 1] - R[2, 2])
-        w = (R[2, 1] - R[1, 2]) / s
-        x = 0.25 * s
-        y = (R[0, 1] + R[1, 0]) / s
-        z = (R[0, 2] + R[2, 0]) / s
-    elif R[1, 1] > R[2, 2]:
-        s = 2.0 * np.sqrt(1.0 + R[1, 1] - R[0, 0] - R[2, 2])
-        w = (R[0, 2] - R[2, 0]) / s
-        x = (R[0, 1] + R[1, 0]) / s
-        y = 0.25 * s
-        z = (R[1, 2] + R[2, 1]) / s
-    else:
-        s = 2.0 * np.sqrt(1.0 + R[2, 2] - R[0, 0] - R[1, 1])
-        w = (R[1, 0] - R[0, 1]) / s
-        x = (R[0, 2] + R[2, 0]) / s
-        y = (R[1, 2] + R[2, 1]) / s
-        z = 0.25 * s
-    return np.array([x, y, z, w])
-
-
-def make_transform(R: np.ndarray, t: np.ndarray) -> np.ndarray:
-    """Build 4×4 homogeneous transform from R (3×3) and t (3,)."""
-    T = np.eye(4)
-    T[:3, :3] = R
-    T[:3, 3] = t
-    return T
-
-
-# ---------------------------------------------------------------------------
-# Transform validation (Module 4 spec)
-# ---------------------------------------------------------------------------
-def check_transform(T, atol: float = 1e-3) -> dict:
+# 1. validate_quaternion
+def validate_quaternion(q: List[float]) -> Tuple[bool, str]:
     """
-    Validate a 4×4 homogeneous transform.
+    Check if a quaternion [x, y, z, w] is valid.
+    A valid quaternion must satisfy: x² + y² + z² + w² ≈ 1.0
 
-    Returns dict with det_R, ortho_err, is_valid — mirrors Module 4 skeleton.
+    Args:
+        q: [x, y, z, w] quaternion values
+
+    Returns:
+        (is_valid, reason_if_invalid)
+
+    Example:
+        >>> validate_quaternion([0.0, 0.0, 0.707, 0.707])
+        (True, "OK")
+        >>> validate_quaternion([1.0, 1.0, 1.0, 1.0])
+        (False, "Quaternion norm 2.0000 is not 1.0")
     """
-    T = np.asarray(T, dtype=float)
-    assert T.shape == (4, 4), f"Expected 4×4, got {T.shape}"
-    R = T[:3, :3]
-    det_R = float(np.linalg.det(R))
-    ortho_err = float(np.linalg.norm(R.T @ R - np.eye(3)))
-    is_valid = abs(det_R - 1.0) < atol and ortho_err < atol
-    return {"det_R": det_R, "ortho_err": ortho_err, "is_valid": is_valid}
+    if len(q) != 4:
+        return False, f"Quaternion must have 4 values, got {len(q)}"
+
+    x, y, z, w = q
+    norm = math.sqrt(x**2 + y**2 + z**2 + w**2)
+
+    if abs(norm - 1.0) > QUATERNION_NORM_TOLERANCE:
+        return False, f"Quaternion norm {norm:.4f} is not 1.0 (tolerance ±{QUATERNION_NORM_TOLERANCE})"
+
+    return True, "OK"
 
 
-# ---------------------------------------------------------------------------
-# Sanity tests
-# ---------------------------------------------------------------------------
-def sanity_identity(p: np.ndarray) -> bool:
-    """T = I should leave point unchanged."""
-    p_out = transform_point(np.eye(4), p)
-    return bool(np.allclose(p, p_out))
-
-
-def sanity_workspace_bounds(p_base: np.ndarray,
-                            x_range: Tuple[float, float] = (-0.5, 1.0),
-                            y_range: Tuple[float, float] = (-0.5, 0.5),
-                            z_range: Tuple[float, float] = (0.0, 1.5)) -> bool:
-    """Check whether a base-frame point lies within the robot workspace."""
-    x, y, z = p_base
-    return (x_range[0] <= x <= x_range[1] and
-            y_range[0] <= y <= y_range[1] and
-            z_range[0] <= z <= z_range[1])
-
-
-def run_transform_sanity(T_base_camera: np.ndarray,
-                         test_points_cam: list[np.ndarray] | None = None,
-                         report_path: str = "transform_sanity_report.md") -> str:
+# 2. validate_position
+def validate_position(position: List[float], bounds: dict = None) -> Tuple[bool, str]:
     """
-    Run standard sanity checks and write a markdown report.
+    Check if a 3D position [x, y, z] is within robot workspace bounds.
 
-    Parameters
-    ----------
-    T_base_camera   : 4×4 transform (camera → base)
-    test_points_cam : list of 3-D points in camera frame to test
-    report_path     : output file path
+    Args:
+        position: [x, y, z] in meters (robot base frame)
+        bounds: optional custom bounds dict, uses WORKSPACE_BOUNDS if None
 
-    Returns
-    -------
-    str — path to generated report
+    Returns:
+        (is_valid, reason_if_invalid)
     """
-    if test_points_cam is None:
-        test_points_cam = [
-            np.array([0.0, 0.0, 0.7]),
-            np.array([0.1, 0.0, 0.7]),
-            np.array([-0.1, 0.0, 0.7]),
-            np.array([0.0, 0.05, 0.5]),
-        ]
 
-    lines = ["# Transform Sanity Report\n"]
+    if len(position) != 3:
+        return False, f"Position must have 3 values [x,y,z], got {len(position)}"
 
-    ok = sanity_identity(np.array([1.0, 2.0, 3.0]))
-    lines.append(f"- Identity test: {'PASS' if ok else 'FAIL'}")
+    b = bounds if bounds else WORKSPACE_BOUNDS
+    labels = ["x", "y", "z"]
 
-    det = np.linalg.det(T_base_camera[:3, :3])
-    lines.append(f"- det(R) = {det:.6f} (should be ≈ 1.0): "
-                 f"{'PASS' if abs(det - 1.0) < 1e-4 else 'FAIL'}")
+    for label, val in zip(labels, position):
+        lo, hi = b[label]
 
-    lines.append("\n## Test points\n")
-    lines.append("| p_camera | p_base | in_workspace |")
-    lines.append("|----------|--------|-------------|")
-    for p_cam in test_points_cam:
-        p_base = transform_point(T_base_camera, p_cam)
-        in_ws = sanity_workspace_bounds(p_base)
-        lines.append(f"| {np.round(p_cam, 4).tolist()} "
-                     f"| {np.round(p_base, 4).tolist()} "
-                     f"| {'YES' if in_ws else 'NO'} |")
+        if not (lo <= val <= hi):
+            return False, f"{label}={val} out of bounds [{lo}, {hi}]"
 
-    with open(report_path, "w") as f:
-        f.write("\n".join(lines) + "\n")
-    return report_path
+    return True, "OK"
+
+
+
+# 3. validate_transform
+def validate_transform(position: List[float], quaternion: List[float]) -> Tuple[bool, str]:
+    """
+    Run both position and quaternion validation together.
+
+    Args:
+        position:   [x, y, z] in robot base frame
+        quaternion: [x, y, z, w]
+
+    Returns:
+        (is_valid, reason_if_invalid)
+
+    Example:
+        >>> validate_transform([0.46, -0.15, 0.82], [0.0, 0.0, 0.707, 0.707])
+        (True, "OK")
+    """
+    q_valid, q_reason = validate_quaternion(quaternion)
+    if not q_valid:
+        return False, f"Quaternion invalid: {q_reason}"
+
+    p_valid, p_reason = validate_position(position)
+    if not p_valid:
+        return False, f"Position invalid: {p_reason}"
+
+    return True, "OK"
+
+
+# 4. quaternion_to_yaw
+def quaternion_to_yaw(q: List[float]) -> float:
+    """
+    Extract yaw angle (rotation around Z axis) from quaternion [x, y, z, w].
+    This is the angle the gripper needs to rotate before closing.
+
+    Formula: yaw = atan2(2*(w*z + x*y), 1 - 2*(y² + z²))
+
+    Args:
+        q: [x, y, z, w] quaternion
+
+    Returns:
+        yaw angle in radians
+
+    Example:
+        >>> quaternion_to_yaw([0.0, 0.0, 0.707, 0.707])
+        1.5707...   ← 90 degrees
+        >>> quaternion_to_yaw([0.0, 0.0, 0.0, 1.0])
+        0.0         ← no rotation
+    """
+    x, y, z, w = q
+    yaw = math.atan2(2.0 * (w * z + x * y), 1.0 - 2.0 * (y * y + z * z))
+    return yaw
+
+
+# 5. camera_to_base
+def camera_to_base(
+    position_camera: List[float],
+    T_cam_to_base: Optional[np.ndarray] = None
+) -> List[float]:
+    """
+    Convert a position from camera frame to robot base frame.
+
+    In the real system, T_cam_to_base comes from camera calibration.
+    For Task 1, Person 1 already provides pose_base, so this is used
+    to verify or re-apply the transform if needed.
+
+    Args:
+        position_camera: [x, y, z] in camera frame (meters)
+        T_cam_to_base:   4x4 homogeneous transform matrix (optional)
+                         If None, uses a default identity-like transform
+                         (assumes camera is aligned with robot base)
+
+    Returns:
+        [x, y, z] in robot base frame
+
+    Example:
+        >>> camera_to_base([0.12, -0.04, 0.74])
+        [0.12, -0.04, 0.74]   ← with identity transform
+    """
+    if T_cam_to_base is None:
+        T_cam_to_base = np.eye(4)
+
+    p_cam = np.array([position_camera[0], position_camera[1], position_camera[2], 1.0])
+
+    p_base = T_cam_to_base @ p_cam
+
+    return [round(float(p_base[0]), 4),
+            round(float(p_base[1]), 4),
+            round(float(p_base[2]), 4)]
+
+
+# 6. world_to_robot
+def world_to_robot(
+    position_world: List[float],
+    robot_origin_in_world: List[float] = None
+) -> List[float]:
+    """
+    Convert a position from world frame to robot base frame.
+
+    Robot base frame = world frame shifted by robot's origin position.
+
+    Args:
+        position_world:        [x, y, z] in world frame
+        robot_origin_in_world: [x, y, z] of robot base in world frame
+                               Default: [0, 0, 0] (robot IS the world origin)
+
+    Returns:
+        [x, y, z] in robot base frame
+
+    Example:
+        >>> world_to_robot([1.46, 0.85, 0.82], robot_origin_in_world=[1.0, 1.0, 0.0])
+        [0.46, -0.15, 0.82]
+    """
+    if robot_origin_in_world is None:
+        robot_origin_in_world = [0.0, 0.0, 0.0]
+
+    result = [
+        round(position_world[0] - robot_origin_in_world[0], 4),
+        round(position_world[1] - robot_origin_in_world[1], 4),
+        round(position_world[2] - robot_origin_in_world[2], 4),
+    ]
+    return result

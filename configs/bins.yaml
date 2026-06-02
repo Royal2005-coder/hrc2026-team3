@@ -1,0 +1,14 @@
+bins:
+  part_A:
+    bin_id: bin_A
+    position_m: [-0.45, 0.25, 0.80]
+    quaternion_xyzw: [0.0, 0.0, 0.0, 1.0]
+    grasp_width_m: 0.045
+    description: "Blue bin — left side of table"
+
+  part_B:
+    bin_id: bin_B
+    position_m: [-0.45, -0.25, 0.80]
+    quaternion_xyzw: [0.0, 0.0, 0.0, 1.0]
+    grasp_width_m: 0.060
+    description: "Red bin — right side of table"
