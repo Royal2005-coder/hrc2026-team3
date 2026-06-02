@@ -913,9 +913,8 @@ class PickAndPlaceStateMachine:
             _obj_base_x = world_obj[1] + 0.20   # base_x = world_y + 0.20
             _obj_base_y = -world_obj[0] + 0.70  # base_y = -world_x + 0.70
             _obj_xy_reach = math.sqrt(_obj_base_x**2 + _obj_base_y**2)
-            tilt_deg = 45 if _obj_xy_reach > 0.44 else 0
-            print(f"[FSM] Object base XY reach={_obj_xy_reach:.3f}m "
-                  f"→ {'diagonal_45' if tilt_deg else 'z_down'} grasp approach")
+            tilt_deg = 0  # z_down: always approach from top
+            print(f"[FSM] Object base XY reach={_obj_xy_reach:.3f}m → z_down grasp approach (from top)")
             APPROACH_R = _make_diagonal_R(tilt_deg)
             tool_Z_dir = APPROACH_R[:, 2]  # world frame: [0,0,-1] or [0,+0.707,-0.707]
 
@@ -1274,17 +1273,8 @@ class PickAndPlaceStateMachine:
         # (rot_err stuck at π/2 for PartB bins), causing IK warm-start resets and
         # S4 timeout. The object is held by FixedJoint so orientation during transit
         # doesn't affect the grasp. S5 will re-approach with z_down.
-        ik_high_place = _matrix_to_base_ik(self.T_high_place)  # [x,y,z, roll,pitch,yaw]
-        if self.robot and self.robot.ik_solver:
-            try:
-                current_se3 = self.robot.ik_solver.get_ee_pose(self.side)
-                current_rpy = DualArmIK.se3_to_xyzrpy(current_se3)
-                ik_high_place[3] = float(current_rpy[3])  # roll
-                ik_high_place[4] = float(current_rpy[4])  # pitch
-                ik_high_place[5] = float(current_rpy[5])  # yaw
-                print(f"  [S4] Using current EE orientation (rpy={[round(float(v),3) for v in current_rpy[3:]]})")
-            except Exception as _e:
-                print(f"  [S4] Could not read current orientation ({_e}) — using z_down target")
+        ik_high_place = _matrix_to_base_ik(self.T_high_place)  # [x,y,z, roll,pitch,yaw] — z_down orientation
+        print(f"  [S4] Targeting z_down orientation at bin high-place")
 
         px, py, pz = ik_high_place[0], ik_high_place[1], ik_high_place[2]
         print(f"  bin high-place target base: x={px:.3f}, y={py:.3f}, z={pz:.3f} "
@@ -1297,9 +1287,9 @@ class PickAndPlaceStateMachine:
         success, _, reason = execute_stage(
             self.robot, self.world, "s4_transfer", ik_high_place, self.side,
             step_size=0.030, max_steps=4000,
-            pos_tol=0.08, rot_tol=1.50,
+            pos_tol=0.08, rot_tol=0.80,
             timeout_sec=60.0,
-            ik_rot_tol=0.30, ik_rot_weight=0.01, ik_null_weight=0.0, ik_max_iter=300)
+            ik_rot_tol=0.15, ik_rot_weight=0.3, ik_null_weight=0.0, ik_max_iter=300)
         if not success:
             print(f"  [S4] ⚠ Transfer incomplete ({reason}) — proceeding best-effort to S5")
         self.state = "S5_LOWER_BIN"
@@ -1331,29 +1321,27 @@ class PickAndPlaceStateMachine:
             except Exception as _e:
                 print(f"  [S5] Cannot get current EE ({_e}) — using T_high_place as start")
 
-        # Phase 1: Straight descent to pre-place height keeping carry orientation.
-        # z_down reorient (old Phase 0) is infeasible at bin XY≈0.71m — the arm fights
-        # to achieve an unreachable orientation, producing erratic horizontal posture.
-        # Skipping it: arm descends in whatever orientation S4 left it (natural carry),
-        # then releases via FixedJoint. Position-only IK ensures stable convergence.
+        # Phase 1: Descent to pre-place height with z_down orientation.
+        # S4 now targets z_down at T_high_place, so T_start_s5 should already be near
+        # z_down. Use interp_rotation=True to smoothly complete any remaining transition.
         success, err = move_interpolated(
             self.robot, self.world, T_start_s5, self.T_pre_place,
             self.side, "s5_lower_pre",
-            num_steps=10, max_sim_steps=120, pos_tol=0.06, rot_tol=1.50,
-            interp_rotation=False, ik_rot_tol=0.40,
-            ik_rot_weight=0.05, ik_null_weight=0.0, ik_max_iter=200)
+            num_steps=10, max_sim_steps=150, pos_tol=0.06, rot_tol=0.50,
+            interp_rotation=True, ik_rot_tol=0.15,
+            ik_rot_weight=0.8, ik_null_weight=0.0, ik_max_iter=250)
         if not success:
             print("  [S5] Pre-lower stuck — releasing above bin (best-effort)")
             self.state = "S6_RELEASE"
             return
 
-        # Phase 2: Final descent to T_place
+        # Phase 2: Final descent to T_place maintaining z_down
         success, err = move_interpolated(
             self.robot, self.world, self.T_pre_place, self.T_place,
             self.side, "s5_lower_final",
-            num_steps=8, max_sim_steps=120, pos_tol=0.03, rot_tol=1.50,
-            interp_rotation=False, ik_rot_tol=0.40,
-            ik_rot_weight=0.05, ik_null_weight=0.0, ik_max_iter=200)
+            num_steps=8, max_sim_steps=150, pos_tol=0.03, rot_tol=0.40,
+            interp_rotation=False, ik_rot_tol=0.15,
+            ik_rot_weight=1.0, ik_null_weight=0.0, ik_max_iter=250)
         if not success:
             print("  [S5] Final lower stuck — releasing at current position (best-effort)")
         self.state = "S6_RELEASE"
