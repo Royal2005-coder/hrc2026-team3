@@ -907,20 +907,21 @@ class PickAndPlaceStateMachine:
             Z_OFFSET = self.specs.get("grasp_z_offset_m", 0.0)
             SAFE_FLY_HEIGHT = 1.40
 
-            # Choose grasp orientation based on wrist XY reach to object.
-            # z_down reach limit ≈ 0.46m. Objects in the scatter area (world_y up to 0.30m)
-            # land at base_x = world_y + 0.20 ≈ 0.50m — past the limit — causing the IK to
-            # find an elbow-up solution (joints 1&2 at limit, joint 3 past 90°) that cannot
-            # descend to grasp. diagonal_45 tilts tool-Z to [0,+0.707,-0.707], moving the
-            # wrist 0.707*tcp_z ≈ 0.156m closer to the robot body, cutting XY reach to ~0.34m.
+            # Adaptive grasp orientation based on wrist XY reach to object.
+            # z_down (tilt=0°): gripper straight down, reach limit ≈ 0.46m from base origin.
+            # diagonal_45 (tilt=45°): tool-Z=[0,+0.707,-0.707], reach ~0.34m — used for
+            # far objects where z_down hits elbow joint limits at table height.
             _obj_base_x = world_obj[1] + 0.20   # base_x = world_y + 0.20
             _obj_base_y = -world_obj[0] + 0.70  # base_y = -world_x + 0.70
             _obj_xy_reach = math.sqrt(_obj_base_x**2 + _obj_base_y**2)
-            # Always z_down: gripper points straight down (wrist_pitch bent 90°).
-            # S1 uses an overhead approach (fly directly above → descend) so the
-            # arm never reaches the XY joint limit before the wrist is pointing down.
-            tilt_deg = 0
-            print(f"[FSM] Object XY reach={_obj_xy_reach:.3f}m → z_down approach (gripper pointing straight down)")
+            _Z_DOWN_MAX_XY = 0.46  # beyond this the arm hits joint limits in z_down at table height
+            if _obj_xy_reach <= _Z_DOWN_MAX_XY:
+                tilt_deg = 0
+                print(f"[FSM] Object XY reach={_obj_xy_reach:.3f}m ≤ {_Z_DOWN_MAX_XY}m → z_down (gripper straight down)")
+            else:
+                tilt_deg = 45
+                print(f"[FSM] Object XY reach={_obj_xy_reach:.3f}m > {_Z_DOWN_MAX_XY}m → diagonal_45 (45° forward-down)")
+            self.tilt_deg = tilt_deg  # stored for S1 wrist pre-bend
             APPROACH_R = _make_diagonal_R(tilt_deg)
             tool_Z_dir = APPROACH_R[:, 2]  # world frame: [0,0,-1] for z_down, [0,+0.707,-0.707] for 45°
 
@@ -1019,19 +1020,14 @@ class PickAndPlaceStateMachine:
         # This replaces the old 3-phase column+sweep which left the arm at full XY
         # extension at table height, leaving no joint DOF to keep the wrist down.
 
-        # Pre-bend wrist to -π/2 (z_down) before running any IK.
-        # Without this, IK warm-start begins from wrist_pitch≈0 (horizontal) and
-        # converges to a local minimum where position is correct but wrist stays
-        # horizontal (gripper pointing sideways) instead of pointing straight down.
-        # Teleporting the physical joint seeds the warm-start so IK stays in z_down.
-        #
-        # Also patch IK solver's q_initial and q_neutral:
-        #   - q_initial: used by _reset_arm_warmstart() when IK fails 30× in a row.
-        #     Without this patch, the reset puts wrist back to 0 → arm flips horizontal
-        #     after ~1 second (the symptom the user observed).
-        #   - q_neutral: used by null-space optimization to pull joints toward "resting".
-        #     Without this patch, null-space pulls wrist back toward 0 whenever
-        #     null_weight > 0.
+        # Pre-bend wrist to the approach-specific target angle before running any IK.
+        #   z_down (tilt=0°):    wrist_pitch = -π/2 → gripper pointing straight down
+        #   diagonal_45 (tilt=45°): wrist_pitch = -π/4 → gripper at ~45° forward-down
+        # Also patch q_initial and q_neutral in the IK solver so that:
+        #   - _reset_arm_warmstart() resets to the correct angle (not back to 0)
+        #   - null-space optimization pulls toward the correct angle
+        _tilt = getattr(self, 'tilt_deg', 0)
+        _wrist_target = -math.pi / 2 if _tilt == 0 else -math.pi / 4
         _prefix = "R" if self.side == "right" else "L"
         _wp_name = f"{_prefix}_wrist_pitch_joint"
         if self.robot and self.robot._articulation:
@@ -1041,23 +1037,24 @@ class PickAndPlaceStateMachine:
                     import torch as _torch
                     _wp_idx = self.robot._articulation.get_dof_index(_wp_name)
                     self.robot._articulation.set_joint_positions(
-                        _torch.tensor([[-math.pi / 2]], dtype=_torch.float32),
+                        _torch.tensor([[_wrist_target]], dtype=_torch.float32),
                         joint_indices=_torch.tensor([_wp_idx], dtype=_torch.int32)
                     )
                     for _ in range(10):
                         self.world.step(render=True)
-                    print(f"  [S1] Wrist {_wp_name} pre-bent to z_down ({-math.pi/2:.3f} rad)")
+                    _label = "z_down" if _tilt == 0 else "diagonal_45"
+                    print(f"  [S1] Wrist {_wp_name} pre-bent for {_label} ({_wrist_target:.3f} rad)")
 
-                    # Patch IK solver references so resets/null-space preserve z_down
+                    # Patch IK solver references so resets/null-space preserve the target angle
                     if self.robot.ik_solver:
                         try:
                             from DualArmIK import DualArmIK as _DAIK
-                            # (a) q_initial: so _reset_arm_warmstart() resets to wrist=-π/2
+                            # (a) q_initial: so _reset_arm_warmstart() resets to target angle
                             if self.robot.ik_solver.q_initial is not None:
                                 _jid = self.robot.ik_solver.model.getJointId(_wp_name)
                                 _q_wp = self.robot.ik_solver.model.joints[_jid].idx_q
-                                self.robot.ik_solver.q_initial[_q_wp] = -math.pi / 2
-                            # (b) q_neutral: so null-space pull targets z_down not horizontal
+                                self.robot.ik_solver.q_initial[_q_wp] = _wrist_target
+                            # (b) q_neutral: so null-space pull targets correct angle
                             _arm_joints = (_DAIK.RIGHT_ARM_JOINTS if self.side == 'right'
                                            else _DAIK.LEFT_ARM_JOINTS)
                             if _wp_name in _arm_joints:
@@ -1065,12 +1062,12 @@ class PickAndPlaceStateMachine:
                                 _q_neu = (self.robot.ik_solver.q_neutral_right if self.side == 'right'
                                           else self.robot.ik_solver.q_neutral_left)
                                 if _q_neu is not None:
-                                    _q_neu[_arm_idx] = -math.pi / 2
-                            print(f"  [S1] IK q_initial & q_neutral patched to z_down ({self.side})")
+                                    _q_neu[_arm_idx] = _wrist_target
+                            print(f"  [S1] IK q_initial & q_neutral patched to {_label} ({self.side})")
                         except Exception as _qe:
                             print(f"  [S1] IK warm-start patch failed: {_qe}")
                 except Exception as _e:
-                    print(f"  [S1] Wrist pre-bend failed ({_e}) — IK may not achieve z_down")
+                    print(f"  [S1] Wrist pre-bend failed ({_e}) — IK may not achieve target orientation")
 
         # Read current EE world-frame pose as 4×4 matrix (interpolation start point).
         T_current = self.T_high_approach.copy()
@@ -1115,7 +1112,8 @@ class PickAndPlaceStateMachine:
             print(f"  [S1/P1] Primary arm '{self.side}' failed ({err1}). Trying '{alt_side}'...")
             if self.robot:
                 self.robot.open_gripper(side=alt_side)
-            # Pre-bend alt_side wrist + patch IK references (same fix as primary side)
+            # Pre-bend alt_side wrist + patch IK references (same angle as primary side)
+            _alt_wrist_target = _wrist_target
             _alt_wp_name = f"{'R' if alt_side == 'right' else 'L'}_wrist_pitch_joint"
             if self.robot and self.robot._articulation and _alt_wp_name in self.robot._articulation.dof_names:
                 try:
@@ -1123,7 +1121,7 @@ class PickAndPlaceStateMachine:
                     from DualArmIK import DualArmIK as _DAIK
                     _alt_wp_idx = self.robot._articulation.get_dof_index(_alt_wp_name)
                     self.robot._articulation.set_joint_positions(
-                        _torch.tensor([[-math.pi / 2]], dtype=_torch.float32),
+                        _torch.tensor([[_alt_wrist_target]], dtype=_torch.float32),
                         joint_indices=_torch.tensor([_alt_wp_idx], dtype=_torch.int32)
                     )
                     for _ in range(5):
@@ -1132,7 +1130,7 @@ class PickAndPlaceStateMachine:
                         if self.robot.ik_solver.q_initial is not None:
                             _ajid = self.robot.ik_solver.model.getJointId(_alt_wp_name)
                             _aq_wp = self.robot.ik_solver.model.joints[_ajid].idx_q
-                            self.robot.ik_solver.q_initial[_aq_wp] = -math.pi / 2
+                            self.robot.ik_solver.q_initial[_aq_wp] = _alt_wrist_target
                         _a_joints = (_DAIK.RIGHT_ARM_JOINTS if alt_side == 'right'
                                      else _DAIK.LEFT_ARM_JOINTS)
                         if _alt_wp_name in _a_joints:
@@ -1140,7 +1138,7 @@ class PickAndPlaceStateMachine:
                             _aq_neu = (self.robot.ik_solver.q_neutral_right if alt_side == 'right'
                                        else self.robot.ik_solver.q_neutral_left)
                             if _aq_neu is not None:
-                                _aq_neu[_ai] = -math.pi / 2
+                                _aq_neu[_ai] = _alt_wrist_target
                 except Exception:
                     pass
             success_alt, err_alt = move_interpolated(
