@@ -1,6 +1,0 @@
-path: /home/ubuntu/tai/dataset
-train: images/train
-val:   images/val
-
-nc: 2
-names: ['part_A', 'part_B']

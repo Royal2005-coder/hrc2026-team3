@@ -10,3 +10,17 @@ __pycache__/
 assets
 lerobot
 Ubtech_sim_ref
+
+# ===== Generated training / experiment artifacts =====
+runs/
+mlruns/
+dataset/
+*.pt
+*.pth
+*.onnx
+*.engine
+*.weights
+*.npy
+__pycache__/
+*.pyc
+.DS_Store
