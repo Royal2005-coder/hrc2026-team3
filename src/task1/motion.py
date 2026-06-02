@@ -916,16 +916,11 @@ class PickAndPlaceStateMachine:
             _obj_base_x = world_obj[1] + 0.20   # base_x = world_y + 0.20
             _obj_base_y = -world_obj[0] + 0.70  # base_y = -world_x + 0.70
             _obj_xy_reach = math.sqrt(_obj_base_x**2 + _obj_base_y**2)
-            # Adaptive tilt: z_down for close objects, diagonal_45 for far ones.
-            # z_down reach limit ≈ 0.46m; beyond that the arm hits joint limits and
-            # the IK settles at a near-horizontal orientation instead of pointing down.
-            _Z_DOWN_LIMIT = 0.46
-            if _obj_xy_reach > _Z_DOWN_LIMIT:
-                tilt_deg = 45
-                print(f"[FSM] Object XY reach={_obj_xy_reach:.3f}m > {_Z_DOWN_LIMIT}m → diagonal_45 approach (gripper tilted 45° down)")
-            else:
-                tilt_deg = 0
-                print(f"[FSM] Object XY reach={_obj_xy_reach:.3f}m ≤ {_Z_DOWN_LIMIT}m → z_down approach (gripper pointing straight down)")
+            # Always z_down: gripper points straight down (wrist_pitch bent 90°).
+            # S1 uses an overhead approach (fly directly above → descend) so the
+            # arm never reaches the XY joint limit before the wrist is pointing down.
+            tilt_deg = 0
+            print(f"[FSM] Object XY reach={_obj_xy_reach:.3f}m → z_down approach (gripper pointing straight down)")
             APPROACH_R = _make_diagonal_R(tilt_deg)
             tool_Z_dir = APPROACH_R[:, 2]  # world frame: [0,0,-1] for z_down, [0,+0.707,-0.707] for 45°
 
@@ -1013,109 +1008,100 @@ class PickAndPlaceStateMachine:
         except Exception as e: return self._fail(f"init_error: {e}")
 
     def _state_s1_pregrasp(self):
-        print("[FSM] State: S1_PREGRASP -> 3-phase column approach (avoid full-extension singularity)")
-        # URDF analysis shows z_down XY reach limit ≈ 0.46m.
-        # Objects can be up to XY=0.59m (scatter area world y=0.38m → base x=0.58m).
-        # Direct move to T_pre_grasp leaves arm at joint limits → S2 cannot descend 8cm.
-        #
-        # 3-phase column approach:
-        #   Phase 1 → retracted XY at SAFE_FLY_HEIGHT  (arm bent ~40%, not at limit)
-        #   Phase 2 → descend vertically to pre-grasp Z (arm stays bent → always feasible)
-        #   Phase 3 → horizontal sweep to T_pre_grasp   (arm extends at fixed height →
-        #             elbow can still bend downward for S2 descent, no singularity)
-        #
-        # RETRACT=0.40: for the farthest object (XY=0.587m),
-        #   retracted XY = 0.587 × 0.60 = 0.352m — comfortably within z_down workspace.
-        # Formula: retracted_world = robot_base_world + (1-RETRACT)*(object_world - robot_base_world)
-        RETRACT = 0.40
-        # Robot base in world frame (from _matrix_to_base_ik: x_base=y_w+0.20, y_base=-x_w+0.70)
-        rx, ry = 0.70, -0.20   # world x,y of robot base
+        print("[FSM] State: S1_PREGRASP -> overhead approach (fly above object, then descend straight down)")
+        # Overhead approach for z_down grasping:
+        #   Phase 1 → fly to T_high_approach (same XY as grasp, SAFE_FLY_HEIGHT)
+        #             At this height the arm is NOT at joint limits, so the IK CAN
+        #             achieve z_down (wrist_pitch bent down) without singularity.
+        #   Phase 2 → descend straight down to T_pre_grasp (8 cm above grasp)
+        #             Pure Z descent while holding z_down → elbow bends more but
+        #             never hits limits.
+        # This replaces the old 3-phase column+sweep which left the arm at full XY
+        # extension at table height, leaving no joint DOF to keep the wrist down.
 
-        T_raised_column = self.T_pre_grasp.copy()
-        T_raised_column[0, 3] = self.T_pre_grasp[0, 3] * (1.0 - RETRACT) + rx * RETRACT
-        T_raised_column[1, 3] = self.T_pre_grasp[1, 3] * (1.0 - RETRACT) + ry * RETRACT
-        T_raised_column[2, 3] = self.T_high_approach[2, 3]   # SAFE_FLY_HEIGHT
+        # Read current EE world-frame pose as 4×4 matrix (interpolation start point).
+        T_current = self.T_high_approach.copy()
+        T_current[2, 3] += 0.20   # safe fallback: slightly above T_high_approach
+        if self.robot and self.robot.ik_solver:
+            try:
+                joints = self.robot.get_joint_states()
+                positions = joints['positions']
+                if positions and isinstance(positions[0], list):
+                    positions = positions[0]
+                self.robot.ik_solver.sync_joint_positions(joints['names'], positions)
+                ee_se3 = self.robot.ik_solver.get_ee_pose(self.side)
+                p_b = np.array(ee_se3.translation)
+                R_b = np.array(ee_se3.rotation)
+                p_w = np.array([-p_b[1] + 0.70, p_b[0] - 0.20, p_b[2] + 0.9005])
+                T_current = np.eye(4)
+                T_current[:3, :3] = _R_W2B.T @ R_b
+                T_current[:3, 3]  = p_w
+            except Exception as e:
+                print(f"  [S1] FK read failed ({e}) — using T_high_approach+0.2 as start")
 
-        T_column = T_raised_column.copy()
-        T_column[2, 3] = self.T_pre_grasp[2, 3]              # drop to pre-grasp height
-
-        ik_raised = _matrix_to_base_ik(T_raised_column)
-        ik_pre    = _matrix_to_base_ik(self.T_pre_grasp)
-        xr, yr, zr = ik_raised[0], ik_raised[1], ik_raised[2]
+        ik_high = _matrix_to_base_ik(self.T_high_approach)
+        ik_pre  = _matrix_to_base_ik(self.T_pre_grasp)
+        xh, yh, zh = ik_high[0], ik_high[1], ik_high[2]
         xb, yb, zb = ik_pre[0], ik_pre[1], ik_pre[2]
-        print(f"  raised_col base: x={xr:.3f}, y={yr:.3f}, z={zr:.3f} "
-              f"XY_reach={math.sqrt(xr**2+yr**2):.3f}m")
-        print(f"  pre_grasp base:  x={xb:.3f}, y={yb:.3f}, z={zb:.3f} "
-              f"XY_reach={math.sqrt(xb**2+yb**2):.3f}m")
+        print(f"  high_approach base: x={xh:.3f}, y={yh:.3f}, z={zh:.3f}")
+        print(f"  pre_grasp base:     x={xb:.3f}, y={yb:.3f}, z={zb:.3f}")
 
-        # Phase 1: Move to raised column (arm bent, at safe fly height)
-        success, _, reason = execute_stage(
-            self.robot, self.world, "s1_raised_col", ik_raised, self.side,
-            step_size=0.025, max_steps=3000,
-            pos_tol=0.08, rot_tol=0.50,
-            timeout_sec=90.0,
-            ik_rot_weight=0.3, ik_null_weight=0.0, ik_max_iter=300,
+        # Phase 1: Fly directly above object with z_down orientation.
+        # interp_rotation=True slerps from current arm rotation to z_down, guiding the
+        # IK to achieve wrist-down before the arm is at full forward extension.
+        success1, err1 = move_interpolated(
+            self.robot, self.world, T_current, self.T_high_approach,
+            self.side, "s1_fly_above",
+            num_steps=20, max_sim_steps=300, pos_tol=0.06, rot_tol=0.35,
+            step_size=0.018, interp_rotation=True,
+            ik_rot_weight=0.8, ik_null_weight=0.0, ik_max_iter=250,
         )
 
-        if not success:
+        if not success1:
             alt_side = "left" if self.side == "right" else "right"
-            print(f"  [S1/P1] Primary arm '{self.side}' failed ({reason}). Trying '{alt_side}'...")
+            print(f"  [S1/P1] Primary arm '{self.side}' failed ({err1}). Trying '{alt_side}'...")
             if self.robot:
                 self.robot.open_gripper(side=alt_side)
-            success_alt, _, reason_alt = execute_stage(
-                self.robot, self.world, "s1_raised_col_alt", ik_raised, alt_side,
-                step_size=0.025, max_steps=3000,
-                pos_tol=0.08, rot_tol=0.50,
-                timeout_sec=90.0,
-                ik_rot_weight=0.3, ik_null_weight=0.0, ik_max_iter=300,
+            success_alt, err_alt = move_interpolated(
+                self.robot, self.world, T_current, self.T_high_approach,
+                alt_side, "s1_fly_above_alt",
+                num_steps=20, max_sim_steps=300, pos_tol=0.06, rot_tol=0.35,
+                step_size=0.018, interp_rotation=True,
+                ik_rot_weight=0.8, ik_null_weight=0.0, ik_max_iter=250,
             )
             if success_alt:
                 self.side = alt_side
                 print(f"  [S1/P1] ✓ Fallback to '{alt_side}' succeeded")
             else:
-                return self._fail(f"s1_raised_col_fail_both_arms: {reason} / {reason_alt}")
+                # Last resort: direct IK (no interpolation, loose tolerances)
+                ok_d, _, r_d = execute_stage(
+                    self.robot, self.world, "s1_direct_high", ik_high, self.side,
+                    step_size=0.025, max_steps=3000,
+                    pos_tol=0.08, rot_tol=0.50, timeout_sec=90.0,
+                    ik_rot_weight=0.5, ik_null_weight=0.0, ik_max_iter=300,
+                )
+                if not ok_d:
+                    return self._fail(f"s1_fly_above_fail: {err1} / {err_alt} / {r_d}")
 
-        # Phase 2: Descend vertically to T_column (retracted XY, pre-grasp Z)
-        print(f"  [Phase2] Descend retracted column: Z {T_raised_column[2,3]:.3f} → {T_column[2,3]:.3f}m")
+        # Phase 2: Descend straight down to pre-grasp height (pure Z drop, z_down held).
+        print(f"  [Phase2] Descend: Z {self.T_high_approach[2,3]:.3f}m → {self.T_pre_grasp[2,3]:.3f}m")
         success2, err2 = move_interpolated(
-            self.robot, self.world, T_raised_column, T_column,
-            self.side, "s1_col_descend",
-            num_steps=12, max_sim_steps=250, pos_tol=0.05, rot_tol=0.40,
-            step_size=0.018, interp_rotation=False,
-            ik_rot_weight=0.5, ik_null_weight=0.0, ik_max_iter=200,
+            self.robot, self.world, self.T_high_approach, self.T_pre_grasp,
+            self.side, "s1_descend",
+            num_steps=15, max_sim_steps=250, pos_tol=0.04, rot_tol=0.30,
+            step_size=0.015, interp_rotation=False,
+            ik_rot_weight=0.9, ik_null_weight=0.0, ik_max_iter=250,
         )
         if not success2:
-            print(f"  [S1/P2] Column descent failed ({err2}) — direct IK fallback...")
-            ik_col = _matrix_to_base_ik(T_column)
+            print(f"  [S1/P2] Descent failed ({err2}) — direct IK fallback to pre-grasp...")
             ok2, _, r2 = execute_stage(
-                self.robot, self.world, "s1_col_direct", ik_col, self.side,
+                self.robot, self.world, "s1_direct_pre", ik_pre, self.side,
                 step_size=0.015, max_steps=2000,
-                pos_tol=0.06, rot_tol=0.40, timeout_sec=40.0,
-                ik_null_weight=0.0,
+                pos_tol=0.06, rot_tol=0.40, timeout_sec=45.0,
+                ik_null_weight=0.0, ik_rot_weight=0.8,
             )
             if not ok2:
-                return self._fail(f"s1_col_descend_fail: {r2}")
-
-        # Phase 3: Horizontal sweep to T_pre_grasp (arm extends at fixed height)
-        # Z stays constant → arm extends forward without going deeper → elbow remains bent
-        print(f"  [Phase3] Horizontal sweep to pre-grasp: Y {T_column[1,3]:.3f} → {self.T_pre_grasp[1,3]:.3f}m")
-        success3, err3 = move_interpolated(
-            self.robot, self.world, T_column, self.T_pre_grasp,
-            self.side, "s1_sweep",
-            num_steps=15, max_sim_steps=250, pos_tol=0.05, rot_tol=0.40,
-            step_size=0.018, interp_rotation=False,
-            ik_rot_weight=0.5, ik_null_weight=0.0, ik_max_iter=200,
-        )
-        if not success3:
-            print(f"  [S1/P3] Sweep failed ({err3}) — direct IK fallback to pre-grasp...")
-            ok3, _, r3 = execute_stage(
-                self.robot, self.world, "s1_direct_pre", ik_pre, self.side,
-                step_size=0.018, max_steps=2000,
-                pos_tol=0.06, rot_tol=0.40, timeout_sec=45.0,
-                ik_null_weight=0.0,
-            )
-            if not ok3:
-                return self._fail(f"s1_pregrasp_fail: {r3}")
+                return self._fail(f"s1_pregrasp_fail: {r2}")
 
         try:
             joints = self.robot.get_joint_states()
