@@ -9,6 +9,7 @@ Mỗi step() gọi một lần per physics tick — không blocking.
 import json
 import time
 import numpy as np
+import pinocchio as pin
 from datetime import datetime, timezone
 
 
@@ -98,6 +99,7 @@ class MotionPrimitiveRunner:
         self._start_time    = 0.0
         self._executed      = []
         self._object_id     = "unknown"
+        self._attempt       = 0
         self._reach_log_n   = 0
 
     # ── Public API ────────────────────────────────────────────────────────────
@@ -112,6 +114,7 @@ class MotionPrimitiveRunner:
             return False
 
         self._object_id    = action_plan.get("object_id", "unknown")
+        self._attempt      = attempt
         self._start_time   = time.time()
         self._executed     = []
         self._step_idx     = 0
@@ -200,6 +203,17 @@ class MotionPrimitiveRunner:
                 self._step_idx   += 1
                 self._hold_counter = 0
 
+        elif s["type"] == "confirm":
+            # MVP: không có force/contact sensor → luôn pass sau 1 tick
+            # Nếu sau này có sensor: kiểm tra gripper width hoặc object still present
+            left_t  = self._last_left_t
+            right_t = self._last_right_t
+            self._executed.append(s["name"])
+            self._log("confirm_grasp", name=s["name"], result="ok_mvp")
+            print(f"[N3] ✓ {s['name']}  (mvp)")
+            self._step_idx   += 1
+            self._hold_counter = 0
+
         return left_t, right_t
 
     def is_done(self):
@@ -232,9 +246,33 @@ class MotionPrimitiveRunner:
         fo      = self.finger_open
         fc      = self.finger_close
 
+        # ── Tính rotation gripper từ grasp_hint.yaw_rad (N3 guide Step 4) ─
+        # Z-axis hướng xuống (approach_axis=z_down), X-axis theo yaw của vật.
+        # Dùng yaw_rad từ grasp_hint thay vì tự tính reach_dir để đồng nhất với
+        # contract N1→N2→N3 và tránh LOG MAP inflate khi rot_weight>0.
+        yaw = float(action_plan.get("grasp_hint", {}).get("yaw_rad", 0.0))
+
+        z_world   = np.array([0.0, 0.0, -1.0])
+        x_world   = np.array([np.cos(yaw), np.sin(yaw), 0.0])
+
+        base_down = self.coord.robot_world_R_inv @ z_world
+        base_down /= np.linalg.norm(base_down)
+
+        x_base    = self.coord.robot_world_R_inv @ x_world
+        x_base    = x_base - np.dot(x_base, base_down) * base_down
+        if np.linalg.norm(x_base) < 1e-6:
+            perp   = np.array([1.0, 0.0, 0.0]) if abs(base_down[0]) < 0.9 else np.array([0.0, 1.0, 0.0])
+            x_base = perp - np.dot(perp, base_down) * base_down
+        x_base   /= np.linalg.norm(x_base)
+        y_base    = np.cross(base_down, x_base)
+        y_base   /= np.linalg.norm(y_base)
+
+        R_grasp   = np.column_stack([x_base, y_base, base_down])
+        grasp_rpy = pin.rpy.matrixToRpy(R_grasp)
+
         def w2_6d(pos_world):
             pos_base = self.coord.world_to_robot(pos_world)
-            return np.concatenate([pos_base, np.zeros(3)])   # rot_weight=0 → RPY không quan trọng
+            return np.concatenate([pos_base, grasp_rpy])
 
         return [
             # 1. Di chuyển tới trên vật
@@ -249,10 +287,12 @@ class MotionPrimitiveRunner:
             # 4. Đóng gripper
             {"type": "gripper", "name": "close_gripper","side": arm,
              "pos": fc, "hold": gc_s},
-            # 5. Nhấc lên
+            # 5. Confirm grasp (MVP: luôn pass; log GRASP_NOT_CONFIRMED nếu sensor phát hiện drop)
+            {"type": "confirm", "name": "confirm_grasp"},
+            # 6. Nhấc lên
             {"type": "move",    "name": "lift",          "arm": arm,
              "target": w2_6d(obj_w + [0, 0, h_lift]),  "tol": 0.04},
-            # 6. Di chuyển tới trên bin
+            # 7. Di chuyển tới trên bin
             {"type": "move",    "name": "pre_place",     "arm": arm,
              "target": w2_6d(bin_w + [0, 0, h_place]),  "tol": 0.05},
             # 7. Hạ vào bin
@@ -305,6 +345,7 @@ class MotionPrimitiveRunner:
             "primitive":          "pick_place",
             "primitive_success":  success,
             "duration_s":         round(time.time() - self._start_time, 2),
+            "retry_count":        self._attempt,
             "failure_reason":     failure_reason,
             "waypoints_executed": executed,
         }

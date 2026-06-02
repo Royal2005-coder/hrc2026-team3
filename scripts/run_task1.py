@@ -72,7 +72,7 @@ MOTION_PARAMS = {
     "pre_place_height_m":  0.12,   # m trên bin trước khi hạ
     "gripper_close_steps": 60,     # ~1s @ 60Hz
     "gripper_open_steps":  30,     # ~0.5s
-    "timeout_s":           35.0,   # timeout per pick_place
+    "timeout_s":           60.0,   # timeout per pick_place
 }
 
 # N3 — Gripper (tune theo URDF finger joint limits)
@@ -292,11 +292,12 @@ motion = MotionPrimitiveRunner(
 # ═══════════════════════════════════════════════════════════════════════
 class Task1FSM:
     def __init__(self):
-        self.state          = "RESET"
-        self._objects       = []
-        self._action_plan   = None
-        self._handled_count = 0
-        self._arm_init      = {}
+        self.state           = "RESET"
+        self._objects        = []
+        self._action_plan    = None
+        self._handled_count  = 0
+        self._current_attempt = 0   # attempt number for motion retry
+        self._arm_init       = {}
 
     def _cache_arm_init(self):
         if not self._arm_init:
@@ -323,14 +324,7 @@ class Task1FSM:
                 if motion.is_success():
                     self.state = "VERIFY"
                 else:
-                    oid = self._action_plan["object_id"]
-                    if planner.can_retry(oid):
-                        planner.increment_retry(oid)
-                        print(f"[FSM] RETRY {oid}")
-                        self.state = "RETRY"
-                    else:
-                        print(f"[FSM] Max retries exceeded → FAIL")
-                        self.state = "FAIL"
+                    self.state = "RETRY"
 
             return (left_t  if left_t  is not None
                     else (self._arm_init.get("left")  or [0]*6),
@@ -369,18 +363,29 @@ class Task1FSM:
             action_plan, info = planner.plan(self._objects)
             if action_plan:
                 self._action_plan = action_plan
-                ok = motion.start_pick_place(action_plan, attempt=0)
-                self.state = "EXECUTE_PICK_PLACE" if ok else "FAIL"
-                print(f"[FSM] SELECT OK → EXECUTE_PICK_PLACE  "
+                print(f"[FSM] SELECT OK → PLAN_PICK_PLACE  "
                       f"obj={action_plan['object_id']}  bin={action_plan['target_bin']}")
+                self.state = "PLAN_PICK_PLACE"
             else:
                 print(f"[FSM] SELECT FAIL: {info['failure_reason']} → FAIL")
+                self.state = "FAIL"
+
+        elif self.state == "PLAN_PICK_PLACE":
+            ok = motion.start_pick_place(self._action_plan,
+                                         attempt=self._current_attempt)
+            if ok:
+                print(f"[FSM] PLAN → EXECUTE_PICK_PLACE  "
+                      f"obj={self._action_plan['object_id']}  attempt={self._current_attempt}")
+                self.state = "EXECUTE_PICK_PLACE"
+            else:
+                print(f"[FSM] PLAN → FAIL (precondition failed)")
                 self.state = "FAIL"
 
         elif self.state == "VERIFY":
             oid = self._action_plan["object_id"]
             planner.mark_handled(oid)
             self._handled_count += 1
+            self._current_attempt = 0
             print(f"[FSM] VERIFY OK — {oid} placed ({self._handled_count}/4)")
             if self._handled_count >= 4:
                 self.state = "DONE"
@@ -388,9 +393,16 @@ class Task1FSM:
                 self.state = "OBSERVE"
 
         elif self.state == "RETRY":
-            ok = motion.start_pick_place(self._action_plan, attempt=1)
-            self.state = "EXECUTE_PICK_PLACE" if ok else "FAIL"
-            print(f"[FSM] RETRY → {'EXECUTE' if ok else 'FAIL'}")
+            oid = self._action_plan["object_id"]
+            if planner.can_retry(oid):
+                planner.increment_retry(oid)
+                self._current_attempt += 1
+                print(f"[FSM] RETRY {oid}  attempt={self._current_attempt} → OBSERVE")
+                self.state = "OBSERVE"
+            else:
+                print(f"[FSM] Max retries for {oid} → SELECT_OBJECT")
+                self._current_attempt = 0
+                self.state = "SELECT_OBJECT"
 
         # EXECUTE_PICK_PLACE và DONE / FAIL: không cần tick
 
@@ -409,7 +421,7 @@ def robot_control_callback(step_size):
         step_size,
         left_target_xyzrpy=left_t,
         right_target_xyzrpy=right_t,
-        rot_weight=0.0,     # position-only IK
+        rot_weight=0.1,     # like baseline: position priority + orientation constraint
         null_weight=0.1,
         max_iter=500,
         pos_tol=5e-3,
@@ -424,7 +436,7 @@ world.add_physics_callback("task1_fsm", robot_control_callback)
 
 try:
     while kit.is_running():
-        # FSM tick: xử lý OBSERVE / SELECT / VERIFY / RESET / RETRY
+        # FSM tick: xử lý OBSERVE / SELECT / PLAN / VERIFY / RESET / RETRY
         if fsm.state not in ("EXECUTE_PICK_PLACE", "DONE", "FAIL"):
             fsm.tick()
 
