@@ -1019,6 +1019,29 @@ class PickAndPlaceStateMachine:
         # This replaces the old 3-phase column+sweep which left the arm at full XY
         # extension at table height, leaving no joint DOF to keep the wrist down.
 
+        # Pre-bend wrist to -π/2 (z_down) before running any IK.
+        # Without this, IK warm-start begins from wrist_pitch≈0 (horizontal) and
+        # converges to a local minimum where position is correct but wrist stays
+        # horizontal (gripper pointing sideways) instead of pointing straight down.
+        # Teleporting the physical joint seeds the warm-start so IK stays in z_down.
+        _prefix = "R" if self.side == "right" else "L"
+        _wp_name = f"{_prefix}_wrist_pitch_joint"
+        if self.robot and self.robot._articulation:
+            _dof_names = self.robot._articulation.dof_names
+            if _wp_name in _dof_names:
+                try:
+                    import torch as _torch
+                    _wp_idx = self.robot._articulation.get_dof_index(_wp_name)
+                    self.robot._articulation.set_joint_positions(
+                        _torch.tensor([[-math.pi / 2]], dtype=_torch.float32),
+                        joint_indices=_torch.tensor([_wp_idx], dtype=_torch.int32)
+                    )
+                    for _ in range(10):
+                        self.world.step(render=True)
+                    print(f"  [S1] Wrist {_wp_name} pre-bent to z_down ({-math.pi/2:.3f} rad)")
+                except Exception as _e:
+                    print(f"  [S1] Wrist pre-bend failed ({_e}) — IK may not achieve z_down")
+
         # Read current EE world-frame pose as 4×4 matrix (interpolation start point).
         T_current = self.T_high_approach.copy()
         T_current[2, 3] += 0.20   # safe fallback: slightly above T_high_approach
@@ -1062,6 +1085,20 @@ class PickAndPlaceStateMachine:
             print(f"  [S1/P1] Primary arm '{self.side}' failed ({err1}). Trying '{alt_side}'...")
             if self.robot:
                 self.robot.open_gripper(side=alt_side)
+            # Pre-bend alt_side wrist to z_down as well
+            _alt_wp_name = f"{'R' if alt_side == 'right' else 'L'}_wrist_pitch_joint"
+            if self.robot and self.robot._articulation and _alt_wp_name in self.robot._articulation.dof_names:
+                try:
+                    import torch as _torch
+                    _alt_wp_idx = self.robot._articulation.get_dof_index(_alt_wp_name)
+                    self.robot._articulation.set_joint_positions(
+                        _torch.tensor([[-math.pi / 2]], dtype=_torch.float32),
+                        joint_indices=_torch.tensor([_alt_wp_idx], dtype=_torch.int32)
+                    )
+                    for _ in range(5):
+                        self.world.step(render=True)
+                except Exception:
+                    pass
             success_alt, err_alt = move_interpolated(
                 self.robot, self.world, T_current, self.T_high_approach,
                 alt_side, "s1_fly_above_alt",
