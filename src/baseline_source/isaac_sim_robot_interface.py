@@ -126,7 +126,7 @@ class IsaacSimRobotInterface:
             "L_wrist_pitch_joint": -0.00048740902645395785,
             "L_wrist_roll_joint": 0.0998718010009366,
             "R_elbow_roll_joint": -1.8963607249359917,
-            "R_elbow_yaw_joint": -1.4000874256427638,
+            "R_elbow_yaw_joint": 0.17070890115723617,  # TEST: +90deg from -1.4001
             "R_shoulder_pitch_joint": -0.09321727661087699,
             "R_shoulder_roll_joint": -0.5933455607833843,
             "R_shoulder_yaw_joint": 1.595869459316937,
@@ -201,7 +201,7 @@ class IsaacSimRobotInterface:
             -0.5933455607833843,      # R_shoulder_roll_joint
             1.595869459316937,        # R_shoulder_yaw_joint
             -1.8963607249359917,      # R_elbow_roll_joint
-            -1.4000874256427638,      # R_elbow_yaw_joint
+            0.17070890115723617,      # R_elbow_yaw_joint  TEST: +90deg from -1.4001
             0.00048144049606466176,   # R_wrist_pitch_joint
             0.09985407619802703,      # R_wrist_roll_joint
         ]
