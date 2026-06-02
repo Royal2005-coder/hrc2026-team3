@@ -1,0 +1,153 @@
+# task1_perception.yaml
+# HRC2026 Task 1 — Perception configuration for Người 1
+# ─────────────────────────────────────────────────────────
+
+# ── Scene info (from Part_Sorting.yaml — official config) ────
+scene:
+  name: "task1_part_sorting"
+  scene_usd: "Collected_Task4/SubUSDs/2_small_warehouse2.usd"
+  scene_usd_abs: "/workspace/GlobalHumanoidRobotChallenge_2026_Baseline/assets/resources/Collected_Task4/SubUSDs/2_small_warehouse2.usd"
+  root_path: "/workspace/GlobalHumanoidRobotChallenge_2026_Baseline/assets/resources/"
+  timelimit: 100
+  notes: "Task 1 — Precise Desktop Sorting of Workpieces"
+
+# ── Parts info ────────────────────────────────────────────
+# Part A: 2 variants (ori_color, red) — shape = Task1_PartA.usd
+# Part B: 2 variants (blue, ori_color) — shape = Part_B.usd
+# ⚠ CẢ HAI đều có variant "ori_color" → KHÔNG THỂ phân biệt A/B chỉ bằng màu!
+# → Cần kết hợp SHAPE (contour / aspect ratio) hoặc dùng semantic label
+parts:
+  part_A:
+    assets:
+      - "Collected_Task1_PartA_ori_color/Task1_PartA.usd"
+      - "Collected_Task1_PartA_red/Task1_PartA.usd"
+    colors: ["ori_color", "red"]
+    count: 2
+  part_B:
+    assets:
+      - "Collected_Part_B_blue/Part_B.usd"
+      - "Collected_Part_B_ori_color/Part_B.usd"
+    colors: ["blue", "ori_color"]
+    count: 2
+  total_objects: 4
+
+# ── World geometry (from official YAML) ───────────────────
+world:
+  robot_position: [0.7, -0.2, 0.9]
+  robot_rotation_deg: [0, 0, 90]     # faces +Y toward table
+  table_position: [0.75, 0.3, 0.5]   # table surface z ≈ 1.0m
+  table_scale: [1.9927, 1.8738, 1.1109]
+  box_position: [1.2, 0.3, 1.05]     # sorting bin — fixed
+  box_scale: [0.38, 0.75, 0.36]
+  scatter_area:
+    center: [0.75, 0.28, 1.04]
+    half_size: [0.15, 0.115]          # x:[0.60,0.90] y:[0.165,0.395]
+    x_range: [0.50, 0.80]            # from comment in config
+    y_range: [0.10, 0.30]
+
+# ── Camera ────────────────────────────────────────────────
+camera:
+  name: "head_stereo_left"
+  prim_path: "/Root/Ref_Xform/Ref/head_pitch_link/head_stereo_left/head_stereo_left_Camera_01"
+  rgb_resolution: [640, 480]      # [width, height]
+  depth_resolution: [640, 480]
+  depth_unit: "meter"             # "meter" | "millimeter" — XÁC NHẬN bằng capture_rgbd.py
+
+# ── Intrinsics ────────────────────────────────────────────
+# Giá trị dưới đây là PLACEHOLDER — chạy extract_camera_params.py để lấy giá trị thật
+# fx = (width * focalLength) / horizontalAperture
+intrinsics:
+  fx: 615.2       # ← THAY bằng output từ extract_camera_params.py
+  fy: 615.0       # ← THAY bằng output từ extract_camera_params.py
+  cx: 320.0
+  cy: 240.0
+
+# ── Extrinsics ────────────────────────────────────────────
+# T_base_camera: transforms points FROM camera frame TO robot-base frame
+# p_base = T_base_camera @ p_camera
+extrinsics:
+  T_base_camera_source: "computed_from_world_transforms"
+  robot_base_prim: "/Root/Ref_Xform/Ref/base_link"
+  # 4x4 row-major — THAY bằng output từ extract_camera_params.py
+  # Identity placeholder — sẽ sai nếu không thay!
+  T_base_camera:
+    - [1.0, 0.0, 0.0, 0.0]
+    - [0.0, 1.0, 0.0, 0.0]
+    - [0.0, 0.0, 1.0, 0.0]
+    - [0.0, 0.0, 0.0, 1.0]
+
+# ── Detection & Classification ────────────────────────────
+# CHIẾN LƯỢC PHÂN LOẠI (quan trọng!):
+#
+# Vì Part A "ori_color" và Part B "ori_color" CÙNG MÀU → chỉ dùng HSV KHÔNG ĐỦ.
+#
+# Level 0 (MVP): Detect tất cả vật bằng depth foreground (vật nổi trên bàn),
+#   rồi classify bằng SHAPE — contour aspect ratio, area, hu moments.
+#   Part A (Task1_PartA.usd) và Part B (Part_B.usd) có hình dạng khác nhau.
+#
+# Level 1: Kết hợp màu + shape:
+#   - red object → chắc chắn Part A
+#   - blue object → chắc chắn Part B
+#   - ori_color object → phân biệt bằng shape/contour
+#
+# Level 2: Semantic segmentation label từ Isaac Sim (nếu baseline hỗ trợ)
+#
+detection:
+  method: "depth_foreground_then_shape"   # MVP strategy
+  min_area_px: 100
+  table_z_m: 1.04                         # mặt bàn z (from scatter_area center)
+  depth_fg_threshold_m: 0.02              # vật nổi > 2cm trên mặt bàn
+
+  # HSV ranges — chỉ dùng để TĂNG confidence, KHÔNG phải cách classify chính
+  hsv_ranges:
+    red:
+      lower: [0, 100, 100]               # tune with HSV picker
+      upper: [10, 255, 255]
+      lower2: [170, 100, 100]            # red wraps around in HSV
+      upper2: [179, 255, 255]
+      implies_class: "part_A"
+    blue:
+      lower: [100, 100, 100]             # tune with HSV picker
+      upper: [130, 255, 255]
+      implies_class: "part_B"
+    ori_color:
+      lower: [0, 0, 50]                  # tune — may be gray/metallic
+      upper: [179, 60, 200]
+      implies_class: null                 # CANNOT determine class by color alone!
+
+  # Shape-based classifier (contour features)
+  shape_classifier:
+    # Đo từ sample: Part A và Part B có aspect ratio / area / moments khác nhau
+    # Điền sau khi capture sample → measure contour features
+    part_A_aspect_ratio_range: [0.0, 999.0]   # TODO: measure from sample
+    part_B_aspect_ratio_range: [0.0, 999.0]   # TODO: measure from sample
+
+# ── Confidence / Failure ──────────────────────────────────
+confidence:
+  threshold_grasp: 0.70           # below this → failure_reason = LOW_CONFIDENCE
+  threshold_skip: 0.50            # below this → don't include in output
+  penalty_small_area: 0.30
+  penalty_invalid_depth: 0.40
+  penalty_low_mask_quality: 0.20
+  penalty_class_ambiguous: 0.20
+
+# ── Grasp hint defaults (aligned with official grasp config) ─
+grasp:
+  default_approach_axis: "z_down"
+  default_grasp_width_m: 0.045
+  yaw_method: "minrect"          # "minrect" | "pca"
+  lift_height_m: 0.17            # from official config
+  tcp_offset: [0.0, 0.0, 0.0]   # from official config
+
+# ── Depth processing ─────────────────────────────────────
+depth:
+  patch_radius: 3                 # for robust_depth_from_patch
+  use_mask_depth: true            # prefer mask-based depth when mask available
+
+# ── Output paths ──────────────────────────────────────────
+output:
+  dir: "lab_outputs/perception"
+  perception_json: "perception_interface.json"
+  pose_report_csv: "pose_estimator_report.csv"
+  yaw_report_csv: "yaw_report.csv"
+  failure_log: "failure_cases_perception.jsonl"

@@ -1,0 +1,20 @@
+# Python cache
+__pycache__/
+*.pyc
+
+# OS/editor noise
+.DS_Store
+
+# Local experiment outputs
+runs/
+*.pt
+
+# Internal or experimental folders kept on the server only
+outputs/task1/perception/Module/
+outputs/task1/perception/archive/
+outputs/task1/perception/final_candidate
+outputs/task1/perception/*parallel*/
+outputs/task1/perception/*rgbd*/
+outputs/task1/perception/yolo_rgbd
+outputs/task1/perception/raw_dataset_frames
+outputs/task1/perception/raw_dataset_frames_filtered

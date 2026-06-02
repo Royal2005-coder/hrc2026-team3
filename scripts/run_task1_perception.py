@@ -1,0 +1,577 @@
+"""
+run_task1_perception.py — Isaac Sim runner for Task 1 perception pipeline.
+
+Chạy:
+    /isaac-sim/python.sh scripts/run_task1_perception.py
+    /isaac-sim/python.sh scripts/run_task1_perception.py --save-params
+    /isaac-sim/python.sh scripts/run_task1_perception.py --frames 5
+    /isaac-sim/python.sh scripts/run_task1_perception.py --method color
+
+Author: Thanh Tai (N1)
+"""
+
+import argparse
+import os
+import sys
+import numpy as np
+import cv2
+
+# ── Parse args trước khi import Isaac Sim ──────────────────────────────────
+def parse_args():
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--root", default="/home/ubuntu/tai",
+                        help="Project root path")
+    parser.add_argument("--output-dir", default="lab_outputs/perception",
+                        help="Thư mục lưu output (relative to --root)")
+    parser.add_argument("--frames", type=int, default=0,
+                        help="Số frame rồi thoát (0 = chạy mãi)")
+    parser.add_argument("--save-params", action="store_true",
+                        help="Lưu camera intrinsics + T_base_camera ra YAML")
+    parser.add_argument("--method", default="semantic_bbox",
+                        choices=["semantic_bbox", "annotation", "color", "depth_fg"],
+                        help="Detection method: semantic_bbox (default) | depth_fg | color")
+    parser.add_argument("--no-perception", action="store_true",
+                        help="Chỉ build scene, không chạy perception")
+    args, _ = parser.parse_known_args()
+    return args
+
+
+# ── Launch Isaac Sim ────────────────────────────────────────────────────────
+from isaacsim import SimulationApp
+CONFIG = {"width": 1280, "height": 720, "headless": True}
+kit = SimulationApp(launch_config=CONFIG)
+
+from isaacsim.core.api import World
+import omni
+import omni.replicator.core as rep
+
+args = parse_args()
+
+ROOT = args.root
+OUT = os.path.join(ROOT, args.output_dir)
+os.makedirs(OUT, exist_ok=True)
+p = lambda name: os.path.join(OUT, name)
+
+# Thêm src vào path để import baseline_source + task1
+sys.path.insert(0, os.path.join(ROOT, "src"))
+
+from baseline_source.config_loader import load_config, apply_scatter_config
+from baseline_source.SceneBuilder import SceneBuilder
+from baseline_source.RobotArticulation import RobotArticulation
+from baseline_source.DataLogger import DataLogger
+
+from task1.camera_utils import (
+    CameraIntrinsics,
+    depth_sanity,
+    write_depth_sanity_report,
+    save_camera_config_csv,
+)
+from task1.transform_utils import run_transform_sanity
+from task1.perception import (
+    run_perception,
+    save_perception_json,
+    save_pose_report_csv,
+    save_yaw_report_csv,
+    save_failure_cases_jsonl,
+)
+from task1.perception_debug import (
+    save_overlays,
+    save_confusion_matrix_csv,
+    validate_perception_output,
+)
+
+print("=" * 60)
+print("  HRC2026 Task 1 — Perception Runner")
+print(f"  Method: {args.method}")
+print(f"  Output: {OUT}")
+print("=" * 60)
+
+# ═══════════════════════════════════════════════════════════════════════
+# 1. Load config + build scene
+# ═══════════════════════════════════════════════════════════════════════
+cfg = load_config(os.path.join(ROOT, "configs/Part_Sorting.yaml"))
+cfg["root_path"] = os.path.join(ROOT, "assets/resources/")
+grasp_cfg = cfg.get("grasp", {})
+
+omni.usd.get_context().open_stage(
+    os.path.join(cfg["root_path"], cfg["scene_usd"])
+)
+world = World(
+    stage_units_in_meters=1.0,
+    physics_dt=1.0 / 60.0,
+    rendering_dt=1.0 / 20.0,
+)
+world.initialize_physics()
+
+logger = DataLogger(enabled=False, csv_path="/tmp/perception_poses.csv",
+                    camera_enabled=False, camera_hdf5_path="/tmp/perception_cam.hdf5")
+scene = SceneBuilder(cfg, data_logger=logger)
+apply_scatter_config(cfg)
+scene.build_all()
+rep.orchestrator.step()
+
+print("[1/5] Physics settling...")
+settle_steps = int(grasp_cfg.get("settle_time", 2.0) / world.get_physics_dt())
+world.play()
+for _ in range(settle_steps):
+    world.step(render=False)
+print(f"      Done ({settle_steps} steps)")
+
+# ═══════════════════════════════════════════════════════════════════════
+# 2. Build robot + initialize cameras
+# ═══════════════════════════════════════════════════════════════════════
+world.pause()
+scene.build_robot()
+robot = RobotArticulation(prim_path="/Root/Ref_Xform/Ref", name="walkerS2")
+robot.initialize()
+
+urdf_path = os.path.join(cfg["root_path"], "s2.urdf")
+robot.initialize_ik(urdf_path)
+js = robot.get_joint_states()
+if js:
+    robot.ik_solver.sync_joint_positions(js["names"], js["positions"][0])
+
+world.play()
+for _ in range(30):
+    world.step(render=True)
+print("[2/5] Robot + cameras initialized")
+print(f"      Available cameras: {list(robot.cameras.keys())}")
+
+# ═══════════════════════════════════════════════════════════════════════
+# 3. Camera intrinsics
+# ═══════════════════════════════════════════════════════════════════════
+CAMERA_NAME = "head_left"
+CAMERA_PRIM = "/Root/Ref_Xform/Ref/head_pitch_link/head_stereo_left/head_stereo_left_Camera_01"
+
+# Tạo render product riêng ở 640×480 — bypass render product 128×128 của baseline
+_CAM_W, _CAM_H = 640, 480
+_rp = rep.create.render_product(CAMERA_PRIM, (_CAM_W, _CAM_H))
+_rgb_ann   = rep.AnnotatorRegistry.get_annotator("rgb")
+_depth_ann = rep.AnnotatorRegistry.get_annotator("distance_to_image_plane")
+_bbox_ann  = rep.AnnotatorRegistry.get_annotator("bounding_box_2d_tight_fast",
+                                                  init_params={"semanticTypes": ["class"]})
+_rgb_ann.attach(_rp)
+_depth_ann.attach(_rp)
+_bbox_ann.attach(_rp)
+print(f"      Render product created: {_CAM_W}×{_CAM_H}")
+
+# Vài step để render product warm up
+for _ in range(5):
+    world.step(render=True)
+
+
+def get_intrinsics_from_prim(cam_prim_path: str, width: int, height: int) -> CameraIntrinsics:
+    """
+    Compute camera intrinsics from USD prim focalLength + aperture attributes.
+    This is always accurate for our custom 640×480 render product.
+    """
+    stage = omni.usd.get_context().get_stage()
+    cam_prim = stage.GetPrimAtPath(cam_prim_path)
+    if not cam_prim.IsValid():
+        raise RuntimeError(f"Camera prim not found: {cam_prim_path}")
+
+    fl = cam_prim.GetAttribute("focalLength").Get()
+    ha = cam_prim.GetAttribute("horizontalAperture").Get()
+    va = cam_prim.GetAttribute("verticalAperture").Get()
+
+    if not all([fl, ha, va]):
+        raise RuntimeError(f"Camera prim missing focalLength/aperture attributes")
+
+    fx = (width  * fl) / ha
+    fy = (height * fl) / va
+    cx = width  / 2.0
+    cy = height / 2.0
+    print(f"      [Intrinsics] fL={fl:.3f} hA={ha:.3f} vA={va:.3f}")
+    print(f"      [Intrinsics] fx={fx:.2f} fy={fy:.2f} cx={cx:.2f} cy={cy:.2f}")
+    return CameraIntrinsics(fx=fx, fy=fy, cx=cx, cy=cy,
+                            width=width, height=height, depth_unit="meter")
+
+
+def get_intrinsics(camera_obj, width=640, height=480) -> CameraIntrinsics:
+    """Lấy intrinsics từ Isaac Sim Camera API, fallback về USD prim."""
+    try:
+        K = camera_obj.get_intrinsics_matrix()
+        fx, fy = float(K[0, 0]), float(K[1, 1])
+        cx, cy = float(K[0, 2]), float(K[1, 2])
+        print(f"      [Intrinsics via API] fx={fx:.2f} fy={fy:.2f} cx={cx:.2f} cy={cy:.2f}")
+        return CameraIntrinsics(fx=fx, fy=fy, cx=cx, cy=cy,
+                                width=width, height=height, depth_unit="meter")
+    except Exception as e:
+        print(f"      [WARN] get_intrinsics_matrix() failed: {e} → USD prim fallback")
+        return get_intrinsics_from_prim(CAMERA_PRIM, width, height)
+
+
+print("[3/5] Getting camera intrinsics...")
+intr = get_intrinsics(robot.cameras[CAMERA_NAME])
+
+
+# ═══════════════════════════════════════════════════════════════════════
+# 4. T_base_camera
+# ═══════════════════════════════════════════════════════════════════════
+def get_T_base_camera(camera_prim_path: str,
+                      base_prim_path: str = "/Root/Ref_Xform/Ref/base_link") -> np.ndarray:
+    """T_base_camera = inv(T_world_base) @ T_world_camera."""
+    from pxr import UsdGeom
+    stage = omni.usd.get_context().get_stage()
+
+    def world_tf(path):
+        prim = stage.GetPrimAtPath(path)
+        if not prim.IsValid():
+            print(f"      [WARN] Prim not found: {path}")
+            return None
+        mat = UsdGeom.Xformable(prim).ComputeLocalToWorldTransform(0)
+        return np.array(mat).T
+
+    T_wc = world_tf(camera_prim_path)
+    T_wb = world_tf(base_prim_path)
+
+    if T_wc is None or T_wb is None:
+        print("      [WARN] Cannot compute T_base_camera — using identity")
+        return np.eye(4)
+
+    T_bc = np.linalg.inv(T_wb) @ T_wc
+    print(f"      det(R)={np.linalg.det(T_bc[:3,:3]):.4f}, "
+          f"cam-base dist={np.linalg.norm(T_bc[:3,3]):.3f}m")
+    return T_bc
+
+
+print("[4/5] Computing T_base_camera...")
+T_base_camera = get_T_base_camera(CAMERA_PRIM)
+
+from pxr import UsdGeom as _UsdGeom
+_base_prim = omni.usd.get_context().get_stage().GetPrimAtPath(
+    "/Root/Ref_Xform/Ref/base_link"
+)
+_T_wb = np.array(_UsdGeom.Xformable(_base_prim).ComputeLocalToWorldTransform(0)).T
+t_base_world = np.linalg.inv(_T_wb)
+
+# ═══════════════════════════════════════════════════════════════════════
+# 5. Save params (--save-params)
+# ═══════════════════════════════════════════════════════════════════════
+if args.save_params:
+    import yaml
+    out_yaml = p("extracted_camera_params.yaml")
+    params = {
+        "camera": {
+            "name": CAMERA_NAME,
+            "prim_path": CAMERA_PRIM,
+            "rgb_resolution": [intr.width, intr.height],
+            "depth_unit": "meter",
+        },
+        "intrinsics": {
+            "fx": round(intr.fx, 4), "fy": round(intr.fy, 4),
+            "cx": round(intr.cx, 4), "cy": round(intr.cy, 4),
+        },
+        "extrinsics": {
+            "T_base_camera_source": "computed_from_world_transforms",
+            "robot_base_prim": "/Root/Ref_Xform/Ref/base_link",
+            "T_base_camera": T_base_camera.tolist(),
+        },
+        "sanity": {
+            "det_R": round(float(np.linalg.det(T_base_camera[:3, :3])), 6),
+            "translation": T_base_camera[:3, 3].tolist(),
+        }
+    }
+    with open(out_yaml, "w") as f:
+        yaml.dump(params, f, default_flow_style=False, allow_unicode=True)
+    run_transform_sanity(T_base_camera, report_path=p("transform_sanity_report.md"))
+    print(f"\n[SAVED] Camera params → {out_yaml}")
+    print("  → Copy vào configs/task1_perception.yaml nếu cần")
+
+# ═══════════════════════════════════════════════════════════════════════
+# 5b. Stage-based detection — reads prim positions from USD
+# ═══════════════════════════════════════════════════════════════════════
+def _yaw_from_usd_rotation(T_wobj: np.ndarray) -> float:
+    """Extract yaw from USD prim world transform (atan2 of local +X in XY plane)."""
+    R = T_wobj[:3, :3]
+    return float(np.arctan2(R[1, 0], R[0, 0]))
+
+
+def get_parts_from_stage(T_base_camera, intr, depth, bgr=None,
+                         parts_prim_paths=None, num_parts_per_class=2):
+    """
+    Detect parts by reading their world positions from the USD stage.
+    Projects world pos → base frame → camera frame → pixel.
+
+    pose_base is computed directly from the exact stage world position,
+    bypassing the noisy depth pipeline — gives accurate 3D coords for N2.
+    Yaw is estimated from a local colour mask in the RGB image when bgr given.
+
+    parts_prim_paths: list from scene.parts_prim_paths (first N = part_A, next N = part_B)
+    """
+    from pxr import UsdGeom
+    import omni.usd
+    stage = omni.usd.get_context().get_stage()
+
+    # Build (prim_path, class_id) list from SceneBuilder paths
+    if parts_prim_paths:
+        part_prims = [
+            (p, "part_A" if i < num_parts_per_class else "part_B")
+            for i, p in enumerate(parts_prim_paths)
+        ]
+    else:
+        # Fallback hardcoded (Task 2 style — wrong for Task 1 but kept as safety net)
+        part_prims = (
+            [("/Root/Part_A_" + str(i), "part_A") for i in range(num_parts_per_class)] +
+            [("/Root/Part_B_" + str(i), "part_B") for i in range(num_parts_per_class)]
+        )
+        print("  [WARN] parts_prim_paths not provided — using fallback hardcoded paths")
+
+    T_cb = np.linalg.inv(T_base_camera)
+
+    base_prim = stage.GetPrimAtPath("/Root/Ref_Xform/Ref/base_link")
+    if base_prim.IsValid():
+        T_wb = np.array(UsdGeom.Xformable(base_prim).ComputeLocalToWorldTransform(0)).T
+        T_bw = np.linalg.inv(T_wb)
+    else:
+        T_bw = np.eye(4)
+
+    detections = []
+    for prim_path, class_id in part_prims:
+        prim = stage.GetPrimAtPath(prim_path)
+        if not prim.IsValid():
+            for suffix in ["/mesh", "/geometry"]:
+                prim = stage.GetPrimAtPath(prim_path + suffix)
+                if prim.IsValid():
+                    break
+        if not prim.IsValid():
+            continue
+
+        T_wobj    = np.array(UsdGeom.Xformable(prim).ComputeLocalToWorldTransform(0)).T
+        pos_world = T_wobj[:3, 3]
+
+        p_base = (T_bw @ np.r_[pos_world, 1.0])[:3]
+        p_cam  = (T_cb @ np.r_[p_base,  1.0])[:3]
+
+        # OpenGL: camera looks down -Z
+        z = -p_cam[2]
+        if z <= 0.05:
+            continue
+
+        u = intr.fx * p_cam[0] / z + intr.cx
+        v = intr.fy * (-p_cam[1]) / z + intr.cy
+
+        if not (0 <= u < intr.width and 0 <= v < intr.height):
+            continue
+
+        bbox_half = 20
+        x1 = max(0, int(u) - bbox_half)
+        y1 = max(0, int(v) - bbox_half)
+        x2 = min(intr.width - 1,  int(u) + bbox_half)
+        y2 = min(intr.height - 1, int(v) + bbox_half)
+
+        # Yaw from USD rotation matrix — exact, no image sampling needed
+        yaw = _yaw_from_usd_rotation(T_wobj)
+
+        # Build pose_base directly from exact stage position — no depth noise
+        pose_base = {
+            "position_m": p_base.tolist(),
+            "quaternion_xyzw": [0.0, 0.0, 0.0, 1.0],
+        }
+
+        detections.append({
+            "bbox_xyxy":   [x1, y1, x2, y2],
+            "centroid_px": [float(u), float(v)],
+            "area_px":     float((x2 - x1) * (y2 - y1)),
+            "class_id":    class_id,
+            "confidence":  0.99,
+            "contour":     None,
+            # Pre-computed accurate fields — make_object_state will use these
+            "_pose_base_exact": pose_base,
+            "_yaw_rad":         yaw,
+            "_pos_world":       pos_world.tolist(),
+        })
+
+    return detections
+
+
+# HSV config
+HSV_RANGES = {
+    "red": {
+        "lower": [0, 80, 80], "upper": [15, 255, 255],
+        "lower2": [160, 80, 80], "upper2": [179, 255, 255],
+        "implies_class": "part_A",
+    },
+    "blue": {
+        "lower": [95, 120, 80], "upper": [135, 255, 255],
+        "implies_class": "part_B",
+    },
+    "ori_color": {
+        "lower": [10, 80, 80], "upper": [35, 255, 255],
+        "implies_class": None,
+    },
+}
+
+
+# ═══════════════════════════════════════════════════════════════════════
+# 6. Helpers
+# ═══════════════════════════════════════════════════════════════════════
+def _save_artifacts(bgr, depth, state, fid):
+    objects = state["objects"]
+
+    cv2.imwrite(p(f"sample_rgb_f{fid:04d}.png"), bgr)
+    np.save(p(f"sample_depth_f{fid:04d}.npy"), depth)
+
+    # Depth preview (jet colormap)
+    valid = np.isfinite(depth) & (depth > 0)
+    d_vis = depth.copy(); d_vis[~valid] = 0
+    d_norm = cv2.normalize(d_vis, None, 0, 255, cv2.NORM_MINMAX)
+    cv2.imwrite(p(f"sample_depth_preview_f{fid:04d}.png"),
+                cv2.applyColorMap(d_norm.astype(np.uint8), cv2.COLORMAP_JET))
+
+    if fid == 1:
+        info = depth_sanity(depth)
+        write_depth_sanity_report(info, p("depth_sanity_report.md"))
+        print(f"      Depth: valid={info['valid_ratio']:.1%}, "
+              f"median={info['median']}, unit={info['guessed_unit']}")
+        save_camera_config_csv(intr, T_source="ComputeLocalToWorldTransform(USD)",
+                               camera_name=CAMERA_NAME,
+                               path=p("camera_config_sheet.csv"))
+        run_transform_sanity(T_base_camera,
+                             report_path=p("transform_sanity_report.md"))
+
+    # Detection overlay
+    overlay = bgr.copy()
+    for o in objects:
+        if not o["bbox_xyxy"]:
+            continue
+        x1, y1, x2, y2 = o["bbox_xyxy"]
+        u, v = int(o["centroid_px"][0]), int(o["centroid_px"][1])
+        col = (0, 255, 0) if o["class_id"] == "part_A" else (255, 128, 0)
+        cv2.rectangle(overlay, (x1, y1), (x2, y2), col, 1)
+        cv2.circle(overlay, (u, v), 3, (0, 0, 255), -1)
+        label = f"{o['class_id'][-1]}{o['confidence']:.2f}"
+        cv2.putText(overlay, label, (x1, max(0, y1 - 4)),
+                    cv2.FONT_HERSHEY_SIMPLEX, 0.3, (255, 255, 255), 1)
+    cv2.imwrite(p(f"overlay_detection_f{fid:04d}.png"), overlay)
+
+    # Canonical (no frame suffix) for easy inspection
+    cv2.imwrite(p("sample_rgb.png"), bgr)
+    np.save(p("sample_depth.npy"), depth)
+    cv2.imwrite(p("overlay_detection.png"), overlay)
+
+    # JSON + CSVs
+    save_perception_json(state, p("perception_interface.json"))
+    save_pose_report_csv(objects, p("pose_estimator_report.csv"))
+    save_yaw_report_csv(objects, p("yaw_report.csv"))
+    save_failure_cases_jsonl(objects, p("failure_cases_perception.jsonl"))
+
+    # Debug overlays (overlay_detection.png, overlay_mask.png, overlay_centroid.png)
+    save_overlays(bgr, state, output_dir=OUT, intr=intr)
+
+    # Confusion matrix CSV
+    save_confusion_matrix_csv(objects, path=p("confusion_matrix_task1.csv"))
+
+    # Validate schema
+    ok, errs = validate_perception_output(state)
+    if not ok:
+        for e in errs:
+            print(f"      [SCHEMA ERR] {e}")
+    else:
+        print(f"      Schema OK")
+
+    print(f"      Artifacts saved → {OUT}/")
+
+
+# ═══════════════════════════════════════════════════════════════════════
+# 7. Main loop
+# ═══════════════════════════════════════════════════════════════════════
+print("[5/5] Starting main loop...")
+
+frame_count = 0
+last_state = [None]
+
+try:
+    while kit.is_running():
+        world.step(render=True)
+
+        if args.no_perception:
+            continue
+
+        rgb   = _rgb_ann.get_data()
+        depth = _depth_ann.get_data()
+
+        if rgb is None or depth is None:
+            continue
+
+        frame_count += 1
+        fid = frame_count
+
+        depth = np.array(depth, dtype=np.float32)
+        if depth.ndim == 3:
+            depth = depth[:, :, 0]
+
+        bgr = cv2.cvtColor(rgb[:, :, :3], cv2.COLOR_RGB2BGR)
+
+        # Tính table_depth từ ROI bàn (lower-centre), tránh tường/trần/tay robot
+        _h, _w = depth.shape
+        _ry1, _ry2 = int(_h * 0.55), _h
+        _rx1, _rx2 = int(_w * 0.15), int(_w * 0.85)
+        _roi = depth[_ry1:_ry2, _rx1:_rx2]
+        _roi_valid = np.isfinite(_roi) & (_roi > 0)
+        table_depth = float(np.median(_roi[_roi_valid])) if _roi_valid.sum() > 0 else None
+
+        # Debug frame 1
+        if fid == 1:
+            valid = np.isfinite(depth) & (depth > 0)
+            print(f"  [DEBUG] bgr={bgr.shape}  depth={depth.shape}")
+            print(f"  [DEBUG] depth valid={valid.sum()}/{depth.size} "
+                  f"min={depth[valid].min():.3f} max={depth[valid].max():.3f} "
+                  f"global_median={np.median(depth[valid]):.3f} "
+                  f"table_depth={table_depth:.3f}")
+            from task1.perception import detect_by_depth_foreground, detect_by_color
+            dets_fg, fg_mask = detect_by_depth_foreground(
+                depth, reference_depth=table_depth,
+                search_bbox=(int(_w*0.20), int(_h*0.40), int(_w*0.80), _h))
+            cv2.imwrite(p("debug_fg_mask_f0001.png"), fg_mask)
+            print(f"  [DEBUG] depth_fg detections={len(dets_fg)}")
+            # Sample HSV tại vùng bàn để xem màu thật
+            hsv_img = cv2.cvtColor(bgr, cv2.COLOR_BGR2HSV)
+            roi_hsv = hsv_img[_ry1:_ry2, _rx1:_rx2]
+            print(f"  [DEBUG] table ROI HSV mean={roi_hsv.mean(axis=(0,1)).round(1)}")
+            # Thử wide HSV ranges
+            dets_r, mask_r = detect_by_color(bgr, [0,50,50], [20,255,255])
+            dets_r2, mask_r2 = detect_by_color(bgr, [160,50,50], [179,255,255])
+            dets_b, mask_b = detect_by_color(bgr, [85,50,50], [135,255,255])
+            cv2.imwrite(p("debug_mask_red_f0001.png"), mask_r)
+            cv2.imwrite(p("debug_mask_blue_f0001.png"), mask_b)
+            print(f"  [DEBUG] wide color red={len(dets_r)+len(dets_r2)} blue={len(dets_b)}")
+
+        bbox_raw = _bbox_ann.get_data()
+        stage    = omni.usd.get_context().get_stage()
+
+        state = run_perception(
+            bgr, depth, intr, T_base_camera,
+            hsv_ranges=HSV_RANGES,
+            frame_id=fid,
+            camera_name=CAMERA_NAME,
+            detection_method=args.method,
+            reference_depth=table_depth,
+            bbox_ann_data=bbox_raw,
+            stage=stage,
+            t_base_world=t_base_world,
+        )
+        last_state[0] = state
+
+        s = state["summary"]
+        n_A = sum(1 for o in state["objects"] if o["class_id"] == "part_A")
+        n_B = sum(1 for o in state["objects"] if o["class_id"] == "part_B")
+        warn = "  ← expected 4!" if s["num_objects"] != 4 else ""
+        print(f"[Frame {fid:4d}] total={s['num_objects']} valid={s['num_valid_objects']} "
+              f"A={n_A} B={n_B}{warn}")
+
+        if fid == 1 or fid % 30 == 0:
+            _save_artifacts(bgr, depth, state, fid)
+
+        if args.frames > 0 and fid >= args.frames:
+            print(f"\n[Done] {args.frames} frames complete.")
+            break
+
+except KeyboardInterrupt:
+    print("\n[Interrupted] Saving final state...")
+    if last_state[0]:
+        save_perception_json(last_state[0], p("perception_interface_final.json"))
+        print(f"  Saved perception_interface_final.json")
+finally:
+    logger.close()
+    kit.close()

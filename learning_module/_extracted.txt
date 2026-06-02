@@ -1,0 +1,2521 @@
+﻿
+
+======== HRC2026_Task1_Nguoi1_Camera_RGBD_Perception_Guide_v1_0_FULL.pdf ========
+pages: 13
+--- page 1 ---
+HRC2026 Task 1 Team4 Guide - Người 1 Camera/RGB-D + Perception 
+HRC2026 TRAINING CAMP 
+TASK 1 TEAM 4 GUIDE 
+Hướng dẫn chi tiết cho Người 1: Camera/RGB-D + Perception 
+Tài liệu nội bộ của BA x AILab 
+Hạng mục Nội dung 
+Phiên bản v1.0 FULL 
+Đối tượng Tài+Hảo+Trinh: phụ trách Camera/RGB-D + Perception trong nhóm 4 người giải Task 1 
+Mục tiêu cuối Tạo được perception module xuất ObjectState đủ sạch để Planner và Motion gắp được 
+vật 
+Task Task 1 - Precise Desktop Sorting of Workpieces 
+Output chính 
+sample_rgb.png, sample_depth.npy, depth_sanity_report.md, camera_config_sheet.csv, 
+overlay_detection.png, confusion_matrix_task1.csv, pose_estimator_report.csv, 
+yaw_report.csv, perception_interface.json 
+Thông điệp chính Không chỉ vẽ bounding box. Người 1 phải xuất class_id + confidence + pose_base + 
+grasp_hint + failure_reason. 
+ 
+Mục tiêu học tập: Sau tài liệu này, Người 1 có thể tự học, lấy RGB-D, kiểm tra depth, detect/classify 4 
+workpieces, tính centroid/yaw/pose_base, tạo grasp_hint và xuất JSON đúng schema để các bạn khác dùng trực 
+tiếp. 
+ 
+Mục lục định hướng 
+1. Vai trò của Người 1 trong Task 1 
+2. Các module cần tự học 
+3. Cấu trúc thư mục và artifact cần nộp 
+4. Step-by-step triển khai Camera/RGB-D + Perception 
+5. Confidence score và failure reason 
+6. Kế hoạch 5 ngày cho Người 1 
+7. Cách phối hợp với Người 2, Người 3, Người 4 và PM 
+8. Debug cookbook 
+9. Definition of Done 
+10. Gói nộp cá nhân và rubric 100 điểm 
+11. Phụ lục code skeleton đầy đủ 
+1. Vai trò của Người 1 trong Task 1 
+Người 1 phụ trách toàn bộ phần Camera/RGB-D + Perception. Nhiệm vụ không dừng ở việc detect vật trong ảnh, 
+mà phải tạo dữ liệu có cấu trúc để Planner/FSM và Motion Primitive dùng được ngay. 
+RGB-D camera 
+→ detect object 
+→ classify A/B 
+→ estimate centroid/yaw 
+→ convert pixel/depth to 3D 
+→ convert camera frame to robot base frame 
+→ output object state with confidence and grasp_hint 
+Câu hỏi Người 1 phải trả lời: Trong scene hiện tại có những vật nào, thuộc loại gì, nằm ở đâu trong robot/base 
+frame, và có đủ tin cậy để gắp không? 
+ 
+Thành phần output Ý nghĩa Người dùng output 
+--- page 2 ---
+HRC2026 Task 1 Team4 Guide - Người 1 Camera/RGB-D + Perception 
+class_id Loại vật: part_A hoặc part_B Người 2 map sang bin A/B 
+confidence Độ tin cậy detection/class/pose Người 2 quyết định gắp hoặc bỏ 
+qua 
+bbox_xyxy/mask Vùng vật thể trong ảnh Người 4 đánh giá perception và 
+debug overlay 
+centroid_px Tâm vật trong ảnh Người 1 dùng để lấy depth 
+centroid_camera_m Tâm vật trong camera frame Người 2 kiểm tra transform 
+pose_base Pose vật trong robot/base frame Người 3 dùng để tạo waypoint gắp 
+grasp_hint Gợi ý yaw, grasp width, approach axis Người 3 dùng trong pick-place 
+primitive 
+failure_reason Lý do không nên gắp nếu perception không 
+chắc 
+Người 2/4 dùng để retry hoặc log 
+lỗi 
+ 
+{ 
+  "frame_id": 25, 
+  "timestamp": 12.53, 
+  "camera_name": "front_rgbd", 
+  "objects": [ 
+    { 
+      "object_id": "obj_001", 
+      "class_id": "part_A", 
+      "confidence": 0.91, 
+      "bbox_xyxy": [310, 220, 380, 292], 
+      "centroid_px": [345.0, 256.0], 
+      "centroid_camera_m": [0.12, -0.04, 0.74], 
+      "pose_base": { 
+        "position_m": [0.46, -0.15, 0.82], 
+        "quaternion_xyzw": [0.0, 0.0, 0.707, 0.707] 
+      }, 
+      "grasp_hint": { 
+        "yaw_rad": 1.57, 
+        "grasp_width_m": 0.045, 
+        "approach_axis": "z_down" 
+      }, 
+      "failure_reason": null 
+    } 
+  ] 
+} 
+2. Các module Người 1 cần tự học 
+Thứ 
+tự Module Mục cần học Output học xong 
+1 Module 1.A - Bắt đầu với 
+Isaac Sim 5.1+ 
+GUI, camera, Stage, Properties, 
+Viewport, Console/Log 
+Biết mở scene, nhìn camera, đọc 
+log 
+2 
+Module 2 - Isaac 
+Sim/USD/URDF/Walker 
+S2/Baseline 
+Camera path, object path, bin path, 
+scene/config Task 1 task1_perception_start_checklist.md 
+3 Module 3 - Robotics Math Frame, transform, quaternion ở 
+mức dùng được transform_sanity_report.md 
+4 Module 4 - Camera, RGB-D, 
+Coordinate Transform 
+Intrinsic, extrinsic, pixel-to-3D, 
+depth sanity, camera-to-base 
+camera_config_sheet.csv, pixel-to-
+3D tests 
+5 Module 5 - Perception for 
+Industrial Manipulation 
+Detection, segmentation, centroid, 
+yaw, output contract perception_interface.json, overlays 
+6 Module 10 - Evaluation, 
+Logging, Ablation 
+Perception metrics, failure reason, 
+confidence failure_cases_perception.jsonl 
+ 
+--- page 3 ---
+HRC2026 Task 1 Team4 Guide - Người 1 Camera/RGB-D + Perception 
+Nguyên tắc tự học: Mỗi phần học xong phải có artifact đo được: ảnh, CSV, JSON, report hoặc unit test. Không 
+đánh dấu hoàn thành chỉ vì đã đọc xong tài liệu. 
+ 
+3. Cấu trúc thư mục và artifact cần nộp 
+src/task1/ 
+  camera_utils.py 
+  transform_utils.py 
+  perception.py 
+  perception_debug.py 
+ 
+configs/ 
+  camera.yaml 
+  task1_perception.yaml 
+ 
+lab_outputs/perception/ 
+  sample_rgb.png 
+  sample_depth.npy 
+  sample_depth_preview.png 
+  depth_sanity_report.md 
+  camera_config_sheet.csv 
+  overlay_detection.png 
+  overlay_mask.png 
+  overlay_centroid.png 
+  confusion_matrix_task1.csv 
+  pose_estimator_report.csv 
+  yaw_report.csv 
+  transform_sanity_report.md 
+  perception_interface.json 
+  failure_cases_perception.jsonl 
+Artifact Bắt buộc? Ý nghĩa 
+sample_rgb.png Có Chứng minh camera RGB hoạt động và thấy đủ 4 vật 
+sample_depth.npy Có Dữ liệu depth gốc để tính 3D 
+sample_depth_preview.png Có Ảnh visualize depth để kiểm tra nhanh 
+depth_sanity_report.md Có Kiểm tra shape, valid ratio, unit, min/median/max depth 
+camera_config_sheet.csv Có Lưu intrinsics/extrinsics/depth unit 
+overlay_detection.png Có Debug detection/class bằng hình ảnh 
+confusion_matrix_task1.csv Nên có Đánh giá class A/B 
+pose_estimator_report.csv Có Centroid pixel, depth, camera point, base point 
+yaw_report.csv Có Yaw/grasp direction theo từng object 
+perception_interface.json Có Output chính cho Người 2/3/4 
+ 
+4. Step-by-step triển khai Camera/RGB-D + Perception 
+Step 1. Nhận thông tin scene/config từ PM 
+PM sẽ hỗ trợ baseline/config, nhưng Người 1 phải tự xác nhận lại thông tin phục vụ perception để tránh làm sai 
+camera hoặc sai object class. 
+Cần biết Câu hỏi cần hỏi PM Ghi chú 
+Scene Task 1 Scene/USD/config nào đang được dùng? Ghi rõ file/path 
+Camera Camera RGB-D nào dùng cho perception? Tên camera và prim path 
+Depth source Depth trả về mét, mm hay normalized? Quan trọng để tránh sai scale 
+1000 lần 
+--- page 4 ---
+HRC2026 Task 1 Team4 Guide - Người 1 Camera/RGB-D + Perception 
+Object names Workpieces có tên/path/label như thế nào? Dùng để debug hoặc đối chiếu 
+Class A/B Phân biệt A/B bằng màu, shape, semantic label hay 
+config? Quyết định cách classify 
+Bin A/B Bin A/B nằm ở đâu? Người 2 dùng để map class -> 
+bin 
+Transform Có sẵn T_base_camera không? Nếu chưa có, phối hợp Người 2 
+ 
+# task1_perception_start_checklist.md 
+- Scene/config: ... 
+- Camera name/path: ... 
+- RGB resolution: ... 
+- Depth resolution: ... 
+- Depth unit: unknown / meter / millimeter 
+- Object naming pattern: ... 
+- Class mapping rule: ... 
+- Bin A/B info source: ... 
+- T_base_camera source: ... 
+- Open questions: 
+  1. ... 
+  2. ... 
+Step 2. Lấy RGB/depth sample đầu tiên 
+Mục tiêu của bước này là chứng minh camera hoạt động, ảnh nhìn thấy đủ 4 vật và depth có dữ liệu hợp lệ. 
+Output Yêu cầu đạt 
+sample_rgb.png Ảnh không đen, thấy bàn và đủ workpieces 
+sample_depth.npy Mảng depth gốc, lưu đúng dtype 
+sample_depth_preview.png Depth được normalize để xem bằng mắt 
+depth_sanity_report.md Có shape, valid_ratio, min/median/max, nhận định depth unit 
+ 
+import numpy as np 
+ 
+depth = np.load("sample_depth.npy") 
+valid = np.isfinite(depth) & (depth > 0) 
+print("shape:", depth.shape) 
+print("valid_ratio:", valid.mean()) 
+ 
+if valid.any(): 
+    print("min:", depth[valid].min()) 
+    print("median:", np.median(depth[valid])) 
+    print("max:", depth[valid].max()) 
+else: 
+    print("No valid depth values") 
+Cách đoán depth unit: Nếu median depth khoảng 0.3-2.0 thì thường là mét. Nếu khoảng 300-2000 thì có thể là 
+millimeter và cần chia 1000 trước khi tính 3D. 
+ 
+Step 3. Tạo camera_config_sheet.csv 
+File này giúp cả nhóm không phải đoán camera intrinsics/extrinsics mỗi lần debug. 
+camera_name,width,height,fx,fy,cx,cy,depth_unit,T_base_camera_source,notes 
+front_rgbd,640,480,615.2,615.0,320.0,240.0,meter,scene_or_config,"Task 1 main camera" 
+Thông số Ý nghĩa Lỗi thường gặp 
+fx, fy Tiêu cự theo pixel Dùng sai fx/fy làm point cloud méo 
+cx, cy Optical center Centroid 3D lệch nếu principal point 
+sai 
+width, height Kích thước ảnh RGB/depth không cùng resolution 
+--- page 5 ---
+HRC2026 Task 1 Team4 Guide - Người 1 Camera/RGB-D + Perception 
+depth_unit Đơn vị depth Sai scale 1000 lần 
+T_base_camera_source Nguồn camera-to-base transform Không biết transform lấy từ đâu thì 
+khó debug 
+ 
+Step 4. Viết hàm pixel-to-3D 
+Từ centroid pixel và depth, tính điểm 3D trong camera frame. Đây là công thức quan trọng nhất của phần RGB-D. 
+import numpy as np 
+ 
+def pixel_to_camera_point(u, v, depth_z, fx, fy, cx, cy): 
+    """ 
+    Convert pixel + depth to a 3D point in camera frame. 
+    u, v: pixel coordinate 
+    depth_z: depth value in meters 
+    fx, fy, cx, cy: camera intrinsics 
+    """ 
+    if depth_z <= 0 or not np.isfinite(depth_z): 
+        raise ValueError(f"Invalid depth value: {depth_z}") 
+ 
+    x = (u - cx) * depth_z / fx 
+    y = (v - cy) * depth_z / fy 
+    z = depth_z 
+    return np.array([x, y, z], dtype=float) 
+ 
+def test_pixel_center(): 
+    p = pixel_to_camera_point( 
+        u=320, v=240, depth_z=1.0, 
+        fx=600, fy=600, cx=320, cy=240 
+    ) 
+    assert np.allclose(p, [0.0, 0.0, 1.0]) 
+Step 5. Lấy depth ổn định quanh centroid 
+Không nên lấy depth đúng 1 pixel vì dễ nhiễu hoặc rơi vào biên object. Dùng median trong patch nhỏ hoặc trong 
+mask. 
+def robust_depth_from_patch(depth, u, v, radius=3): 
+    h, w = depth.shape 
+    u = int(round(u)) 
+    v = int(round(v)) 
+ 
+    x1 = max(0, u - radius) 
+    x2 = min(w, u + radius + 1) 
+    y1 = max(0, v - radius) 
+    y2 = min(h, v + radius + 1) 
+ 
+    patch = depth[y1:y2, x1:x2] 
+    valid = patch[np.isfinite(patch) & (patch > 0)] 
+    if len(valid) == 0: 
+        return None 
+    return float(np.median(valid)) 
+ 
+def robust_depth_from_mask(depth, mask): 
+    valid = depth[(mask > 0) & np.isfinite(depth) & (depth > 0)] 
+    if len(valid) == 0: 
+        return None 
+    return float(np.median(valid)) 
+Step 6. Detect vật bằng baseline đơn giản trước 
+Mục tiêu ban đầu là có MVP end-to-end, không phải model đẹp. Nếu màu/hình dạng trong mô phỏng rõ, bắt đầu 
+bằng threshold + contour. 
+--- page 6 ---
+HRC2026 Task 1 Team4 Guide - Người 1 Camera/RGB-D + Perception 
+Mức Cách làm Khi nào dùng 
+Level 0 Threshold màu/depth + contour Làm MVP nhanh 
+Level 1 Mask + contour + minAreaRect/PCA Khi cần centroid/yaw tốt hơn 
+Level 2 YOLO/segmentation model Khi rule-based không đủ ổn định 
+ 
+import cv2 as cv 
+import numpy as np 
+ 
+def detect_by_color_bgr(rgb_bgr, lower_hsv, upper_hsv): 
+    hsv = cv.cvtColor(rgb_bgr, cv.COLOR_BGR2HSV) 
+    mask = cv.inRange(hsv, np.array(lower_hsv), np.array(upper_hsv)) 
+ 
+    kernel = np.ones((5, 5), np.uint8) 
+    mask = cv.morphologyEx(mask, cv.MORPH_OPEN, kernel) 
+    mask = cv.morphologyEx(mask, cv.MORPH_CLOSE, kernel) 
+ 
+    contours, _ = cv.findContours(mask, cv.RETR_EXTERNAL, cv.CHAIN_APPROX_SIMPLE) 
+    detections = [] 
+    for cnt in contours: 
+        area = cv.contourArea(cnt) 
+        if area < 100: 
+            continue 
+        x, y, w, h = cv.boundingRect(cnt) 
+        m = cv.moments(cnt) 
+        if m["m00"] == 0: 
+            continue 
+        cx = m["m10"] / m["m00"] 
+        cy = m["m01"] / m["m00"] 
+        detections.append({ 
+            "bbox_xyxy": [x, y, x + w, y + h], 
+            "centroid_px": [cx, cy], 
+            "area_px": area, 
+            "contour": cnt 
+        }) 
+    return detections, mask 
+# Nếu hai loại vật khác màu 
+# detections_A, mask_A = detect_by_color_bgr(rgb, lower_A, upper_A) 
+# detections_B, mask_B = detect_by_color_bgr(rgb, lower_B, upper_B) 
+ 
+for d in detections_A: 
+    d["class_id"] = "part_A" 
+    d["confidence"] = 0.85 
+ 
+for d in detections_B: 
+    d["class_id"] = "part_B" 
+    d["confidence"] = 0.85 
+Step 7. Vẽ overlay để debug bằng hình ảnh 
+Quy tắc: Không được nói “detection đúng” nếu chưa có overlay. Overlay là bằng chứng để cả nhóm biết lỗi nằm 
+ở perception hay motion. 
+ 
+def draw_detections(rgb_bgr, objects): 
+    img = rgb_bgr.copy() 
+    for obj in objects: 
+        x1, y1, x2, y2 = obj["bbox_xyxy"] 
+        u, v = obj["centroid_px"] 
+        label = f'{obj["class_id"]} {obj["confidence"]:.2f}' 
+ 
+        cv.rectangle(img, (x1, y1), (x2, y2), (0, 255, 0), 2) 
+--- page 7 ---
+HRC2026 Task 1 Team4 Guide - Người 1 Camera/RGB-D + Perception 
+        cv.circle(img, (int(u), int(v)), 4, (0, 0, 255), -1) 
+        cv.putText(img, label, (x1, max(0, y1 - 5)), 
+                   cv.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 255), 1) 
+    return img 
+Step 8. Tính yaw/grasp direction 
+Mức Cách tính yaw Khi nào dùng 
+MVP yaw = 0 hoặc yaw default Nếu gripper gắp được vật không cần xoay 
+Khá cv.minAreaRect(contour) Nếu vật hình chữ nhật/dài 
+Tốt PCA trên mask/point cloud Nếu cần trục chính ổn định 
+ 
+def estimate_yaw_from_contour(contour): 
+    rect = cv.minAreaRect(contour) 
+    angle_deg = rect[-1] 
+    # OpenCV angle convention can be tricky. 
+    # Treat this as a grasp hint and validate visually. 
+    yaw_rad = np.deg2rad(angle_deg) 
+    return float(yaw_rad) 
+Step 9. Tính centroid 3D trong camera frame 
+u, v = detection["centroid_px"] 
+z = robust_depth_from_patch(depth, u, v, radius=3) 
+ 
+if z is None: 
+    detection["failure_reason"] = "INVALID_DEPTH" 
+else: 
+    p_cam = pixel_to_camera_point(u, v, z, fx, fy, cx, cy) 
+# pose_estimator_report.csv columns 
+object_id,class_id,u,v,depth_m,x_cam,y_cam,z_cam,status 
+obj_001,part_A,345,256,0.74,0.031,0.019,0.740,ok 
+Step 10. Chuyển centroid từ camera frame sang base frame 
+def transform_point(T_ab, p_b): 
+    p_h = np.array([p_b[0], p_b[1], p_b[2], 1.0]) 
+    return (T_ab @ p_h)[:3] 
+ 
+# Quy ước dùng trong nhóm: 
+# p_base = T_base_camera @ p_camera 
+Sanity test Kỳ vọng 
+Object trên bàn có z hợp lý z_base gần mặt bàn/object height 
+Vật bên trái/phải ảnh Không bị đảo trái/phải bất thường 
+Pose object nằm trong workspace Nếu quá xa, có thể sai transform/depth scale 
+T identity test Không làm đổi điểm 
+ 
+Step 11. Tạo ObjectState hoàn chỉnh 
+{ 
+  "frame_id": 1, 
+  "timestamp": 0.033, 
+  "camera_name": "front_rgbd", 
+  "objects": [ 
+    { 
+      "object_id": "obj_001", 
+      "class_id": "part_A", 
+      "confidence": 0.88, 
+      "bbox_xyxy": [310, 220, 380, 292], 
+      "centroid_px": [345.0, 256.0], 
+--- page 8 ---
+HRC2026 Task 1 Team4 Guide - Người 1 Camera/RGB-D + Perception 
+      "centroid_camera_m": [0.031, 0.019, 0.740], 
+      "pose_base": { 
+        "position_m": [0.46, -0.15, 0.82], 
+        "quaternion_xyzw": [0.0, 0.0, 0.707, 0.707] 
+      }, 
+      "grasp_hint": { 
+        "approach_axis": "z_down", 
+        "yaw_rad": 1.57, 
+        "grasp_width_m": 0.045 
+      }, 
+      "failure_reason": null 
+    } 
+  ], 
+  "summary": { 
+    "num_objects": 4, 
+    "num_valid_objects": 4, 
+    "num_invalid_depth": 0 
+  } 
+} 
+5. Confidence score và failure reason 
+Confidence ở giai đoạn đầu không cần quá phức tạp, nhưng phải có ý nghĩa để Planner biết nên gắp hay bỏ qua. 
+confidence = 1.0 
+if area_px < min_area: 
+    confidence -= 0.3 
+if depth_invalid: 
+    confidence -= 0.4 
+if mask_quality_low: 
+    confidence -= 0.2 
+if class_ambiguous: 
+    confidence -= 0.2 
+confidence = max(0.0, min(1.0, confidence)) 
+Trường hợp Confidence gợi ý 
+Mask rõ, depth tốt, class chắc 0.85-0.95 
+Mask hơi nhiễu nhưng centroid ổn 0.70-0.85 
+Depth thiếu hoặc class không chắc < 0.70 
+Không đủ thông tin để gắp < 0.50 
+ 
+Failure reason Khi nào dùng 
+NO_OBJECT_DETECTED Không detect đủ vật 
+LOW_CONFIDENCE Detect được nhưng không đủ tin cậy 
+INVALID_DEPTH Depth tại object không hợp lệ 
+CLASS_AMBIGUOUS Không chắc A/B 
+MASK_TOO_SMALL Mask nhỏ hơn ngưỡng 
+MASK_FRAGMENTED Mask bị vỡ thành nhiều mảnh 
+POSE_OUT_OF_RANGE Pose 3D bất thường 
+TRANSFORM_NOT_AVAILABLE Chưa có T_base_camera 
+GRASP_HINT_UNSTABLE Yaw/grasp direction dao động mạnh 
+ 
+6. Kế hoạch 5 ngày cho Người 1 
+Ngày Mục tiêu Output bắt buộc Checklist pass 
+1 Camera và dữ liệu 
+mẫu 
+sample_rgb.png, sample_depth.npy, 
+sample_depth_preview.png, 
+RGB thấy đủ 4 vật; depth valid 
+>80%; biết depth unit 
+--- page 9 ---
+HRC2026 Task 1 Team4 Guide - Người 1 Camera/RGB-D + Perception 
+camera_config_sheet.csv, 
+depth_sanity_report.md 
+2 Pixel-to-3D và 
+transform sanity 
+camera_utils.py, transform_utils.py, 
+pytest_camera_utils.txt, 
+pose_estimator_report.csv, 
+transform_sanity_report.md 
+Test optical center pass; 
+p_camera/p_base hợp lý 
+3 Detection/classification 
+MVP 
+overlay_detection.png, overlay_mask.png, 
+confusion_matrix_task1.csv, 
+perception_mvp_report.md 
+Detect đủ 4 vật, class A/B đúng 
+ở sample 
+4 Pose/yaw/grasp hint 
+pose_estimator_report.csv, yaw_report.csv, 
+perception_interface.json, 
+overlay_centroid.png 
+Mỗi vật có pose_base và 
+grasp_hint 
+5 Robustness và tích 
+hợp 
+perception_eval_summary.csv, 
+failure_cases_perception.jsonl, 
+perception_interface_v1.json 
+Chạy nhiều frame/seed; Người 
+2 đọc được JSON 
+ 
+7. Cách phối hợp với Người 2, Người 3, Người 4 và PM 
+7.1. Với Người 2 - Transform + Planner/FSM 
+Câu hỏi cần thống nhất Quyết định đề xuất 
+Planner cần class tên gì? part_A, part_B 
+Pose ở frame nào? pose_base 
+Confidence threshold? 0.70 
+Nếu depth invalid thì làm gì? failure_reason = INVALID_DEPTH 
+Object ID có ổn định không? obj_001... hoặc ID theo contour/track 
+ 
+7.2. Với Người 3 - Motion Primitive 
+Câu hỏi cần hỏi Vì sao 
+Gripper cần yaw chính xác đến mức nào? Để biết yaw MVP có đủ không 
+Cần grasp_width không? Nếu cần, ước lượng từ bbox/mask 
+Approach axis mặc định là gì? Thường dùng z_down 
+Pose cần ở tâm vật hay mép vật? Tùy hình dạng vật và gripper 
+ 
+7.3. Với Người 4 - Evaluation/Debug 
+File Người 4 dùng để làm gì 
+confusion_matrix_task1.csv Đánh giá phân loại A/B 
+pose_estimator_report.csv Phân tích pose sai 
+failure_cases_perception.jsonl Thống kê lỗi perception 
+overlay images Debug bằng chứng trực quan 
+ 
+7.4. Với PM 
+Người 1 cần PM hỗ trợ Không nên đẩy cho PM 
+Scene/config/camera path ban đầu Viết detection/perception thay Người 1 
+Cách chạy script baseline Tính centroid, yaw, depth sanity 
+Lỗi môi trường, asset path, camera không xuất dữ liệu Làm perception report 
+ 
+--- page 10 ---
+HRC2026 Task 1 Team4 Guide - Người 1 Camera/RGB-D + Perception 
+8. Debug cookbook 
+Lỗi Triệu chứng Cách kiểm tra Cách sửa 
+RGB không thấy vật Overlay trống Kiểm tra camera view/path Hỏi PM camera đúng chưa, 
+chỉnh camera/config 
+Depth toàn 0/NaN Không tính 3D được depth_sanity_report Kiểm tra depth 
+annotator/source 
+Depth sai đơn vị Điểm 3D quá xa/gần Median depth bất thường Đổi mm -> m hoặc scale đúng 
+Mask nhiễu Detect quá nhiều object overlay_mask.png Morphology open/close, lọc 
+area 
+Detect thiếu vật Chỉ thấy 2-3 object Contour area/threshold Chỉnh threshold, dùng 
+depth/mask 
+Class sai Vật vào sai bin confusion_matrix_task1.csv Rule mới, crop classifier, 
+nhiều frame 
+Centroid sai Robot gắp lệch overlay_centroid.png Dùng mask tốt hơn, median 
+depth theo mask 
+Yaw sai Gripper xoay lệch Overlay trục yaw Thử yaw + pi/2, 
+PCA/minAreaRect 
+pose_base sai Tay đi sai hướng transform_sanity_report Kiểm tra T_base_camera, 
+convention, quaternion 
+Confidence quá cao 
+dù sai Planner gắp vật lỗi failure_cases Thêm penalty cho 
+mask/depth/class ambiguity 
+ 
+9. Definition of Done cho Người 1 
+Điều kiện Bắt buộc 
+Có sample_rgb.png, sample_depth.npy Có 
+Có depth_sanity_report.md Có 
+Có camera_config_sheet.csv Có 
+Detect đủ 4 workpieces ở scene mẫu Có 
+Classify A/B đúng ở scene mẫu Có 
+Tính được centroid pixel và centroid 3D Có 
+Xuất được pose_base Có 
+Có grasp_hint Có 
+Có perception_interface.json đúng schema Có 
+Có overlay debug Có 
+Có failure reason rõ Có 
+Người 2 đọc được JSON và chọn được object Có 
+Người 3 dùng được pose/grasp hint để dry-run Có 
+Người 4 có report để đánh giá perception Có 
+ 
+10. Gói nộp cá nhân và rubric 100 điểm 
+person1_perception_pack/ 
+  README_PERCEPTION.md 
+  src/ 
+    camera_utils.py 
+    transform_utils.py 
+    perception.py 
+    perception_debug.py 
+  configs/ 
+    task1_perception.yaml 
+    camera.yaml 
+  outputs/ 
+--- page 11 ---
+HRC2026 Task 1 Team4 Guide - Người 1 Camera/RGB-D + Perception 
+    sample_rgb.png 
+    sample_depth.npy 
+    sample_depth_preview.png 
+    camera_config_sheet.csv 
+    depth_sanity_report.md 
+    overlay_detection.png 
+    overlay_mask.png 
+    overlay_centroid.png 
+    confusion_matrix_task1.csv 
+    pose_estimator_report.csv 
+    yaw_report.csv 
+    perception_interface.json 
+    failure_cases_perception.jsonl 
+# README_PERCEPTION.md 
+## What it does 
+Detects 4 workpieces, classifies A/B, estimates 3D centroid and grasp hint. 
+ 
+## Inputs 
+- RGB image 
+- Depth image 
+- Camera intrinsics 
+- T_base_camera 
+ 
+## Outputs 
+- perception_interface.json 
+ 
+## Known limitations 
+- ... 
+Hạng mục Điểm 
+Lấy RGB/depth và camera config đúng 15 
+Depth sanity và pixel-to-3D đúng 15 
+Detection đủ 4 vật 15 
+Classification A/B 15 
+Centroid 3D và pose_base 15 
+Yaw/grasp hint 10 
+JSON interface đúng schema 10 
+Overlay/debug/failure report rõ 5 
+ 
+11. Phụ lục code skeleton đầy đủ 
+11.1. camera_utils.py 
+import numpy as np 
+ 
+class CameraIntrinsics: 
+    def __init__(self, fx, fy, cx, cy, width=None, height=None): 
+        self.fx = float(fx) 
+        self.fy = float(fy) 
+        self.cx = float(cx) 
+        self.cy = float(cy) 
+        self.width = width 
+        self.height = height 
+ 
+def pixel_to_camera_point(u, v, depth_z, intr): 
+    if depth_z is None or depth_z <= 0 or not np.isfinite(depth_z): 
+        raise ValueError(f"Invalid depth: {depth_z}") 
+    x = (u - intr.cx) * depth_z / intr.fx 
+--- page 12 ---
+HRC2026 Task 1 Team4 Guide - Người 1 Camera/RGB-D + Perception 
+    y = (v - intr.cy) * depth_z / intr.fy 
+    z = depth_z 
+    return np.array([x, y, z], dtype=float) 
+ 
+def robust_depth_from_patch(depth, u, v, radius=3): 
+    h, w = depth.shape 
+    u = int(round(u)) 
+    v = int(round(v)) 
+    x1, x2 = max(0, u-radius), min(w, u+radius+1) 
+    y1, y2 = max(0, v-radius), min(h, v+radius+1) 
+    patch = depth[y1:y2, x1:x2] 
+    valid = patch[np.isfinite(patch) & (patch > 0)] 
+    return None if len(valid) == 0 else float(np.median(valid)) 
+11.2. perception.py 
+import cv2 as cv 
+import numpy as np 
+from camera_utils import pixel_to_camera_point, robust_depth_from_patch 
+ 
+def detect_by_color_bgr(rgb_bgr, lower_hsv, upper_hsv, min_area=100): 
+    hsv = cv.cvtColor(rgb_bgr, cv.COLOR_BGR2HSV) 
+    mask = cv.inRange(hsv, np.array(lower_hsv), np.array(upper_hsv)) 
+    kernel = np.ones((5, 5), np.uint8) 
+    mask = cv.morphologyEx(mask, cv.MORPH_OPEN, kernel) 
+    mask = cv.morphologyEx(mask, cv.MORPH_CLOSE, kernel) 
+    contours, _ = cv.findContours(mask, cv.RETR_EXTERNAL, cv.CHAIN_APPROX_SIMPLE) 
+    detections = [] 
+    for cnt in contours: 
+        area = cv.contourArea(cnt) 
+        if area < min_area: 
+            continue 
+        x, y, w, h = cv.boundingRect(cnt) 
+        m = cv.moments(cnt) 
+        if m["m00"] == 0: 
+            continue 
+        cx = m["m10"] / m["m00"] 
+        cy = m["m01"] / m["m00"] 
+        detections.append({ 
+            "bbox_xyxy": [int(x), int(y), int(x+w), int(y+h)], 
+            "centroid_px": [float(cx), float(cy)], 
+            "area_px": float(area), 
+            "contour": cnt, 
+        }) 
+    return detections, mask 
+ 
+def estimate_yaw_from_contour(contour): 
+    rect = cv.minAreaRect(contour) 
+    return float(np.deg2rad(rect[-1])) 
+ 
+def make_object_state(d, class_id, depth, intr, T_base_camera): 
+    u, v = d["centroid_px"] 
+    z = robust_depth_from_patch(depth, u, v, radius=3) 
+    if z is None: 
+        return {"failure_reason": "INVALID_DEPTH", **d} 
+    p_cam = pixel_to_camera_point(u, v, z, intr) 
+    p_h = np.array([p_cam[0], p_cam[1], p_cam[2], 1.0]) 
+    p_base = (T_base_camera @ p_h)[:3] 
+    yaw = estimate_yaw_from_contour(d["contour"]) 
+    return { 
+        "object_id": None, 
+        "class_id": class_id, 
+--- page 13 ---
+HRC2026 Task 1 Team4 Guide - Người 1 Camera/RGB-D + Perception 
+        "confidence": 0.85, 
+        "bbox_xyxy": d["bbox_xyxy"], 
+        "centroid_px": d["centroid_px"], 
+        "centroid_camera_m": p_cam.tolist(), 
+        "pose_base": { 
+            "position_m": p_base.tolist(), 
+            "quaternion_xyzw": [0.0, 0.0, 0.0, 1.0] 
+        }, 
+        "grasp_hint": { 
+            "approach_axis": "z_down", 
+            "yaw_rad": yaw, 
+            "grasp_width_m": 0.045 
+        }, 
+        "failure_reason": None 
+    } 
+Kết luận: Người 1 thành công khi xuất được object state đủ sạch để robot gắp: class_id + confidence + 
+pose_base + grasp_hint + failure_reason. Đây là đầu vào quan trọng nhất cho Planner/FSM và Motion Primitive 
+trong Task 1. 
+ 
+
+
+======== HRC2026_Module_5_Perception_for_Industrial_Manipulation_v1_0_FULL.pdf ========
+pages: 20
+--- page 1 ---
+HRC2026 Training Program | Module 5: Perception for Industrial Manipulation | v1.0 FULL 
+HRC2026 Training Program 
+Module 5: Perception for Industrial Manipulation 
+Phiên bản: v1.0 FULL | Định dạng tự học + demo baseline + lab đo được 
+Đối tượng: sinh viên năm 3 CNTT/KHMT, đã hoàn thành Module 1-4 
+ 
+Mục tiêu của module 
+Sau module này, sinh viên có thể thiết kế và triển khai perception pipeline cho thao tác công nghiệp: từ ảnh 
+RGB-D hoặc video đến object class, mask/bounding box, centroid, orientation, pose, velocity/tracking và 
+confidence để planner/motion module sử dụng được. 
+ 
+Thông tin Nội dung 
+Thời lượng đề xuất 2 đến 2.5 ngày học tập trung; 10-14 giờ tự học/lab. 
+Guild chủ lực Perception/Pose/Tracking; Manipulation và Evaluation cần học đủ để hiểu contract đầu 
+vào/đầu ra. 
+Liên hệ HRC2026 Task 1: desktop sorting; Task 2: conveyor sorting; Task 3: workpiece insertion; Task 4: 
+carton sealing. 
+Triết lý Không chỉ tạo bounding box đẹp. Perception phải xuất dữ liệu hành động được: pose, 
+velocity, confidence, grasp_hint/slot_hint và failure_reason. 
+Output cuối module perception_interface.json, perception_report.csv, overlay images, mask/pose/tracking 
+metrics, mini-project report. 
+ 
+Mục lục 
+1. Chuẩn đầu ra và bản đồ năng lực 
+2. Phần A - Lý thuyết tối thiểu 
+3. Phần B - Demo trên baseline HRC2026 
+4. Phần C - Bài lab có output đo được 
+5. Mini-project cuối module và rubric 
+6. Troubleshooting checklist 
+7. Phụ lục code skeleton và schema 
+8. Tài liệu tham khảo và video/tutorial mở 
+  
+--- page 2 ---
+HRC2026 Training Program | Module 5: Perception for Industrial Manipulation | v1.0 FULL 
+1. Chuẩn đầu ra và bản đồ năng lực 
+Mã Sau module này sinh viên làm được gì? Minh chứng đo được 
+M5-CLO1 Phân biệt classification, detection, segmentation, pose estimation, 
+tracking và chọn đúng kỹ thuật cho từng task. 
+Bảng task-to-method trong 
+report. 
+M5-CLO2 Xây pipeline xử lý ảnh cơ bản: load frame, preprocess, 
+threshold/mask/contour, tính centroid/orientation. 
+overlay_centroid.png, 
+classical_perception_report.csv. 
+M5-CLO3 Dùng hoặc chuẩn bị dữ liệu để train detector/segmenter như 
+YOLO/SAM-style pipeline. 
+dataset_inventory.csv, 
+label_quality_report.md. 
+M5-CLO4 Từ RGB-D tính được 3D centroid/pose thô trong camera/base 
+frame, kế thừa kiến thức Module 4. 
+pose_estimator_report.csv. 
+M5-CLO5 Theo dõi vật chuyển động trên băng chuyền bằng 
+tracker/predictor đơn giản. 
+tracker_report.csv, 
+velocity_error_px_per_frame. 
+M5-CLO6 Thiết kế output contract cho planner/motion: object_id, class_id, 
+pose, velocity, confidence, grasp_hint. 
+perception_interface.json. 
+M5-CLO7 Đánh giá perception bằng metric phù hợp: precision, recall, IoU, 
+mAP, pose error, latency và end-to-end impact. 
+evaluation_summary.md. 
+ 
+Điểm nối với các module trước 
+Module 3 đã cung cấp frame, transform, SE(3), quaternion và FK/IK. Module 4 đã cung cấp camera 
+intrinsic/extrinsic, RGB-D và camera-to-base transform. Module 5 dùng các kiến thức đó để tạo perception 
+output có thể đưa trực tiếp vào planner/motion module. 
+ 
+2. Phần A - Lý thuyết tối thiểu 
+2.1. Perception trong industrial manipulation là gì? 
+Perception trong bài toán thao tác công nghiệp không dừng ở việc “nhận dạng ảnh”. Nó là tầng chuyển đổi quan 
+sát thô từ camera/sensor thành trạng thái có cấu trúc để robot có thể ra quyết định và hành động. Với HRC2026, 
+perception phải trả lời ít nhất 6 câu hỏi: 
+☐ Có những vật nào trong scene? 
+☐ Mỗi vật thuộc loại nào? 
+☐ Vật nằm ở đâu trong ảnh, trong 3D camera frame và trong robot/world frame? 
+☐ Vật đang đứng yên hay chuyển động? Nếu chuyển động, vận tốc và hướng là gì? 
+☐ Độ tin cậy của nhận dạng/pose/tracking là bao nhiêu? 
+☐ Planner/motion nên gắp ở đâu, theo hướng nào, hay nên bỏ qua vật đó? 
+Loại output perception Ví dụ Dùng cho task nào? 
+Class label workpiece_A / workpiece_B / carton_lid 
+/ foam_slot 
+Tất cả task. 
+Bounding box 2D [x1, y1, x2, y2] Detection nhanh, tracking, debug overlay. 
+Mask/segmentation Pixel thuộc về vật thể T1/T3 rất hữu ích để tính 
+centroid/orientation; T4 để tìm nắp carton. 
+Centroid 3D [x, y, z] trong camera/base frame Gắp/đặt/align. 
+Orientation/Pose yaw hoặc SE(3) Gắp đúng hướng, chèn vào foam, đóng nắp 
+carton. 
+Velocity/track vx, vy, confidence, object_id Task 2 băng chuyền. 
+--- page 3 ---
+HRC2026 Training Program | Module 5: Perception for Industrial Manipulation | v1.0 FULL 
+Loại output perception Ví dụ Dùng cho task nào? 
+Confidence/failure reason low_mask_quality, occluded, 
+out_of_workspace 
+Planner quyết định retry/fallback. 
+ 
+2.2. Bản đồ kỹ thuật: từ đơn giản đến nâng cao 
+Mức Kỹ thuật Ưu điểm Hạn chế Nên dùng khi 
+Level 0 Rule-based thresholding: màu, 
+depth range, contour 
+Rất nhanh, dễ 
+debug, không cần 
+data lớn 
+Kém robust nếu 
+lighting/texture thay đổi 
+Scene mô phỏng 
+ổn định, màu/vật 
+thể khác biệt rõ. 
+Level 1 Classical CV + RGB-D geometry: 
+contour, PCA, minAreaRect, 3D 
+centroid 
+Tạo pose/grasp 
+hint tốt, ít training 
+Cần tuning theo scene T1/T3 cần pose 
+chính xác. 
+Level 2 Detector/segmenter học máy: 
+YOLO detect/segment, Mask R-
+CNN, SAM-assisted labeling 
+Robust hơn với 
+biến thiên 
+pose/texture 
+Cần dữ liệu/label, 
+latency cao hơn 
+T1/T2 hoặc khi 
+rule-based không 
+đủ. 
+Level 3 6D 
+pose/template/ICP/FoundationPose 
+Ước lượng pose 
+đầy đủ, phù hợp 
+CAD/object pose 
+Thiết lập phức tạp, cần 
+mesh/reference tốt 
+T3 insertion, gắp 
+vật có hình học đặc 
+thù. 
+Level 4 VLM/embodied perception hỗ trợ Giúp mô tả scene, 
+validate nhãn, 
+phân tích lỗi 
+Có thể 
+chậm/hallucinate/khó 
+tái lập 
+Dùng 
+offline/fallback, 
+không nên phụ 
+thuộc real-time. 
+ 
+2.3. Perception interface: hợp đồng giữa Perception và Planner 
+Để tích hợp tốt, perception module không nên trả về nhiều format tùy tiện. Cần chuẩn hóa một schema chung để 
+planner/motion module dùng được. Một object observation nên có cấu trúc như sau: 
+{ 
+  "frame_id": 128, 
+  "timestamp": 12.833, 
+  "camera_name": "front_rgbd", 
+  "objects": [ 
+    { 
+      "object_id": "track_003", 
+      "class_id": "workpiece_A", 
+      "confidence": 0.92, 
+      "bbox_xyxy": [345, 210, 420, 292], 
+      "mask_quality": 0.86, 
+      "centroid_px": [382.5, 251.0], 
+      "centroid_camera_m": [0.12, -0.08, 0.74], 
+      "pose_base": { 
+        "position_m": [0.48, -0.16, 0.83], 
+        "quaternion_xyzw": [0.0, 0.0, 0.707, 0.707] 
+      }, 
+      "velocity_px_per_frame": [2.3, 0.1], 
+      "grasp_hint": { 
+        "approach_axis": "z_down", 
+        "grasp_width_m": 0.045, 
+        "yaw_rad": 1.57 
+      }, 
+      "failure_reason": null 
+    } 
+  ] 
+} 
+--- page 4 ---
+HRC2026 Training Program | Module 5: Perception for Industrial Manipulation | v1.0 FULL 
+Nguyên tắc 
+Planner không nên phải biết object được detect bằng YOLO, threshold hay template matching. Planner chỉ cần 
+nhận object state sạch, có confidence và failure_reason. 
+ 
+2.4. Image representation và preprocessing 
+Khái niệm Ý nghĩa Lưu ý thực hành 
+RGB/BGR Ảnh màu 3 kênh. OpenCV mặc định đọc ảnh 
+theo BGR. 
+Nếu overlay màu sai, kiểm tra RGB/BGR 
+conversion. 
+HSV Không gian màu tách hue/saturation/value, 
+hữu ích cho threshold theo màu. 
+Hue trong OpenCV thường có range 0-179. 
+Depth Mỗi pixel có khoảng cách đến camera. Kiểm tra đơn vị: meter, millimeter hoặc 
+normalized. 
+Binary mask Ảnh 0/1 hoặc 0/255 biểu diễn vùng vật thể. Morphology open/close giúp giảm nhiễu. 
+Contour Biên của vùng mask. Dùng để tính area, centroid, minAreaRect, 
+orientation. 
+Point cloud Tập điểm 3D suy ra từ depth + intrinsic. Cần lọc outlier, NaN, far depth. 
+ 
+# Minimal preprocessing skeleton 
+import cv2 as cv 
+import numpy as np 
+ 
+rgb = cv.imread("frame.png")                 # BGR by default 
+hsv = cv.cvtColor(rgb, cv.COLOR_BGR2HSV) 
+mask = cv.inRange(hsv, lowerb=(20, 60, 60), upperb=(40, 255, 255)) 
+mask = cv.morphologyEx(mask, cv.MORPH_OPEN, np.ones((5,5), np.uint8)) 
+contours, _ = cv.findContours(mask, cv.RETR_EXTERNAL, cv.CHAIN_APPROX_SIMPLE) 
+2.5. Classification, detection, segmentation, pose estimation và tracking 
+Bài toán Input Output Metric chính Ví dụ trong HRC2026 
+Classification Crop/ảnh Class label Accuracy, 
+precision/recall 
+Phân biệt workpiece A/B 
+nếu đã crop vật. 
+Object detection Ảnh RGB BBox + class + 
+confidence 
+mAP, precision/recall, 
+FPS 
+Tìm vật trên bàn hoặc 
+băng chuyền. 
+Instance 
+segmentation 
+Ảnh RGB/RGB-D Mask từng vật IoU, mask mAP Tính centroid/orientation 
+chính xác hơn bbox. 
+Pose estimation Ảnh + 
+depth/CAD/keypoints 
+Vị trí + 
+hướng/SE(3) 
+Position error, 
+angular error, 
+reprojection error 
+Gắp đúng yaw; chèn chi 
+tiết vào foam. 
+Tracking Video frames Track ID + 
+trajectory + 
+velocity 
+ID switches, 
+MOTA/HOTA, 
+prediction error 
+Dự đoán điểm gắp trên 
+băng chuyền. 
+ 
+2.6. Object detection và YOLO-style workflow 
+Detector phù hợp khi scene có nhiều vật và cần biết “vật nào ở đâu”. Với công cụ như YOLO, quy trình thực dụng 
+là: chuẩn bị ảnh/label, chia train/val/test theo episode/scene, fine-tune từ pretrained weights, đánh giá bằng 
+mAP/precision/recall/latency, rồi kiểm thử end-to-end trong simulation. 
+# Example YOLO-style dataset structure 
+perception_dataset/ 
+  images/ 
+--- page 5 ---
+HRC2026 Training Program | Module 5: Perception for Industrial Manipulation | v1.0 FULL 
+    train/ 
+    val/ 
+    test/ 
+  labels/ 
+    train/ 
+    val/ 
+    test/ 
+  data.yaml 
+ 
+# One label file per image in YOLO detection format: 
+# class_id x_center y_center width height  (normalized 0-1) 
+0 0.518 0.431 0.083 0.120 
+1 0.244 0.612 0.077 0.106 
+Cảnh báo về chia dữ liệu 
+Không nên trộn ngẫu nhiên từng frame liên tiếp vào train/val/test. Với video/episode, các frame gần nhau rất 
+giống nhau. Nên chia theo episode/seed/scene để tránh data leakage. 
+ 
+2.7. Segmentation: vì sao mask quan trọng hơn bbox trong thao tác? 
+Bounding box thường đủ cho nhận dạng thô, nhưng thao tác robot cần vị trí và orientation chính xác. Mask cho 
+phép tính centroid theo vùng vật thật, loại bỏ background và tính orientation qua PCA/minAreaRect. Với vật 
+dài/hẹp, bbox axis-aligned có thể gây sai yaw; mask hoặc rotated rectangle hữu ích hơn. 
+# Orientation from contour using minAreaRect 
+cnt = max(contours, key=cv.contourArea) 
+rect = cv.minAreaRect(cnt)        # ((cx, cy), (w, h), angle_deg) 
+(cx, cy), (w, h), angle = rect 
+box = cv.boxPoints(rect).astype(int) 
+2.8. Pose estimation từ RGB-D: centroid, orientation và 6D pose 
+Trong Module 4, sinh viên đã học pixel + depth → point 3D. Trong Module 5, ta dùng công thức đó trên nhiều pixel 
+thuộc mask để tạo point cloud của vật. Từ point cloud có thể tính centroid 3D, trục chính bằng PCA, hoặc align với 
+template/CAD bằng ICP để refinement. 
+Mức pose Cách làm Output Khi nào đủ? 
+Pose thô 2.5D Centroid mask + depth median + yaw 
+2D từ minAreaRect 
+x,y,z + yaw Gắp vật nằm phẳng trên bàn. 
+Pose 3D từ point 
+cloud 
+Lấy point cloud trong mask, PCA trục 
+chính, lọc outlier 
+centroid 3D + 
+axes 
+Vật có hình dạng rõ, depth tốt. 
+PnP từ keypoints Biết keypoint 3D trên vật và 2D 
+projection 
+rvec/tvec object-
+to-camera 
+Vật có keypoint/corner rõ hoặc 
+marker. 
+ICP/template 
+alignment 
+Align point cloud đo được với 
+CAD/template 
+Refined SE(3) Chèn chính xác, foam slot, 
+CAD có sẵn. 
+FoundationPose/6D 
+model 
+Dùng CAD/reference image và model 
+6D pose 
+6D pose + 
+tracking 
+Khi cần pose tốt nhưng 
+classical khó. 
+ 
+# Compute 3D centroid from mask + depth + intrinsics 
+ys, xs = np.where(mask > 0) 
+z = depth[ys, xs] 
+valid = np.isfinite(z) & (z > 0.1) & (z < 2.0) 
+xs, ys, z = xs[valid], ys[valid], z[valid] 
+X = (xs - cx) * z / fx 
+Y = (ys - cy) * z / fy 
+Z = z 
+centroid_cam = np.array([np.median(X), np.median(Y), np.median(Z)]) 
+--- page 6 ---
+HRC2026 Training Program | Module 5: Perception for Industrial Manipulation | v1.0 FULL 
+2.9. Tracking và prediction cho băng chuyền 
+Task 2 có băng chuyền tốc độ cố định. Vì vậy perception không chỉ detect vị trí hiện tại mà còn phải dự đoán vị trí 
+tương lai để planner pre-position robot. Cách đơn giản và hiệu quả là giữ track ID, ước lượng vận tốc trung bình 
+theo pixel hoặc world coordinate, rồi ngoại suy đến thời điểm robot có thể gắp. 
+Thành phần Cách làm đơn giản Metric 
+Detection per frame YOLO/threshold/segmentation để lấy bbox hoặc centroid Precision/recall, latency. 
+Association Ghép detection mới với track cũ bằng nearest 
+centroid/IoU 
+ID switch count. 
+Velocity estimation v = (p_t - p_{t-k}) / k hoặc linear regression Velocity error. 
+Prediction p_future = p_now + v * delta_t Prediction error tại grasp 
+line. 
+Decision gate Nếu confidence thấp, vật ngoài vùng reachable, hoặc quá 
+muộn thì skip 
+False grasp attempts, drop 
+count. 
+ 
+# Constant-velocity predictor in image space 
+class SimpleTrack: 
+    def __init__(self, track_id): 
+        self.track_id = track_id 
+        self.history = []  # list of (frame_id, x, y) 
+ 
+    def update(self, frame_id, x, y): 
+        self.history.append((frame_id, x, y)) 
+        self.history = self.history[-10:] 
+ 
+    def predict(self, target_frame): 
+        if len(self.history) < 2: 
+            return None 
+        f0, x0, y0 = self.history[0] 
+        f1, x1, y1 = self.history[-1] 
+        dt = max(f1 - f0, 1) 
+        vx, vy = (x1 - x0) / dt, (y1 - y0) / dt 
+        return x1 + vx * (target_frame - f1), y1 + vy * (target_frame - f1) 
+2.10. Confidence, failure detection và fallback 
+Trong robotics, perception không nên “tự tin giả”. Nếu output sai nhưng confidence cao, planner/motion sẽ hành 
+động sai. Do đó cần thiết kế confidence và failure_reason rõ ràng. 
+Tín hiệu rủi ro Có thể phát hiện bằng Fallback đề xuất 
+Low detection confidence score < threshold Chụp lại frame hoặc dùng detector khác. 
+Mask quá nhỏ/lớn area ngoài range Loại bỏ object hoặc gắn failure_reason. 
+Depth không hợp lệ NaN/zero/out-of-range Dùng median vùng lân cận hoặc bỏ vật. 
+Pose không ổn định yaw/centroid thay đổi mạnh qua 
+frame 
+Temporal smoothing; yêu cầu nhiều frame 
+nhất quán. 
+Occlusion/overlap IoU cao giữa objects, mask chồng Chọn vật ít bị che trước. 
+Out of workspace pose_base nằm ngoài vùng robot với 
+tới 
+Planner skip hoặc chờ vật vào vùng gắp. 
+ 
+2.11. Synthetic data và domain randomization trong Isaac Sim 
+Isaac Sim có thể tạo dữ liệu tổng hợp có nhãn như RGB, 2D/3D bounding boxes và segmentation masks thông 
+qua Replicator/Object data generation. Với HRC2026, đây là lợi thế lớn vì assets, camera và scene đều có trong 
+--- page 7 ---
+HRC2026 Training Program | Module 5: Perception for Industrial Manipulation | v1.0 FULL 
+mô phỏng. Tuy nhiên, dữ liệu tổng hợp vẫn cần validation bằng end-to-end success trong task, không chỉ metric 
+detection. 
+Yếu tố randomize Ví dụ Tác dụng 
+Vị trí/pose vật thể random x/y/yaw trong vùng bàn hoặc băng 
+chuyền 
+Tăng robust với placement. 
+Lighting/material brightness, color, texture nhẹ Giảm overfit ánh sáng. 
+Camera pose/noise small jitter, depth noise Tăng robust perception-to-pose. 
+Distractors/occlusion vật nền hoặc overlap nhẹ Giúp detector xử lý hard cases. 
+Class balance số lượng A/B cân bằng Giảm bias classifier/detector. 
+ 
+2.12. Metric đánh giá perception 
+Metric Dùng cho Cách hiểu thực dụng 
+Precision Detection/classification Trong các vật model báo có, bao nhiêu là đúng? Precision 
+thấp → gắp nhầm vật/background. 
+Recall Detection/classification Trong các vật thật, model tìm được bao nhiêu? Recall thấp → 
+bỏ sót vật. 
+IoU BBox/mask Mức overlap giữa prediction và ground truth. Mask IoU giúp 
+đo chất lượng vùng vật. 
+mAP Detector/segmenter Metric tổng hợp theo confidence/IoU thresholds; tốt cho model 
+selection nhưng chưa đủ. 
+Centroid error Pose thô Sai số pixel hoặc meter giữa centroid dự đoán và ground 
+truth. 
+Angular error Orientation/pose Sai số yaw/quaternion; quan trọng khi chèn/align. 
+Latency/FPS Real-time perception Nếu perception quá chậm, Task 2 sẽ miss vật. 
+End-to-end success Toàn hệ thống Metric cuối cùng: robot có hoàn thành task không? 
+ 
+2.13. Thiết kế perception theo 4 task HRC2026 
+Task Perception cần xuất Kỹ thuật khuyến nghị Failure mode cần log 
+Task 1 Desktop 
+Sorting 
+class_id, mask/bbox, 
+centroid_base, 
+yaw/grasp_hint 
+YOLO/segmentation + RGB-D 
+centroid + minAreaRect/PCA 
+wrong_class, 
+missed_object, bad_yaw, 
+low_depth_quality 
+Task 2 Conveyor 
+Sorting 
+class_id, track_id, centroid, 
+velocity, predicted_intercept 
+Detector/tracker + constant 
+velocity/Kalman + decision 
+gate 
+late_detection, id_switch, 
+prediction_error, 
+out_of_reach 
+Task 3 Workpiece 
+Insertion 
+part class/pose, slot pose, 
+alignment error 
+Segmentation + depth + 
+template/ICP/PnP; slot 
+keypoints 
+wrong_slot, pose_offset, 
+angle_error, occluded_slot 
+Task 4 Carton 
+Sealing 
+carton pose, lid 
+edge/keypoints, short/long 
+side state 
+Keypoint/edge segmentation 
++ state machine verification 
+lid_not_detected, 
+wrong_side, 
+uncertain_state, occlusion 
+ 
+  
+--- page 8 ---
+HRC2026 Training Program | Module 5: Perception for Industrial Manipulation | v1.0 FULL 
+3. Phần B - Demo trên baseline HRC2026 
+Mục tiêu demo 
+Sinh viên không chỉ đọc lý thuyết mà phải nhìn thấy perception gắn với baseline: camera stream, frame capture, 
+object/asset paths, config, output overlay và JSON interface. Tất cả demo đều có thể chạy ở mức tối thiểu bằng 
+frame mẫu nếu máy chưa chạy Isaac Sim. 
+ 
+3.1. Demo 0 - Tìm perception-related files trong baseline 
+Mục tiêu: lập bản đồ repo để biết camera, task config, dataset, assets và scripts nằm ở đâu. Sinh viên chạy các 
+lệnh sau trong thư mục baseline hoặc bản clone của nhóm: 
+# Repository map for perception 
+find . -maxdepth 4 -type f | grep -Ei 
+"camera|rgb|depth|sensor|perception|detect|segment|track|config|yaml" | sort > repo_perception_files.txt 
+find . -maxdepth 4 -type f | grep -Ei "Part|Conveyor|Foam|Packing|Sorting|Box|yaml" | sort > 
+task_config_files.txt 
+find . -maxdepth 5 -type f | grep -Ei "usd|urdf|stl|obj|png|jpg|mp4|parquet" | sort > 
+asset_data_files.txt 
+Output Tiêu chí pass 
+repo_perception_files.txt Có ít nhất 10 file hoặc ghi rõ nếu baseline hiện không có module perception 
+riêng. 
+task_config_files.txt Tìm được config hoặc scene files liên quan đến 4 task. 
+asset_data_files.txt Tìm được assets/dataset/media để dùng cho demo perception. 
+baseline_perception_map.md Viết 1 trang mô tả camera/input/output liên quan perception. 
+ 
+3.2. Demo 1 - Camera stream inventory 
+Mục tiêu: xác định baseline có những camera nào, resolution, frame rate, loại dữ liệu RGB/depth/segmentation và 
+cách lấy frame. Nếu chưa chạy Isaac Sim, sinh viên dùng dataset video/frame chính thức hoặc frame mẫu do 
+nhóm trích xuất. 
+Trường thông tin Ví dụ cần ghi 
+camera_name front_rgb, wrist_left_rgb, wrist_right_rgb, overhead_cam... 
+modalities rgb, depth, instance_segmentation, semantic_segmentation 
+resolution 640x480, 1280x720... 
+frame_id/timestamp Có timestamp hoặc index frame không? 
+coordinate frame camera frame tương ứng trong scene/baseline 
+access path script/function/config để lấy frame 
+ 
+# Suggested output CSV columns 
+camera_name, modality, width, height, fps_or_dt, frame_name, source_file, notes 
+front_rgbd, rgb+depth, 640, 480, 30, front_camera, task_config.yaml, verify in baseline 
+3.3. Demo 2 - Classical perception baseline từ frame RGB-D 
+Mục tiêu: tạo một perception baseline không cần train: threshold/mask, contour, centroid, orientation, depth 
+median. Đây là baseline cực kỳ quan trọng để debug trước khi dùng deep learning. 
+# demo_classical_perception.py (skeleton) 
+import cv2 as cv 
+import numpy as np 
+import json 
+ 
+rgb = cv.imread("sample_rgb.png") 
+--- page 9 ---
+HRC2026 Training Program | Module 5: Perception for Industrial Manipulation | v1.0 FULL 
+depth = np.load("sample_depth.npy")  # meters, shape HxW 
+hsv = cv.cvtColor(rgb, cv.COLOR_BGR2HSV) 
+ 
+# Example threshold; each team must tune from actual frames 
+mask = cv.inRange(hsv, np.array([10, 40, 40]), np.array([35, 255, 255])) 
+mask = cv.morphologyEx(mask, cv.MORPH_OPEN, np.ones((5,5), np.uint8)) 
+contours, _ = cv.findContours(mask, cv.RETR_EXTERNAL, cv.CHAIN_APPROX_SIMPLE) 
+objects = [] 
+for i, cnt in enumerate(contours): 
+    area = cv.contourArea(cnt) 
+    if area < 100: 
+        continue 
+    M = cv.moments(cnt) 
+    if M["m00"] == 0: 
+        continue 
+    cx_px = M["m10"] / M["m00"] 
+    cy_px = M["m01"] / M["m00"] 
+    rect = cv.minAreaRect(cnt) 
+    objects.append({ 
+        "object_id": f"obj_{i}", 
+        "class_id": "unknown_or_rule_based", 
+        "confidence": 0.5, 
+        "centroid_px": [cx_px, cy_px], 
+        "area_px": area, 
+        "yaw_image_deg": rect[2] 
+    }) 
+ 
+with open("perception_classical_output.json", "w") as f: 
+    json.dump({"objects": objects}, f, indent=2) 
+3.4. Demo 3 - YOLO/SAM-assisted perception starter 
+Mục tiêu: sinh viên hiểu cách thay classical perception bằng detector/segmenter học máy. Không bắt buộc phải 
+train model lớn trong module này; cần nắm format dữ liệu, lệnh inference, output và cách chuyển output sang 
+perception_interface.json. 
+# Optional YOLO quickstart concept - adjust model path and dataset 
+pip install ultralytics 
+ 
+yolo predict model=yolo11n.pt source=sample_frames/ save=True 
+# For custom training after labels are ready: 
+yolo detect train model=yolo11n.pt data=hrc2026_parts.yaml imgsz=640 epochs=50 batch=16 
+# For segmentation: 
+yolo segment train model=yolo11n-seg.pt data=hrc2026_parts_seg.yaml imgsz=640 epochs=50 
+Licensing reminder 
+Ultralytics YOLO open-source package uses AGPL-3.0 for open-source use; teams should check competition 
+and institutional constraints before final submission if shipping modified code/model.  
+ 
+3.5. Demo 4 - Conveyor tracker và intercept prediction 
+Mục tiêu: dùng detection centroids qua nhiều frame để tính velocity và predicted intercept. Đây là phần then chốt 
+cho Task 2. 
+# Expected tracker output CSV 
+frame_id, track_id, class_id, cx_px, cy_px, vx_px_frame, vy_px_frame, pred_x_at_grasp_line, 
+pred_y_at_grasp_line, confidence 
+1, track_01, A, 310.4, 220.1, 2.1, 0.0, 500.0, 220.1, 0.91 
+2, track_01, A, 312.6, 220.0, 2.2, -0.1, 500.0, 219.8, 0.92 
+--- page 10 ---
+HRC2026 Training Program | Module 5: Perception for Industrial Manipulation | v1.0 FULL 
+3.6. Demo 5 - Pose exporter cho planner/motion 
+Mục tiêu: gom output từ detector/segmenter/RGB-D transform thành một file JSON mà planner/motion có thể đọc. 
+Nếu chưa có planner, sinh viên viết một script giả lập planner kiểm tra các điều kiện: confidence, reachable, 
+selected object, failure_reason. 
+# demo_select_next_object.py 
+import json 
+obs = json.load(open("perception_output.json")) 
+valid = [] 
+for obj in obs["objects"]: 
+    if obj["confidence"] < 0.6: 
+        continue 
+    if obj.get("failure_reason"): 
+        continue 
+    # Example reachable gate: x/y/z already in base frame 
+    pos = obj["pose_base"]["position_m"] 
+    if 0.2 <= pos[0] <= 0.8 and -0.5 <= pos[1] <= 0.5 and 0.5 <= pos[2] <= 1.2: 
+        valid.append(obj) 
+print("selected", valid[0]["object_id"] if valid else "none") 
+  
+--- page 11 ---
+HRC2026 Training Program | Module 5: Perception for Industrial Manipulation | v1.0 FULL 
+4. Phần C - Bài lab có output đo được 
+Quy tắc nộp lab 
+Mỗi lab phải có file output cụ thể. Không chấp nhận mô tả “đã chạy được” nếu không có CSV/JSON/ảnh 
+overlay/log. Output phải đặt trong thư mục lab_outputs/module5/<student_name_or_team>/. 
+ 
+Lab 1 - Dataset/scene inventory cho perception 
+Mục tiêu: Tìm và mô tả dữ liệu/frames/assets có thể dùng để phát triển perception cho 4 task. 
+Output bắt buộc Mô tả 
+dataset_inventory.csv Nộp trong thư mục lab_outputs/module5/. 
+class_map.yaml Nộp trong thư mục lab_outputs/module5/. 
+sample_gallery_contact_sheet.png Nộp trong thư mục lab_outputs/module5/. 
+data_quality_notes.md Nộp trong thư mục lab_outputs/module5/. 
+ 
+Tiêu chí pass: 
+☐ Liệt kê tối thiểu 20 ảnh/frame hoặc 5 video/episodes nếu có. 
+☐ Có class map cho workpiece A/B, foam slot, carton lid/edge. 
+☐ Có ghi rõ nguồn dữ liệu: baseline, assets, tự capture, synthetic. 
+Lab 2 - Classical mask, centroid và orientation 
+Mục tiêu: Từ 20 frame mẫu, tạo mask bằng threshold/contour, tính centroid và yaw_image. 
+Output bắt buộc Mô tả 
+classical_perception_report.csv Nộp trong thư mục lab_outputs/module5/. 
+overlay_centroid_*.png Nộp trong thư mục lab_outputs/module5/. 
+mask_examples/*.png Nộp trong thư mục lab_outputs/module5/. 
+ 
+Tiêu chí pass: 
+☐ Có ít nhất 20 dòng kết quả. 
+☐ Overlay phải thấy bbox/mask/centroid/orientation. 
+☐ Ghi latency trung bình/frame. 
+Lab 3 - Detection/segmentation starter 
+Mục tiêu: Chuẩn bị format dữ liệu YOLO-style hoặc chạy inference pretrained/fine-tune nhỏ. 
+Output bắt buộc Mô tả 
+data.yaml Nộp trong thư mục lab_outputs/module5/. 
+labels_sample/ Nộp trong thư mục lab_outputs/module5/. 
+detector_eval_summary.md Nộp trong thư mục lab_outputs/module5/. 
+detection_overlay_*.png Nộp trong thư mục lab_outputs/module5/. 
+ 
+Tiêu chí pass: 
+☐ Có train/val/test split hợp lý. 
+☐ Có confusion matrix hoặc precision/recall nếu có labels. 
+☐ Không trộn random frame liên tiếp nếu dữ liệu là video. 
+--- page 12 ---
+HRC2026 Training Program | Module 5: Perception for Industrial Manipulation | v1.0 FULL 
+Lab 4 - RGB-D centroid và pose thô trong base frame 
+Mục tiêu: Dùng mask + depth + intrinsics/extrinsics để tính centroid_camera và centroid_base. 
+Output bắt buộc Mô tả 
+pose_estimator_report.csv Nộp trong thư mục lab_outputs/module5/. 
+transform_chain_report.json Nộp trong thư mục lab_outputs/module5/. 
+overlay_3d_projection.png Nộp trong thư mục lab_outputs/module5/. 
+ 
+Tiêu chí pass: 
+☐ Sai số reprojection hoặc sanity check phải được ghi. 
+☐ Có kiểm tra depth unit và invalid depth. 
+☐ Output schema tương thích perception_interface.json. 
+Lab 5 - Conveyor tracking/prediction 
+Mục tiêu: Từ video hoặc frame sequence, tạo track_id, velocity và prediction tại grasp line. 
+Output bắt buộc Mô tả 
+tracker_report.csv Nộp trong thư mục lab_outputs/module5/. 
+tracking_overlay.mp4 hoặc 
+tracking_overlay_frames/ 
+Nộp trong thư mục lab_outputs/module5/. 
+prediction_error_summary.md Nộp trong thư mục lab_outputs/module5/. 
+ 
+Tiêu chí pass: 
+☐ Có ít nhất 3 tracks hoặc ghi rõ nếu data không đủ. 
+☐ Có velocity và predicted point. 
+☐ Có rule skip nếu object quá muộn/confidence thấp. 
+Lab 6 - Task-specific perception contract 
+Mục tiêu: Thiết kế output contract cho một trong 4 task và viết validator kiểm tra schema. 
+Output bắt buộc Mô tả 
+perception_interface.json Nộp trong thư mục lab_outputs/module5/. 
+validate_perception_schema.py Nộp trong thư mục lab_outputs/module5/. 
+schema_validation_report.txt Nộp trong thư mục lab_outputs/module5/. 
+ 
+Tiêu chí pass: 
+☐ Validator phát hiện thiếu field bắt buộc. 
+☐ Có failure_reason và confidence. 
+☐ Có ví dụ object hợp lệ và object bị reject. 
+  
+--- page 13 ---
+HRC2026 Training Program | Module 5: Perception for Industrial Manipulation | v1.0 FULL 
+5. Mini-project cuối module: Perception-to-Action Contract v0 
+Sinh viên hoặc nhóm 2-3 người chọn một task HRC2026 và xây một perception pipeline tối thiểu có thể chuyển từ 
+ảnh/video/RGB-D sang output có cấu trúc cho planner/motion. Ưu tiên Task 1 hoặc Task 2 vì có thể đo nhanh 
+bằng frame/video; nhóm khá có thể chọn Task 3/4. 
+Task lựa chọn Yêu cầu tối thiểu Output chính 
+Task 1 Detect/segment 4 workpieces, phân loại A/B, xuất 
+centroid/yaw/grasp_hint. 
+perception_output_task1.json 
++ overlay. 
+Task 2 Detect/track vật trên băng chuyền, xuất 
+velocity/predicted_intercept. 
+tracker_report.csv + 
+prediction overlay. 
+Task 3 Detect part + foam slot, xuất alignment/slot_hint. slot_pose_report.csv + 
+overlay. 
+Task 4 Detect carton/lid edge/keypoints, xuất state short/long lid. carton_state_report.csv + 
+overlay. 
+ 
+5.1. Cấu trúc thư mục nộp 
+module5_submission_<team_or_student>/ 
+  README.md 
+  src/ 
+    run_perception.py 
+    perception_schema.py 
+    tracking.py                  # nếu chọn Task 2 
+    pose_from_rgbd.py             # nếu dùng RGB-D 
+  configs/ 
+    class_map.yaml 
+    camera_config.yaml 
+    thresholds.yaml 
+  data_samples/ 
+    images_or_frames/ 
+    depth_or_video/               # nếu có 
+  outputs/ 
+    perception_output.json 
+    perception_report.csv 
+    overlay_images/ 
+    tracker_report.csv            # nếu có tracking 
+    pose_estimator_report.csv      # nếu có RGB-D pose 
+    latency_report.csv 
+  report/ 
+    module5_perception_report.md 
+5.2. Rubric chấm mini-project 100 điểm 
+Hạng mục Điểm Mô tả 
+Hiểu bài toán và thiết kế pipeline 15 Chọn đúng kỹ thuật cho task; có sơ đồ pipeline; nêu rõ 
+input/output/failure modes. 
+Dữ liệu và annotation/label quality 15 Có dataset inventory, class map, split hợp lý, ghi rõ nguồn dữ 
+liệu và chất lượng nhãn. 
+Implementation chạy được 20 Script chạy được bằng một lệnh; có config; không hard-code quá 
+mức; output đúng schema. 
+Perception quality metrics 20 Có precision/recall/IoU hoặc centroid/pose/tracking error; có 
+latency; có phân tích lỗi. 
+Integration readiness 15 Output có thể đưa vào planner/motion: pose_base, confidence, 
+grasp_hint/slot_hint, failure_reason. 
+Debug overlay và reproducibility 10 Có ảnh/video overlay, log, README rõ cách chạy. 
+--- page 14 ---
+HRC2026 Training Program | Module 5: Perception for Industrial Manipulation | v1.0 FULL 
+Hạng mục Điểm Mô tả 
+Teamwork/documentation 5 Report ngắn gọn, phân công rõ, commit/log có ý nghĩa. 
+ 
+5.3. Ngưỡng đánh giá 
+Mức Điểm Ý nghĩa 
+Excellent 85-100 Có thể đưa vào sprint tích hợp Team A/B ngay. 
+Good 70-84 Pipeline tốt, cần cải thiện robustness hoặc metrics. 
+Pass 55-69 Có output chạy được nhưng chưa đủ tin cậy để tích hợp. 
+Needs revision <55 Thiếu schema/metric/output hoặc không tái lập được. 
+ 
+  
+--- page 15 ---
+HRC2026 Training Program | Module 5: Perception for Industrial Manipulation | v1.0 FULL 
+6. Troubleshooting checklist 
+Triệu chứng Nguyên nhân thường gặp Cách kiểm tra/sửa 
+BBox/mask lệch khỏi vật RGB-depth resize/crop không đồng bộ; 
+sai color channel; sai coordinate 
+convention. 
+Overlay từng bước: raw image, mask, 
+bbox, centroid; kiểm tra image size và 
+RGB/BGR. 
+Centroid 3D nhảy mạnh Depth nhiễu/NaN; mask có 
+background; vật bị occlusion. 
+Dùng median depth, lọc valid depth, 
+erosion mask, temporal smoothing. 
+Yaw sai 90 độ minAreaRect convention; w/h đảo; trục 
+chính không xác định duy nhất. 
+Chuẩn hóa yaw theo cạnh dài; kiểm tra 
+bằng overlay trục orientation. 
+Detector accuracy cao 
+nhưng robot gắp sai 
+Metric perception không đo pose/grasp; 
+frame transform sai; confidence không 
+phản ánh chất lượng pose. 
+Thêm centroid/pose error, transform 
+sanity, end-to-end lab. 
+Task 2 miss vật Latency cao; prediction không tính thời 
+gian robot di chuyển; track ID switch. 
+Đo FPS/latency, pre-position, skip late 
+objects, association tốt hơn. 
+False positive background Threshold/detector nhầm texture; class 
+imbalance. 
+Thêm negative samples, area/depth gates, 
+confidence threshold. 
+Model overfit synthetic data Domain randomization chưa đủ; split bị 
+leakage. 
+Randomize lighting/pose/camera; validate 
+trên seed/scene khác. 
+ 
+7. Phụ lục code skeleton và schema 
+7.1. perception_schema.py 
+from dataclasses import dataclass, asdict 
+from typing import Optional, List, Dict, Any 
+import json 
+ 
+@dataclass 
+class PoseBase: 
+    position_m: List[float] 
+    quaternion_xyzw: List[float] 
+ 
+@dataclass 
+class PerceivedObject: 
+    object_id: str 
+    class_id: str 
+    confidence: float 
+    bbox_xyxy: List[float] 
+    centroid_px: List[float] 
+    centroid_camera_m: Optional[List[float]] 
+    pose_base: Optional[PoseBase] 
+    velocity_px_per_frame: Optional[List[float]] 
+    grasp_hint: Optional[Dict[str, Any]] 
+    failure_reason: Optional[str] = None 
+ 
+@dataclass 
+class PerceptionOutput: 
+    frame_id: int 
+    timestamp: float 
+    camera_name: str 
+    objects: List[PerceivedObject] 
+ 
+    def save(self, path: str): 
+--- page 16 ---
+HRC2026 Training Program | Module 5: Perception for Industrial Manipulation | v1.0 FULL 
+        def default(o): 
+            if hasattr(o, "__dataclass_fields__"): 
+                return asdict(o) 
+            raise TypeError(type(o)) 
+        with open(path, "w") as f: 
+            json.dump(self, f, default=default, indent=2) 
+7.2. validate_perception_output.py 
+import json, sys 
+required = ["object_id", "class_id", "confidence", "bbox_xyxy", "centroid_px"] 
+path = sys.argv[1] 
+obs = json.load(open(path)) 
+errors = [] 
+if "objects" not in obs: 
+    errors.append("missing objects") 
+for i, obj in enumerate(obs.get("objects", [])): 
+    for k in required: 
+        if k not in obj: 
+            errors.append(f"object {i}: missing {k}") 
+    if not (0.0 <= obj.get("confidence", -1) <= 1.0): 
+        errors.append(f"object {i}: confidence out of range") 
+    if len(obj.get("bbox_xyxy", [])) != 4: 
+        errors.append(f"object {i}: bbox must have 4 numbers") 
+print("PASS" if not errors else "FAIL") 
+for e in errors: 
+    print("-", e) 
+7.3. latency_report.py 
+import time 
+import pandas as pd 
+ 
+records = [] 
+for frame_id in range(100): 
+    t0 = time.perf_counter() 
+    # run_perception(frame) 
+    # placeholder for student pipeline 
+    t1 = time.perf_counter() 
+    records.append({"frame_id": frame_id, "latency_ms": (t1 - t0) * 1000}) 
+ 
+pd.DataFrame(records).to_csv("latency_report.csv", index=False) 
+print(pd.DataFrame(records)["latency_ms"].describe()) 
+  
+--- page 17 ---
+HRC2026 Training Program | Module 5: Perception for Industrial Manipulation | v1.0 FULL 
+8. Tài liệu tham khảo và video/tutorial mở 
+Ưu tiên tài liệu chính thức, open documentation hoặc GitHub liên quan trực tiếp đến HRC2026, perception, 
+detection, segmentation, pose estimation, tracking và synthetic data. 
+8.1. Tài liệu chính thức HRC2026/UBTECH 
+Tài liệu Dùng để học gì? Link 
+UBTECH HRC2026 
+Baseline GitHub 
+Baseline chính thức: 
+simulation, LeRobot, 
+teleoperation, record/replay, 
+training/evaluation. 
+https://github.com/UBTECH-
+Robot/GlobalHumanoidRobotChallenge_2026_Baseline 
+UBTECH 
+challenge2026_assets 
+Hugging Face 
+Assets chính thức: Walker 
+S2, task scenes, objects, 
+foam/carton/conveyor. 
+https://huggingface.co/UBTECH-
+Robotics/challenge2026_assets 
+UBTECH 
+challenge2026_dataset 
+Hugging Face 
+Dataset chính thức hoặc 
+mẫu để học cấu trúc dữ liệu. 
+https://huggingface.co/datasets/UBTECH-
+Robotics/challenge2026_dataset 
+ 
+8.2. Isaac Sim, synthetic data và perception model 
+Tài liệu Dùng để học 
+gì? Link 
+NVIDIA 
+Isaac 
+Sim 
+Develo
+per 
+Page 
+Tổng quan 
+Isaac Sim, 
+synthetic 
+data, robot 
+learning, 
+simulation/tes
+ting. 
+https://developer.nvidia.com/isaac-sim 
+Isaac 
+Sim 
+Replicat
+or 
+Object / 
+Syntheti
+c Data 
+Tạo dữ liệu 
+RGB, 
+bounding 
+boxes, 
+segmentation 
+masks bằng 
+synthetic 
+data 
+generation. 
+https://docs.isaacsim.omniverse.nvidia.com/latest/action_and_event_data_generation/tu
+torial_replicator_object.html 
+NVIDIA 
+Getting 
+Started 
+With 
+Isaac 
+Sim - 
+Syntheti
+c 
+Dataset 
+Tutorial tạo 
+synthetic 
+dataset và 
+domain 
+randomizatio
+n. 
+https://docs.nvidia.com/learning/physical-ai/getting-started-with-isaac-
+sim/latest/synthetic-data-generation-for-perception-model-training-in-isaac-sim/04-
+generating-a-synthetic-dataset-using-a-replicator.html 
+NVIDIA 
+Getting 
+Started 
+With 
+Isaac 
+Sim - 
+Tutorial fine-
+tune và 
+validate 
+model 
+perception từ 
+synthetic 
+https://docs.nvidia.com/learning/physical-ai/getting-started-with-isaac-
+sim/latest/synthetic-data-generation-for-perception-model-training-in-isaac-sim/05-fine-
+tuning-and-validating-an-ai-perception-model.html 
+--- page 18 ---
+HRC2026 Training Program | Module 5: Perception for Industrial Manipulation | v1.0 FULL 
+Tài liệu Dùng để học 
+gì? Link 
+Fine-
+tuning 
+Percept
+ion 
+Model 
+data. 
+ 
+  
+--- page 19 ---
+HRC2026 Training Program | Module 5: Perception for Industrial Manipulation | v1.0 FULL 
+8.3. Computer vision, segmentation, tracking và 6D pose 
+Tài liệu Dùng để học gì? Link 
+Ultralytics YOLO 
+Documentation 
+Detection, segmentation, 
+classification, pose, OBB 
+và tracking tasks. 
+https://docs.ultralytics.com/ 
+OpenCV 
+Thresholding Tutorial 
+Segmentation cơ bản 
+bằng threshold. 
+https://docs.opencv.org/master/db/d8e/tutorial_threshold.html 
+OpenCV 
+Meanshift/Camshift 
+Tracking 
+Object tracking cơ bản 
+trong video. 
+https://docs.opencv.org/4.x/d7/d00/tutorial_meanshift.html 
+OpenCV solvePnP 
+Documentation 
+Pose estimation từ 3D-
+2D correspondences. 
+https://docs.opencv.org/4.x/d5/d1f/calib3d_solvePnP.html 
+Open3D ICP 
+Registration Tutorial 
+Point cloud alignment và 
+pose refinement. 
+https://www.open3d.org/html/tutorial/Basic/icp_registration.html 
+Meta Segment 
+Anything GitHub 
+Foundation 
+segmentation model, 
+hữu ích cho 
+annotation/mask-
+assisted workflow. 
+https://github.com/facebookresearch/segment-anything 
+NVIDIA 
+FoundationPose 
+GitHub 
+6D pose 
+estimation/tracking cho 
+object mới dựa trên 
+CAD/reference images. 
+https://github.com/NVlabs/FoundationPose 
+ 
+8.1. Lộ trình tự học trong 1 ngày 
+Thời lượng Việc cần làm Output 
+60 phút Đọc lại Module 4: camera/RGB-D/transform; đọc phần 2.1-2.5 
+của Module 5. 
+Ghi 10 khái niệm chính. 
+90 phút Làm Lab 2 classical mask/centroid/orientation trên frame mẫu. overlay_centroid.png + CSV. 
+90 phút Đọc Ultralytics hoặc OpenCV tracking tutorial; chạy 
+inference/tracking thử. 
+detection/tracking overlay. 
+90 phút Làm Lab 4 hoặc Lab 5 tùy guild. pose/tracker report. 
+60 phút Viết perception_interface.json và validator. schema_validation_report.txt. 
+30 phút Tự đánh giá theo rubric mini-project. todo list cải thiện. 
+ 
+9. Câu hỏi tự kiểm tra 
+1. Vì sao bounding box thường chưa đủ cho manipulation? 
+2. Khi nào nên dùng threshold/mask thay vì YOLO? 
+3. Nếu depth có nhiều NaN trong mask, em xử lý thế nào? 
+4. Tại sao phải chia train/validation/test theo episode hoặc scene? 
+5. Task 2 cần thêm output nào mà Task 1 không bắt buộc? 
+6. Metric mAP cao nhưng end-to-end success thấp có thể do nguyên nhân gì? 
+7. failure_reason trong perception_output.json có tác dụng gì? 
+8. Làm sao phát hiện object pose không ổn định qua nhiều frame? 
+--- page 20 ---
+HRC2026 Training Program | Module 5: Perception for Industrial Manipulation | v1.0 FULL 
+9. Khi dùng synthetic data từ Isaac Sim, cần randomize những yếu tố nào? 
+10. Perception output nào planner/motion module cần để quyết định grasp? 
+
+
+======== HRC2026_Module_4_Camera_RGBD_Coordinate_Transform_v1_0_FULL.pdf ========
+pages: 14
+--- page 1 ---
+HRC2026 - Module 4 | Trang 1 
+HRC2026 TRAINING BOOTCAMP 
+Module 4 
+Camera, RGB-D and Coordinate Transform  
+Tài liệu đào tạo nội bộ của BA x AILAB@UEL 
+ 
+Thông tin Nội dung 
+Phiên bản v1.0 FULL 
+Thời lượng khuyến nghị 1.5 ngày học tập trung + 0.5 ngày làm mini-project 
+Đối tượng Sinh viên năm 3 ngành CNTT/KHMT, đã học Module 1-3 hoặc có kiến thức 
+Python cơ bản 
+Vai trò chính Perception/Data Vision guild; Action Planning và Manipulation guild cần học để 
+hiểu đầu vào pose 
+Sản phẩm cuối module Camera config sheet, point cloud, pixel-to-3D unit tests, camera-to-base transform 
+report, pose overlay, baseline demo report 
+ 
+Ghi chú: Tài liệu này không giả định sinh viên đã thành thạo robotics. Các khái niệm được giải thích theo hướng phục vụ trực 
+tiếp cho 4 task HRC2026: desktop sorting, conveyor sorting, workpiece insertion, carton sealing. 
+  
+--- page 2 ---
+HRC2026 - Module 4 | Trang 2 
+Mục lục tóm tắt 
+1. Vị trí của Module 4 trong pipeline HRC2026 
+2. Chuẩn đầu ra và cấu trúc học 3 lớp 
+3. Lý thuyết tối thiểu: camera, RGB-D, calibration, coordinate transform 
+4. Isaac Sim camera/RGB-D trong bối cảnh baseline 
+5. Demo trên baseline HRC2026 
+6. Bài lab có output đo được 
+7. Mini-project cuối module và rubric 
+8. Troubleshooting checklist 
+9. Câu hỏi tự kiểm tra 
+10. Tài liệu tham khảo và video/tutorial 
+  
+--- page 3 ---
+HRC2026 - Module 4 | Trang 3 
+1. Vị trí của Module 4 trong pipeline HRC2026 
+Module 4 nối trực tiếp Module 3 về SE(3), frame và transform với các module perception/manipulation phía 
+sau. Trong HRC2026, robot không thể gắp, chèn hay đóng hộp chỉ từ ảnh RGB đẹp; hệ thống cần chuyển 
+quan sát 2D/3D thành tọa độ dùng được cho planner và controller. 
+Từ quan sát Đến dữ liệu cần cho robot Ví dụ trong HRC2026 
+RGB image class_id, mask, bbox, keypoints Phân biệt hai loại workpieces ở Task 1/2 
+Depth image 3D point, point cloud, object 
+height/pose 
+Tính điểm gắp trên mặt bàn hoặc băng 
+chuyền 
+Camera intrinsics pixel + depth -> 3D point trong 
+camera frame 
+Từ centroid vật thể trong ảnh tính vị trí 3D 
+Camera extrinsics camera frame -> world/base frame Từ pose vật thể trong camera chuyển sang 
+robot base 
+Pose estimation object pose hoặc slot pose Căn vật để chèn vào foam ở Task 3 
+Camera stream + 
+tracking 
+velocity, predicted intercept point Dự đoán vị trí vật trên băng chuyền Task 2 
+ 
+Sau module này, sinh viên cần hiểu một nguyên tắc nền tảng: perception không chỉ là vẽ bounding box; 
+perception phải xuất dữ liệu định lượng để planner/motion module sử dụng được. 
+2. Chuẩn đầu ra của Module 4 
+Mã Chuẩn đầu ra 
+M4-CLO1 Giải thích được pinhole camera model, intrinsic matrix K, pixel coordinate, depth và point 
+cloud. 
+M4-CLO2 Tính được tọa độ 3D trong camera frame từ pixel (u, v) và depth z. 
+M4-CLO3 Phân biệt được intrinsic, extrinsic, camera frame, world frame, robot base frame và object 
+frame. 
+M4-CLO4 Tạo được point cloud từ RGB-D image và trích xuất thống kê cơ bản về point cloud. 
+M4-CLO5 Dùng transform chain để chuyển point/pose từ camera frame sang world/base frame. 
+M4-CLO6 Hiểu calibration, distortion và lý do cần kiểm tra alignment giữa RGB và depth. 
+M4-CLO7 Biết cách inspect camera/sensor trong Isaac Sim/baseline và xuất camera config sheet. 
+M4-CLO8 Tạo được baseline demo report với ảnh RGB, depth, overlay điểm 3D và log transform. 
+M4-CLO9 Thiết kế được lab output đo được: CSV/JSON/PLY/PNG/report thay vì chỉ mô tả bằng lời. 
+ 
+3. Cấu trúc học 3 lớp cho Module 4 
+Lớp Nội dung Output bắt buộc 
+Lớp A - Lý thuyết tối 
+thiểu 
+Pinhole camera, K matrix, depth, RGB-D, point cloud, 
+calibration, extrinsic, coordinate transform, PnP/ICP ở 
+mức khái niệm. 
+Notebook lý thuyết + unit 
+tests công thức pixel-to-3D. 
+Lớp B - Demo trên 
+baseline 
+Tìm camera trong scene/config, đọc thông số camera, 
+capture RGB/depth, kiểm tra frame, chuyển một 
+pixel/point sang frame robot/base. 
+baseline_camera_demo.md, 
+camera_config_sheet.csv, 
+sample_rgb.png, 
+sample_depth.png. 
+Lớp C - Lab đo được Tạo point cloud, tính thống kê depth, kiểm tra 
+transform chain, vẽ overlay 2D/3D, báo cáo sai số 
+hoặc sanity checks. 
+point_cloud.ply, 
+transform_chain_report.json, 
+overlay_axes.png, 
+pytest_report.txt. 
+ 
+--- page 4 ---
+HRC2026 - Module 4 | Trang 4 
+4. Lý thuyết tối thiểu về camera 
+4.1. Ảnh số, pixel và hệ tọa độ ảnh 
+Ảnh RGB là ma trận H x W x 3. Mỗi pixel có tọa độ ảnh (u, v), trong đó u thường là chỉ số cột theo chiều 
+ngang, v là chỉ số hàng theo chiều dọc. Gốc tọa độ ảnh thường nằm ở góc trên-trái. Với robotics, cần hết 
+sức cẩn thận vì hệ tọa độ ảnh, camera frame, world frame và robot base frame không giống nhau. 
+Ký hiệu Ý nghĩa Ghi chú 
+u tọa độ cột pixel tăng từ trái sang phải 
+v tọa độ hàng pixel tăng từ trên xuống dưới 
+z hoặc depth khoảng cách đo bởi depth 
+camera 
+đơn vị có thể là m, mm hoặc scale tùy nguồn 
+H, W chiều cao, chiều rộng ảnh ví dụ 480 x 640 hoặc 720 x 1280 
+bbox bounding box thường là x_min, y_min, x_max, y_max hoặc x, y, w, 
+h 
+mask vùng pixel thuộc vật thể cần cho centroid/pose/point cloud của vật 
+ 
+4.2. Pinhole camera model 
+Pinhole model mô tả cách điểm 3D trong camera frame chiếu lên ảnh 2D. Nếu điểm 3D trong camera 
+frame là P_cam = (X, Y, Z), pixel tương ứng được tính gần đúng bởi: 
+u = fx * X / Z + cx 
+v = fy * Y / Z + cy 
+Trong đó fx, fy là tiêu cự theo đơn vị pixel; cx, cy là tọa độ principal point/optical center. Ma trận intrinsic K 
+có dạng: 
+K = [[fx,  0, cx], 
+     [ 0, fy, cy], 
+     [ 0,  0,  1]] 
+Công thức ngược, dùng nhiều nhất trong module này, là chuyển từ pixel + depth sang điểm 3D trong 
+camera frame: 
+X = (u - cx) * Z / fx 
+Y = (v - cy) * Z / fy 
+Z = depth 
+4.3. Depth image và các dạng depth thường gặp 
+Depth image là ảnh một kênh, mỗi pixel chứa giá trị khoảng cách. Tuy nhiên cần kiểm tra kỹ định nghĩa 
+của depth vì các hệ thống có thể trả về distance-to-image-plane, distance-to-camera-center, disparity hoặc 
+depth đã scale. 
+Loại dữ liệu Ý nghĩa Rủi ro thường gặp 
+Depth in meters Mỗi pixel là khoảng cách tính bằng mét Dễ nhầm với millimeters 
+Depth in millimeters Mỗi pixel là khoảng cách tính bằng mm Nếu không chia 1000, point cloud 
+phóng đại 1000 lần 
+Distance to image plane Khoảng cách theo trục Z camera Phù hợp công thức pinhole đơn giản 
+Euclidean distance Khoảng cách từ camera center đến 
+điểm 
+Không giống Z nếu điểm lệch xa tâm 
+ảnh 
+Disparity Giá trị liên quan tới nghịch đảo depth Cần biết baseline/focal để đổi sang 
+depth 
+ 
+4.4. RGB-D image và alignment 
+RGB-D gồm một ảnh màu RGB và một ảnh depth tương ứng. Để dùng trực tiếp pixel RGB làm pixel depth, 
+hai ảnh phải cùng resolution và đã được đăng ký/aligned vào cùng camera frame. Nếu RGB và depth 
+không aligned, centroid/mask từ RGB sẽ lấy nhầm depth. 
+• Kiểm tra shape RGB và depth có giống nhau không. 
+--- page 5 ---
+HRC2026 - Module 4 | Trang 5 
+• Kiểm tra depth tại centroid vật thể có hợp lý so với mặt bàn/scene không. 
+• Không lấy depth tại một pixel duy nhất nếu mask nhiễu; nên dùng median depth trong vùng mask nhỏ. 
+• Loại bỏ giá trị depth = 0, NaN, inf hoặc quá xa/quá gần. 
+• Luôn ghi rõ depth_scale trong report. 
+4.5. Distortion và calibration 
+Camera thật thường có lens distortion, chủ yếu radial distortion và tangential distortion. Calibration tìm 
+intrinsic K, distortion coefficients và đôi khi extrinsic giữa camera với một frame tham chiếu. Trong Isaac 
+Sim, camera lý tưởng hơn camera thật, nhưng vẫn cần hiểu calibration để chuẩn bị cho vòng robot thật và 
+để chuyển thông số OpenCV sang Isaac/Omniverse khi cần. 
+Khái niệm Ý nghĩa thực dụng 
+Intrinsic calibration Tìm fx, fy, cx, cy và distortion coefficients của camera. 
+Extrinsic calibration Tìm pose của camera so với robot/world/base. 
+Undistortion Sửa ảnh để đường thẳng ngoài đời không bị cong trên ảnh. 
+Reprojection error Sai số giữa điểm 2D quan sát và điểm 2D chiếu từ mô hình camera; dùng 
+để đánh giá calibration. 
+ 
+4.6. Camera extrinsic và transform chain 
+Intrinsic giúp chuyển pixel + depth sang point trong camera frame. Extrinsic giúp chuyển point đó sang 
+world frame hoặc robot base frame. Theo quy ước từ Module 3, T_A_B là transform đưa tọa độ của một 
+point từ frame B sang frame A. 
+p_cam_h = [X, Y, Z, 1]^T 
+p_world_h = T_world_cam @ p_cam_h 
+p_base_h  = T_base_world @ T_world_cam @ p_cam_h 
+ 
+# Nếu đã có T_base_cam: 
+p_base_h = T_base_cam @ p_cam_h 
+Đây là đường dẫn nhận thức tối thiểu cho robot: 
+RGB/depth pixel -> 3D point in camera frame -> 3D point in world/base frame -> grasp/insert/place 
+target 
+4.7. Point cloud từ RGB-D 
+Point cloud là tập hợp các điểm 3D, thường kèm màu RGB. Từ depth image và K, ta có thể back-project 
+nhiều pixel thành nhiều điểm 3D. Point cloud giúp ước lượng mặt phẳng bàn, centroid 3D, orientation bằng 
+PCA, hoặc align vật thể với CAD/mesh. 
+Ứng dụng point cloud Ví dụ trong HRC2026 
+Estimate centroid 3D Tính vị trí chi tiết trên bàn hoặc băng chuyền. 
+Plane segmentation Tách mặt bàn/foam khỏi vật thể. 
+PCA orientation Ước lượng hướng của workpiece khi hình dạng kéo dài. 
+ICP/template alignment Căn mesh/slot với point cloud cho Task 3. 
+Outlier removal Loại điểm depth nhiễu để tăng ổn định pose. 
+ 
+4.8. Pose estimation 2D-3D, PnP và ICP ở mức tối thiểu 
+Pose estimation là ước lượng vị trí và hướng của vật thể. Với object có keypoints 3D đã biết và ảnh 2D 
+keypoints, có thể dùng PnP để tìm rotation/translation. Với point cloud hoặc mesh, có thể dùng ICP để tinh 
+chỉnh pose giữa point cloud quan sát và template/CAD. 
+Phương pháp Đầu vào Đầu ra Khi nên dùng 
+Centroid + median depth mask/bbox + depth vị trí 3D gần đúng Task 1/2 bản đầu, khi chỉ 
+cần gắp ổn định 
+PCA on point cloud mask depth points hướng chính của 
+vật 
+vật có hình dạng kéo dài 
+hoặc cần orientation 
+PnP 2D keypoints + 3D keypoints R, t của vật có 
+--- page 6 ---
+HRC2026 - Module 4 | Trang 6 
++ K object/camera keypoints/marker/geometry 
+rõ 
+ICP/template alignment point cloud quan sát + 
+mesh/template 
+pose tinh chỉnh Task 3, slot/foam/cad 
+alignment 
+ 
+5. Camera và RGB-D trong Isaac Sim/baseline 
+Trong Isaac Sim, camera thường là một USD Camera prim. Camera data được lấy thông qua render 
+product và các annotator/extension. Với HRC2026, sinh viên cần biết cách tìm camera trong stage, đọc 
+thông số camera, capture RGB/depth/segmentation và kiểm tra camera pose so với robot/world. 
+Thành phần Isaac Sim Ý nghĩa cho Module 4 Output sinh viên cần lấy được 
+Camera prim Đối tượng camera trong stage/USD; có 
+transform, focal length, aperture, 
+clipping range. 
+camera prim path, pose, resolution. 
+Render product Nguồn sinh ảnh từ camera ở một 
+resolution cụ thể. 
+RGB/depth output path hoặc array 
+shape. 
+Annotator Cơ chế lấy dữ liệu như RGB, depth, 
+segmentation, bounding boxes. 
+sample_rgb.png, 
+sample_depth.npy/png. 
+USD Stage Cây scene chứa robot, camera, table, 
+objects, bins, foam, carton. 
+camera_inventory.csv, 
+scene_camera_notes.md. 
+Replicator Tạo dữ liệu synthetic như RGB, bbox, 
+segmentation, depth. 
+synthetic_sample_manifest.json nếu 
+dùng. 
+ 
+5.1. Các câu hỏi cần trả lời khi inspect camera trong baseline 
+11. Camera nằm ở prim path nào trong stage? 
+12. Camera gắn với robot, world hay scene object nào? 
+13. Resolution RGB/depth là bao nhiêu? 
+14. Camera output là RGB, depth, segmentation, bbox hay nhiều loại cùng lúc? 
+15. Depth unit là mét, millimeters hay một scale khác? 
+16. Camera intrinsic K lấy trực tiếp được không? Nếu không, tính từ focal length/aperture/FOV như thế 
+nào? 
+17. Extrinsic camera-to-world lấy từ USD transform hay từ API baseline? 
+18. World frame và robot base frame khác nhau thế nào trong scene? 
+19. Có nhiều camera không? Camera nào dùng cho policy, camera nào dùng cho perception debug? 
+20. Dữ liệu camera có được ghi vào LeRobotDataset hay chỉ dùng online? 
+5.2. Gợi ý naming convention cho output camera 
+outputs/module4/ 
+  camera_config_sheet.csv 
+  camera_inventory.csv 
+  sample_rgb.png 
+  sample_depth.npy 
+  sample_depth_vis.png 
+  point_cloud.ply 
+  point_cloud_stats.json 
+  transform_chain_report.json 
+  overlay_pixel_to_3d.png 
+  baseline_camera_demo.md 
+--- page 7 ---
+HRC2026 - Module 4 | Trang 7 
+6. Demo trên baseline HRC2026 
+Các demo dưới đây được thiết kế để sinh viên có thể chạy sau khi đã hoàn thành Module 1-3 và đã clone 
+baseline/assets. Nếu môi trường chưa chạy được Isaac Sim, sinh viên vẫn có thể làm bản dry-run bằng 
+synthetic images/depth arrays để kiểm tra công thức. 
+Demo 1 - Baseline camera inventory 
+Mục tiêu: tìm tất cả camera hoặc cấu hình camera trong baseline/assets/config. Demo này không yêu cầu 
+hiểu toàn bộ Isaac Sim API; chỉ cần scan file USD/YAML/Python và ghi lại các path/tên camera có khả 
+năng liên quan. 
+# Chạy ở thư mục repo baseline 
+mkdir -p outputs/module4 
+find . -type f \( -name "*.py" -o -name "*.yaml" -o -name "*.yml" -o -name "*.usd" \)   | grep -Ei 
+"camera|cam|sensor|rgb|depth"   > outputs/module4/camera_related_files.txt 
+ 
+# Tìm keyword trong code/config 
+grep -RniE "camera|rgb|depth|render_product|annotator|segmentation" .   > 
+outputs/module4/camera_keyword_hits.txt || true 
+Output đo được: `camera_related_files.txt`, `camera_keyword_hits.txt`, và bảng `camera_inventory.csv` do 
+sinh viên tổng hợp thủ công hoặc bán tự động. 
+Demo 2 - Capture RGB/depth frame từ baseline hoặc Isaac Sim sample 
+Mục tiêu: sinh viên chứng minh rằng mình có thể lấy được ít nhất một frame RGB và một frame depth. Nếu 
+baseline có script sẵn để chạy task hoặc teleoperation, sinh viên dùng script đó; nếu chưa rõ, dùng Isaac 
+Sim camera sample trước rồi quay lại baseline sau. 
+# Gợi ý output sau khi chạy demo 
+outputs/module4/sample_rgb.png 
+outputs/module4/sample_depth.npy 
+outputs/module4/sample_depth_vis.png 
+outputs/module4/frame_capture_log.json 
+Trường trong 
+frame_capture_log.json Ý nghĩa 
+timestamp_or_step simulation step hoặc thời điểm capture 
+camera_prim_path đường dẫn camera trong stage 
+rgb_shape ví dụ [480, 640, 3] 
+depth_shape ví dụ [480, 640] 
+depth_min_m, depth_median_m, 
+depth_max_m 
+sanity check depth 
+camera_pose_world translation + quaternion hoặc matrix 
+ 
+Demo 3 - Pixel + depth sang point 3D 
+Mục tiêu: chọn 5 pixel trong ảnh, đọc depth, tính điểm 3D trong camera frame và ghi ra CSV. Dùng median 
+depth quanh một cửa sổ nhỏ để giảm nhiễu. 
+import numpy as np 
+ 
+def pixel_to_camera(u, v, z, fx, fy, cx, cy): 
+    X = (u - cx) * z / fx 
+    Y = (v - cy) * z / fy 
+    Z = z 
+    return np.array([X, Y, Z], dtype=float) 
+ 
+def median_depth(depth, u, v, radius=2): 
+--- page 8 ---
+HRC2026 - Module 4 | Trang 8 
+    patch = depth[max(0, v-radius):v+radius+1, max(0, u-radius):u+radius+1] 
+    valid = patch[np.isfinite(patch) & (patch > 0)] 
+    if len(valid) == 0: 
+        return np.nan 
+    return float(np.median(valid)) 
+Demo 4 - Transform camera point sang world/base frame 
+Mục tiêu: lấy một point trong camera frame, dùng T_world_cam hoặc T_base_cam để chuyển sang frame 
+khác. Sinh viên cần kiểm tra bằng sanity check: tọa độ Z/height có hợp lý so với mặt bàn không, điểm có 
+nằm trong vùng workspace không. 
+import numpy as np 
+ 
+def transform_point(T_A_B, p_B): 
+    p_h = np.r_[p_B, 1.0] 
+    p_A_h = T_A_B @ p_h 
+    return p_A_h[:3] 
+ 
+# Ví dụ: p_cam -> p_base 
+p_base = transform_point(T_base_cam, p_cam) 
+Demo 5 - Overlay điểm 3D và trục pose lên ảnh 
+Mục tiêu: kiểm tra trực quan công thức bằng cách vẽ lại điểm hoặc trục pose đã tính lên ảnh. Nếu điểm 3D 
+chiếu ngược về pixel không gần pixel ban đầu, có thể sai K, sai depth scale hoặc sai convention frame. 
+def camera_to_pixel(P_cam, fx, fy, cx, cy): 
+    X, Y, Z = P_cam 
+    u = fx * X / Z + cx 
+    v = fy * Y / Z + cy 
+    return np.array([u, v]) 
+7. Bài lab có output đo được 
+Mỗi lab phải nộp sản phẩm cụ thể. Không chấp nhận chỉ nộp screenshot hoặc giải thích miệng. Mục tiêu là 
+giúp Evaluation guild có thể kiểm tra tự động hoặc bán tự động. 
+Lab 4.1 - Camera config sheet 
+Mục Yêu cầu 
+Mục tiêu Tìm và ghi lại thông số camera trong baseline/scene. 
+Input Baseline repo, assets/config, hoặc một Isaac Sim scene có camera. 
+Output camera_config_sheet.csv và camera_inventory.md. 
+Cột bắt buộc camera_id, prim_path, resolution_w, resolution_h, fx, fy, cx, cy, depth_unit, 
+frame_parent, source_file, notes. 
+Đạt Có ít nhất 1 camera hợp lệ, có resolution và tối thiểu 4 intrinsic values hoặc ghi rõ 
+cách tính/thiếu. 
+ 
+Lab 4.2 - Pixel-to-camera unit tests 
+Mục Yêu cầu 
+Mục tiêu Viết hàm pixel_to_camera và camera_to_pixel, kiểm tra round-trip. 
+Input Một bộ K giả lập hoặc lấy từ camera_config_sheet.csv. 
+Output pytest_report.txt, pixel_to_camera_report.csv. 
+Metric Round-trip pixel error trung bình < 1e-6 với depth hợp lệ trong test synthetic. 
+Đạt Ít nhất 10 test cases, có cả pixel ở center, corner, random và invalid depth. 
+ 
+--- page 9 ---
+HRC2026 - Module 4 | Trang 9 
+# Gợi ý test case 
+K = dict(fx=600.0, fy=600.0, cx=320.0, cy=240.0) 
+for u, v, z in [(320,240,1.0), (0,0,1.5), (640,480,2.0), (123,345,0.8)]: 
+    P = pixel_to_camera(u, v, z, **K) 
+    uv = camera_to_pixel(P, **K) 
+    assert np.linalg.norm(uv - np.array([u, v])) < 1e-6 
+Lab 4.3 - RGB-D to point cloud 
+Mục Yêu cầu 
+Mục tiêu Tạo point cloud từ RGB-D và lưu file PLY. 
+Input sample_rgb.png + sample_depth.npy/png hoặc synthetic depth array. 
+Output point_cloud.ply, point_cloud_stats.json, point_cloud_preview.png. 
+Metric Số điểm hợp lệ, min/max/median Z, bounding box point cloud. 
+Đạt Point cloud có > 1000 điểm hợp lệ hoặc báo rõ lý do nếu dùng sample nhỏ; 
+preview không bị lộn trục nghiêm trọng. 
+ 
+# Pseudocode với Open3D 
+import open3d as o3d 
+import numpy as np 
+ 
+# depth_m: numpy array HxW, đơn vị mét 
+# rgb: numpy array HxWx3 
+# tạo RGBDImage hoặc tự back-project nếu cần kiểm soát scale 
+# lưu: o3d.io.write_point_cloud('point_cloud.ply', pcd) 
+Lab 4.4 - Camera-to-base transform chain 
+Mục Yêu cầu 
+Mục tiêu Chuyển 5 điểm từ camera frame sang world/base frame. 
+Input T_world_cam hoặc T_base_cam giả lập/baseline; 5 point từ Lab 4.2/4.3. 
+Output transform_chain_report.json, transformed_points.csv. 
+Metric Kiểm tra T inverse, determinant của R gần 1, round-trip error nhỏ. 
+Đạt Mọi transform 4x4 hợp lệ; round-trip p_cam -> p_base -> p_cam sai số < 1e-6 
+trong test synthetic. 
+ 
+Lab 4.5 - Object mask to 3D centroid 
+Mục Yêu cầu 
+Mục tiêu Từ mask/bbox của vật, tính centroid 2D, median depth, centroid 3D và overlay lên 
+ảnh. 
+Input RGB, depth, mask tự tạo hoặc bbox thủ công. 
+Output object_3d_centroids.csv, overlay_centroid.png. 
+Metric Có centroid_2d, median_depth_m, centroid_cam_xyz, centroid_base_xyz nếu có 
+T_base_cam. 
+Đạt Ít nhất 3 object/mask hoặc 3 vùng test; không dùng pixel depth đơn lẻ nếu có 
+mask. 
+ 
+Lab 4.6 - Pose estimation mini-demo: PnP hoặc PCA/ICP 
+Mục Yêu cầu 
+Mục tiêu Chạy một phương pháp pose estimation đơn giản. 
+Phương án A PnP với 4-8 keypoints 3D/2D synthetic; xuất rvec, tvec, reprojection error. 
+Phương án B PCA trên point cloud mask; xuất principal axis và orientation angle. 
+Phương án C ICP giữa point cloud synthetic và template; xuất fitness/RMSE. 
+Output pose_estimator_report.csv, pose_overlay.png hoặc icp_alignment_report.json. 
+Đạt Có metric định lượng: reprojection error, PCA consistency hoặc ICP 
+RMSE/fitness. 
+--- page 10 ---
+HRC2026 - Module 4 | Trang 10 
+ 
+8. Mini-project cuối module: Camera-to-Base Perception Readiness 
+Mini-project này kiểm tra xem sinh viên đã đủ sẵn sàng để bước sang Module 5 - Perception for Industrial 
+Manipulation hay chưa. Sản phẩm phải chạy được trên dữ liệu sample/synthetic và nếu có môi trường thì 
+chạy được trên baseline/Isaac Sim. 
+Thành phần nộp Mô tả 
+README.md Mô tả cách chạy, môi trường, input/output, hạn chế. 
+camera_config_sheet.csv Thông số camera và nguồn lấy thông số. 
+sample_rgb.png, 
+sample_depth_vis.png 
+Ảnh demo lấy từ baseline/Isaac Sim hoặc synthetic. 
+pixel_to_camera.py Hàm chuyển pixel-depth sang 3D camera frame. 
+transforms.py Hàm transform point/pose giữa frame. 
+point_cloud.ply Point cloud từ RGB-D. 
+overlay_centroid.png Ảnh có vẽ centroid/object point/axis. 
+transform_chain_report.json Kiểm tra transform, inverse, determinant, round-trip error. 
+pytest_report.txt Kết quả test công thức. 
+baseline_camera_demo.md Ghi chú demo trên baseline: camera path, resolution, depth stats, lỗi gặp 
+phải. 
+ 
+8.1. Rubric chấm mini-project 100 điểm 
+Nhóm tiêu chí Điểm Mô tả chấm 
+Camera understanding 15 Giải thích đúng intrinsic/extrinsic/depth unit; 
+camera_config_sheet đầy đủ. 
+Pixel-to-3D correctness 15 Công thức đúng, unit tests pass, xử lý invalid depth. 
+Coordinate transform 15 T_base_cam/T_world_cam đúng convention, inverse/round-
+trip check rõ. 
+RGB-D/point cloud 15 Tạo point cloud hợp lệ, có stats và preview. 
+Baseline demo 15 Có demo/scan baseline, capture hoặc phân tích camera 
+config; ghi lỗi và cách xử lý. 
+Pose/centroid overlay 10 Có overlay trực quan và CSV định lượng. 
+Reproducibility 10 README rõ, lệnh chạy một lần, output đúng cấu trúc. 
+Engineering discipline 5 Code sạch, đặt tên file rõ, log đầy đủ, không hard-code mơ 
+hồ. 
+ 
+8.2. Ngưỡng đánh giá 
+Mức Điểm Diễn giải 
+Excellent 85-100 Có thể tham gia Perception guild hoặc hỗ trợ Manipulation 
+với pose/transform. 
+Good 70-84 Nắm lõi RGB-D/transform, cần thêm thực hành baseline. 
+Pass 60-69 Có thể đi tiếp nhưng cần mentor review phần frame/depth 
+scale. 
+Retry <60 Chưa đủ sẵn sàng cho Module 5; cần làm lại Lab 4.2-4.4. 
+ 
+9. Troubleshooting checklist 
+Hiện tượng Nguyên nhân thường gặp Cách kiểm tra/sửa 
+Point cloud quá lớn/quá 
+xa 
+Nhầm depth mm thành m hoặc 
+ngược lại. 
+In min/median/max depth; kiểm tra 
+depth_scale. 
+Point cloud bị lộn ngược Khác convention giữa image frame, 
+camera frame, Open3D/Isaac. 
+Vẽ 3 trục camera; kiểm tra trục Y/Z. 
+Centroid 3D nằm dưới 
+bàn hoặc sau camera 
+Sai depth tại mask, sai invalid 
+depth, sai T. 
+Dùng median depth trong mask; kiểm tra Z 
+> 0; test transform inverse. 
+--- page 11 ---
+HRC2026 - Module 4 | Trang 11 
+Overlay điểm không 
+trùng pixel ban đầu 
+Sai fx/fy/cx/cy hoặc sai công thức 
+project/back-project. 
+Chạy round-trip 
+camera_to_pixel(pixel_to_camera()). 
+Depth toàn 0/NaN Camera chưa render, annotator 
+chưa attach, sai render product. 
+Chạy thêm vài frame; kiểm tra shape và 
+log render product. 
+RGB và depth lệch nhau Không aligned hoặc khác 
+resolution. 
+Kiểm tra shape; resize/alignment; không 
+dùng mask RGB trực tiếp nếu depth không 
+aligned. 
+Transform đúng số 
+nhưng robot gắp lệch 
+Sai quy ước T_A_B/T_B_A hoặc 
+frame parent. 
+Viết rõ p_A = T_A_B @ p_B; test với điểm 
+gốc/trục đơn vị. 
+Kết quả thay đổi giữa các 
+lần chạy 
+Seed/randomization/render timing 
+chưa cố định. 
+Ghi seed, step, timestamp; capture sau khi 
+scene stable. 
+ 
+10. Câu hỏi tự kiểm tra 
+21. Sự khác nhau giữa intrinsic và extrinsic là gì? 
+22. Vì sao cần biết fx, fy, cx, cy để chuyển pixel sang 3D? 
+23. Nếu depth image dùng đơn vị millimeters nhưng code giả định meters, lỗi sẽ biểu hiện thế nào? 
+24. Tại sao không nên lấy depth tại một pixel duy nhất ở centroid? 
+25. RGB và depth không cùng resolution thì pipeline sẽ sai ở đâu? 
+26. T_A_B có nghĩa là gì? p_A = T_A_B @ p_B hay p_B = T_A_B @ p_A? 
+27. Point cloud có thể giúp ước lượng orientation của vật thể như thế nào? 
+28. PnP cần những input nào? 
+29. ICP khác PnP ở đâu? 
+30. Trong Task 2 băng chuyền, camera/RGB-D hỗ trợ tracking như thế nào? 
+31. Trong Task 3 insertion, vì sao pose/slot frame quan trọng hơn classification accuracy? 
+32. Ba output định lượng nào chứng minh lab camera/transform đã chạy đúng? 
+11. Tài liệu tham khảo và video/tutorial 
+Ưu tiên nguồn mở, tài liệu chính thức từ nhà cung cấp và GitHub liên quan. Sinh viên nên đọc theo thứ tự: 
+Isaac Sim camera/sensor -> OpenCV calibration/PnP -> Open3D RGB-D/point cloud/ICP -> 
+baseline/assets HRC2026. 
+Tài liệu Link Dùng để làm gì 
+UBTECH 
+HRC2026 
+Baseline 
+GitHub 
+https://github.com/UBTECH-Robot/GlobalHumanoidRobotChallenge_2026_Baseline Repo baseline 
+chính thức: 
+simulation, data 
+collection, training, 
+inference, 
+evaluation. 
+UBTECH 
+challenge2
+026 assets 
+https://huggingface.co/UBTECH-Robotics/challenge2026_assets Assets Walker S2 
+và scene/task 
+components. 
+UBTECH 
+challenge2
+026 
+dataset 
+https://huggingface.co/datasets/UBTECH-Robotics/challenge2026_dataset Dataset LeRobot 
+v2.1 để học cấu 
+trúc dữ liệu 
+camera/video/state/
+action. 
+NVIDIA 
+Isaac Sim 
+Sensors 
+https://docs.isaacsim.omniverse.nvidia.com/5.1.0/sensors/index.html Tổng quan sensor 
+simulation, camera, 
+depth, RTX, 
+physics-based 
+sensors. 
+NVIDIA 
+Isaac Sim 
+Camera 
+Sensors 
+https://docs.isaacsim.omniverse.nvidia.com/4.5.0/sensors/isaacsim_sensors_camera.ht
+ml 
+Camera prim, 
+render product, 
+calibrated camera 
+sensors. 
+--- page 12 ---
+HRC2026 - Module 4 | Trang 12 
+NVIDIA 
+Isaac Sim 
+Depth 
+Sensors 
+https://docs.isaacsim.omniverse.nvidia.com/5.1.0/sensors/isaacsim_sensors_camera_d
+epth.html 
+Depth camera, 
+depth annotators, 
+single-view depth 
+sensor examples. 
+NVIDIA 
+Isaac Sim 
+Add 
+Camera 
+and 
+Sensors 
+Tutorial 
+https://docs.isaacsim.omniverse.nvidia.com/4.5.0/gui/tutorial_gui_camera_sensors.html Tutorial GUI thêm 
+camera/sensor và 
+attach vào robot. 
+NVIDIA 
+Getting 
+Started 
+With Isaac 
+Sim - 
+Adding 
+Sensors 
+https://docs.nvidia.com/learning/physical-ai/getting-started-with-isaac-sim/latest/building-
+your-first-robot-in-isaac-sim/03-adding-sensors.html 
+Bài học có video 
+hướng dẫn thêm 
+RGB sensor, xem 
+camera view và 
+dùng dual 
+viewports. 
+Isaac Sim 
+Replicator 
+Object / 
+Synthetic 
+Data 
+https://docs.isaacsim.omniverse.nvidia.com/latest/action_and_event_data_generation/tu
+torial_replicator_object.html 
+Sinh dữ liệu 
+synthetic RGB, 
+2D/3D boxes, 
+segmentation 
+masks. 
+OpenCV 
+Camera 
+Calibration 
+https://docs.opencv.org/4.x/dc/dbb/tutorial_py_calibration.html Intrinsic/extrinsic, 
+distortion, camera 
+matrix, undistortion. 
+OpenCV 
+Camera 
+Calibration 
+with 
+OpenCV 
+https://docs.opencv.org/4.x/d4/d94/tutorial_camera_calibration.html Lý thuyết calibration 
+và distortion 
+coefficients. 
+OpenCV 
+Pose 
+Estimation 
+/ PnP 
+https://docs.opencv.org/4.x/d7/d53/tutorial_py_pose.html Ước lượng pose từ 
+camera matrix, 
+distortion 
+coefficients và 
+keypoints. 
+Open3D 
+RGBD 
+images 
+https://www.open3d.org/docs/0.10.0/tutorial/Basic/rgbd_image.html Tạo RGBDImage 
+và point cloud từ 
+color/depth. 
+Open3D 
+Point 
+Cloud 
+Tutorial 
+https://open3d.org/docs/release/tutorial/geometry/pointcloud.html Đọc, hiển thị, xử lý 
+point cloud. 
+Open3D 
+ICP 
+Registratio
+n 
+https://www.open3d.org/docs/latest/tutorial/Basic/icp_registration.html Align point clouds 
+bằng ICP. 
+ROS 2 tf2 
+Concepts 
+https://docs.ros.org/en/humble/Concepts/Intermediate/About-Tf2.html Tư duy quản lý 
+nhiều coordinate 
+frames theo thời 
+gian. 
+Modern 
+Robotics - 
+Rigid-Body 
+Motions 
+https://modernrobotics.northwestern.edu/chapters/chapter3/ Nền tảng SE(3), 
+frame và transform, 
+liên kết trực tiếp 
+Module 3. 
+ 
+Phụ lục A. Code skeleton đề xuất cho sinh viên 
+module4_camera_rgbd/ 
+  README.md 
+--- page 13 ---
+HRC2026 - Module 4 | Trang 13 
+  src/ 
+    camera_math.py 
+    depth_utils.py 
+    transforms.py 
+    point_cloud_utils.py 
+    overlay_utils.py 
+  tests/ 
+    test_camera_math.py 
+    test_transforms.py 
+  outputs/ 
+    camera_config_sheet.csv 
+    pixel_to_camera_report.csv 
+    transform_chain_report.json 
+    point_cloud.ply 
+    overlay_centroid.png 
+    pytest_report.txt 
+A.1. camera_math.py tối thiểu 
+import numpy as np 
+ 
+def pixel_to_camera(u, v, z, fx, fy, cx, cy): 
+    if not np.isfinite(z) or z <= 0: 
+        raise ValueError('Depth must be positive and finite') 
+    X = (u - cx) * z / fx 
+    Y = (v - cy) * z / fy 
+    Z = z 
+    return np.array([X, Y, Z], dtype=float) 
+ 
+def camera_to_pixel(P, fx, fy, cx, cy): 
+    X, Y, Z = P 
+    if not np.isfinite(Z) or Z <= 0: 
+        raise ValueError('Z must be positive and finite') 
+    u = fx * X / Z + cx 
+    v = fy * Y / Z + cy 
+    return np.array([u, v], dtype=float) 
+ 
+def make_K(fx, fy, cx, cy): 
+    return np.array([[fx, 0.0, cx], [0.0, fy, cy], [0.0, 0.0, 1.0]], dtype=float) 
+A.2. transforms.py tối thiểu 
+import numpy as np 
+ 
+def check_transform(T, atol=1e-6): 
+    T = np.asarray(T, dtype=float) 
+    assert T.shape == (4, 4) 
+    R = T[:3, :3] 
+    det_R = np.linalg.det(R) 
+    ortho_err = np.linalg.norm(R.T @ R - np.eye(3)) 
+    return {'det_R': float(det_R), 'ortho_err': float(ortho_err), 
+            'is_valid': abs(det_R - 1.0) < 1e-3 and ortho_err < 1e-3} 
+ 
+--- page 14 ---
+HRC2026 - Module 4 | Trang 14 
+def transform_point(T_A_B, p_B): 
+    p_B_h = np.r_[np.asarray(p_B, dtype=float), 1.0] 
+    p_A_h = np.asarray(T_A_B, dtype=float) @ p_B_h 
+    return p_A_h[:3] 
+ 
+def inverse_transform(T_A_B): 
+    return np.linalg.inv(np.asarray(T_A_B, dtype=float)) 
+A.3. depth_utils.py tối thiểu 
+import numpy as np 
+ 
+def valid_depth_mask(depth, min_depth=0.05, max_depth=5.0): 
+    depth = np.asarray(depth, dtype=float) 
+    return np.isfinite(depth) & (depth >= min_depth) & (depth <= max_depth) 
+ 
+def median_depth_in_mask(depth, mask): 
+    valid = valid_depth_mask(depth) & (mask.astype(bool)) 
+    values = depth[valid] 
+    if values.size == 0: 
+        return np.nan 
+    return float(np.median(values)) 
+Phụ lục B. Checklist nộp Module 4 
+File/thư mục Bắt buộc? Tự kiểm tra 
+README.md Có Lệnh chạy rõ, không phụ thuộc đường dẫn cá nhân. 
+camera_config_sheet.csv Có Có ít nhất 1 camera, resolution, K hoặc ghi rõ chưa 
+lấy được K. 
+pytest_report.txt Có Lab 4.2 và 4.4 pass test synthetic. 
+sample_rgb.png Có Ảnh mở được. 
+sample_depth_vis.png Có Depth visualization không toàn đen/trắng. 
+point_cloud.ply Có Open3D đọc được, số điểm hợp lệ > 0. 
+point_cloud_stats.json Có Có min/median/max depth và bounding box. 
+transform_chain_report.json Có Có det_R, ortho_err, round_trip_error. 
+overlay_centroid.png Có Centroid/axis overlay nằm đúng vùng vật thể. 
+baseline_camera_demo.md Có Ghi camera path, input/output, lỗi gặp phải. 
+ 

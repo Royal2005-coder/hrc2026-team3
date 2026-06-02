@@ -1,0 +1,2 @@
+camera_name,width,height,fx,fy,cx,cy,depth_unit,T_base_camera_source,notes
+head_stereo_left,640,480,259.0676607155584,194.3007455366688,320.0,240.0,meter,ComputeLocalToWorldTransform(USD),Task 1 perception camera
