@@ -25,7 +25,16 @@ _HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, os.path.join(_HERE, "..", "shared"))  # model, data_loader
 sys.path.insert(0, _HERE)                                 # config
 
-import config as cfg
+import importlib.util as _ilu
+
+# Load task1 config by explicit path — avoids sys.path collision with
+# /isaac-sim/.../cv2/config.py that Isaac Sim inserts into sys.path.
+_cfg_spec = _ilu.spec_from_file_location("config", os.path.join(_HERE, "config.py"))
+cfg = _ilu.module_from_spec(_cfg_spec)
+sys.modules["config"] = cfg   # register trước để data_loader/model dùng đúng
+_cfg_spec.loader.exec_module(cfg)
+del _ilu, _cfg_spec
+
 from model import build_model, BCMlpPolicy, BCLstmPolicy
 from data_loader import Normalizer
 
