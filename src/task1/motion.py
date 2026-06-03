@@ -1512,13 +1512,26 @@ def run_pipeline_from_person2(action_plan_yaml: str = None, robot=None, world=No
             is_first_plan = (plan_idx == 0)
             is_recovering = (retry_count > 0)
 
-            # Always reset before each plan: ensures _physics_view is valid and
-            # joint state is clean after any FixedJoint mutations from prior plans.
+            # Full teleport-reset only on first plan or after a failure that may
+            # have left physics in a corrupt state.  For normal mid-pipeline plans
+            # we only re-sync the IK solver so the arm continues from where it
+            # left off (avoids the visible "snap to initial" jerk between picks).
             if robot is not None:
-                verbose_reset = is_first_plan or is_recovering
-                if verbose_reset:
+                if is_first_plan or is_recovering:
                     print(f"[Init] Teleport tay về Neutral + reset full state...")
-                reset_robot_state_full(robot, world, verbose=verbose_reset)
+                    reset_robot_state_full(robot, world, verbose=True)
+                else:
+                    # Lightweight sync: just update IK warm-start to current joint state
+                    try:
+                        if hasattr(robot, 'ik_solver') and robot.ik_solver is not None:
+                            joints = robot.get_joint_states()
+                            if joints is not None:
+                                positions = joints['positions']
+                                if positions and isinstance(positions[0], list):
+                                    positions = positions[0]
+                                robot.ik_solver.sync_joint_positions(joints['names'], positions)
+                    except Exception as _e:
+                        print(f"[Init] IK re-sync warning: {_e}")
 
             remaining = action_plans[plan_idx + 1:]
             fsm = PickAndPlaceStateMachine(robot, world, plan, motion_specs,

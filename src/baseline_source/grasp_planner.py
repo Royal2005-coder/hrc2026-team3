@@ -272,10 +272,10 @@ class GraspPlanner:
             return
         # Get part current world coordinates
         current_world = self._get_prim_world_position(self.target_prim_path)
-        print(f">>> [GraspPlanner] update_active_target: Current part world position: {current_world}")
-        current_world += 0.15
         if current_world is None:
             return
+        print(f">>> [GraspPlanner] update_active_target: Current part world position: {current_world}")
+        current_world[2] += 0.15  # lift offset: add to Z only
         # Transform to base coordinate system
         obj_robot_now = self.coord.world_to_robot(current_world)
         # Update grasp target position (keep rotation unchanged)
