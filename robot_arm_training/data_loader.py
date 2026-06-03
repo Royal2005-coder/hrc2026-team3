@@ -56,17 +56,22 @@ class RobotMLPDataset(Dataset):
 
     def __init__(
         self,
-        states:  np.ndarray,   # (N, STATE_DIM)  đã normalize
-        actions: np.ndarray,   # (N, ACTION_DIM) đã normalize
+        states:     np.ndarray,   # (N, STATE_DIM)  đã normalize
+        actions:    np.ndarray,   # (N, ACTION_DIM) đã normalize
+        noise_std:  float = 0.0,  # Gaussian noise augmentation trên state
     ):
-        self.states  = torch.from_numpy(states).float()
-        self.actions = torch.from_numpy(actions).float()
+        self.states    = torch.from_numpy(states).float()
+        self.actions   = torch.from_numpy(actions).float()
+        self.noise_std = noise_std
 
     def __len__(self) -> int:
         return len(self.states)
 
     def __getitem__(self, idx: int):
-        return self.states[idx], self.actions[idx]
+        s = self.states[idx]
+        if self.noise_std > 0.0:
+            s = s + torch.randn_like(s) * self.noise_std
+        return s, self.actions[idx]
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -78,16 +83,17 @@ class RobotLSTMDataset(Dataset):
 
     def __init__(
         self,
-        states:      np.ndarray,   # (N, STATE_DIM) đã normalize
-        actions:     np.ndarray,   # (N, ACTION_DIM) đã normalize
-        window_size: int = config.LSTM_WINDOW_SIZE,
+        states:          np.ndarray,
+        actions:         np.ndarray,
+        window_size:     int = config.LSTM_WINDOW_SIZE,
         episode_lengths: list[int] | None = None,
+        noise_std:       float = 0.0,
     ):
         self.window_size = window_size
+        self.noise_std   = noise_std
 
-        # Xây dựng danh sách valid indices, không lấy mẫu qua episode boundary
-        all_state_windows  = []
-        all_actions        = []
+        all_state_windows = []
+        all_actions       = []
 
         if episode_lengths is None:
             episode_lengths = [len(states)]
@@ -113,7 +119,10 @@ class RobotLSTMDataset(Dataset):
         return len(self.actions)
 
     def __getitem__(self, idx: int):
-        return self.state_windows[idx], self.actions[idx]
+        w = self.state_windows[idx]
+        if self.noise_std > 0.0:
+            w = w + torch.randn_like(w) * self.noise_std
+        return w, self.actions[idx]
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -170,11 +179,13 @@ def df_to_arrays(df: pd.DataFrame):
 
 
 def build_mlp_loaders(
-    batch_size: int = config.BATCH_SIZE,
-    num_workers: int = 2,
+    batch_size:  int   = config.BATCH_SIZE,
+    noise_std:   float = config.STATE_NOISE_STD,
+    num_workers: int   = 2,
 ) -> tuple[DataLoader, DataLoader, DataLoader, Normalizer, Normalizer]:
     """
     Trả về (train_loader, val_loader, test_loader, state_norm, action_norm).
+    noise_std chỉ áp dụng cho train loader.
     """
     df = load_csv()
     train_df, val_df, test_df = episode_split(df)
@@ -186,27 +197,30 @@ def build_mlp_loaders(
     s_norm = Normalizer().fit(train_s)
     a_norm = Normalizer().fit(train_a)
 
-    def make_loader(s, a, shuffle):
-        ds = RobotMLPDataset(s_norm.transform(s), a_norm.transform(a))
+    def make_loader(s, a, shuffle, noise=0.0):
+        ds = RobotMLPDataset(s_norm.transform(s), a_norm.transform(a),
+                             noise_std=noise)
         return DataLoader(ds, batch_size=batch_size, shuffle=shuffle,
                           num_workers=num_workers, pin_memory=True)
 
     return (
-        make_loader(train_s, train_a, shuffle=True),
-        make_loader(val_s,   val_a,   shuffle=False),
-        make_loader(test_s,  test_a,  shuffle=False),
+        make_loader(train_s, train_a, shuffle=True,  noise=noise_std),
+        make_loader(val_s,   val_a,   shuffle=False, noise=0.0),
+        make_loader(test_s,  test_a,  shuffle=False, noise=0.0),
         s_norm,
         a_norm,
     )
 
 
 def build_lstm_loaders(
-    batch_size:  int = config.BATCH_SIZE,
-    window_size: int = config.LSTM_WINDOW_SIZE,
-    num_workers: int = 2,
+    batch_size:  int   = config.BATCH_SIZE,
+    window_size: int   = config.LSTM_WINDOW_SIZE,
+    noise_std:   float = config.STATE_NOISE_STD,
+    num_workers: int   = 2,
 ) -> tuple[DataLoader, DataLoader, DataLoader, Normalizer, Normalizer]:
     """
     Trả về (train_loader, val_loader, test_loader, state_norm, action_norm).
+    noise_std chỉ áp dụng cho train loader.
     """
     df = load_csv()
     train_df, val_df, test_df = episode_split(df)
@@ -218,16 +232,17 @@ def build_lstm_loaders(
     s_norm = Normalizer().fit(train_s)
     a_norm = Normalizer().fit(train_a)
 
-    def make_loader(s, a, eps, shuffle):
+    def make_loader(s, a, eps, shuffle, noise=0.0):
         ds = RobotLSTMDataset(s_norm.transform(s), a_norm.transform(a),
-                              window_size=window_size, episode_lengths=eps)
+                              window_size=window_size, episode_lengths=eps,
+                              noise_std=noise)
         return DataLoader(ds, batch_size=batch_size, shuffle=shuffle,
                           num_workers=num_workers, pin_memory=True)
 
     return (
-        make_loader(train_s, train_a, train_ep, shuffle=True),
-        make_loader(val_s,   val_a,   val_ep,   shuffle=False),
-        make_loader(test_s,  test_a,  test_ep,  shuffle=False),
+        make_loader(train_s, train_a, train_ep, shuffle=True,  noise=noise_std),
+        make_loader(val_s,   val_a,   val_ep,   shuffle=False, noise=0.0),
+        make_loader(test_s,  test_a,  test_ep,  shuffle=False, noise=0.0),
         s_norm,
         a_norm,
     )

@@ -20,11 +20,15 @@ def _build_mlp(
     out_dim:      int,
     dropout:      float = 0.1,
     activation:   type  = nn.ReLU,
+    use_bn:       bool  = True,
 ) -> nn.Sequential:
     layers: list[nn.Module] = []
     prev = in_dim
     for h in hidden_dims:
-        layers += [nn.Linear(prev, h), activation(), nn.Dropout(dropout)]
+        layers.append(nn.Linear(prev, h))
+        if use_bn:
+            layers.append(nn.BatchNorm1d(h))
+        layers += [activation(), nn.Dropout(dropout)]
         prev = h
     layers.append(nn.Linear(prev, out_dim))
     return nn.Sequential(*layers)

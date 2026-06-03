@@ -57,23 +57,26 @@ TEST_RATIO   = 0.10   # 10% episodes dùng test
 
 # MLP config
 MLP_HIDDEN_DIMS = [512, 512, 256]
-MLP_DROPOUT     = 0.1
+MLP_DROPOUT     = 0.2    # tăng từ 0.1 → 0.2 để chống overfitting
 
 # LSTM config
 LSTM_HIDDEN_DIM    = 256
 LSTM_NUM_LAYERS    = 2
-LSTM_DROPOUT       = 0.1
-LSTM_WINDOW_SIZE   = 10   # số frame lịch sử làm đầu vào
+LSTM_DROPOUT       = 0.2  # tăng từ 0.1 → 0.2
+LSTM_WINDOW_SIZE   = 10
 
 # Training config
 BATCH_SIZE       = 256
 LEARNING_RATE    = 1e-3
-WEIGHT_DECAY     = 1e-5
-NUM_EPOCHS       = 100
-PATIENCE         = 15      # early stopping
-LR_STEP_SIZE     = 30
+WEIGHT_DECAY     = 1e-4   # tăng từ 1e-5 → 1e-4
+NUM_EPOCHS       = 200
+PATIENCE         = 20
+LR_STEP_SIZE     = 30     # không dùng nữa (cosine scheduler)
 LR_GAMMA         = 0.5
 GRAD_CLIP        = 1.0
+
+# Data augmentation: thêm Gaussian noise vào state khi train
+STATE_NOISE_STD  = 0.01   # std noise tương đối so với normalized state
 
 # Logging
 LOG_EVERY_N_EPOCHS = 5

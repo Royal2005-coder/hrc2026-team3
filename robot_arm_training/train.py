@@ -17,7 +17,7 @@ import numpy as np
 import torch
 import torch.nn as nn
 from torch.optim import Adam
-from torch.optim.lr_scheduler import StepLR
+from torch.optim.lr_scheduler import CosineAnnealingLR
 
 import config
 from data_loader import build_mlp_loaders, build_lstm_loaders
@@ -169,8 +169,8 @@ def train(args):
     criterion = nn.MSELoss()
     optimizer = Adam(model.parameters(), lr=args.lr,
                      weight_decay=config.WEIGHT_DECAY)
-    scheduler = StepLR(optimizer, step_size=config.LR_STEP_SIZE,
-                       gamma=config.LR_GAMMA)
+    # Cosine annealing: LR giảm mượt từ lr → lr/100 trong T_max epochs
+    scheduler = CosineAnnealingLR(optimizer, T_max=args.epochs, eta_min=args.lr / 100)
 
     # ── Checkpoint dir ────────────────────────────────────────────────────────
     ckpt_dir = os.path.join(config.CHECKPOINT_DIR, args.model)
