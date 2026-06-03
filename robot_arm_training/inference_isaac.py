@@ -32,21 +32,21 @@ from data_loader import Normalizer
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# Tên 14 khớp tay đúng thứ tự như trong ACTION_COLS
-# (phải khớp với IsaacSimRobotInterface.arm_joint_names)
+# Task 1: cánh tay trái cố định, model chỉ điều khiển cánh tay phải.
+# ARM_JOINT_NAMES liệt kê đủ 14 khớp theo thứ tự robot interface yêu cầu.
 # ─────────────────────────────────────────────────────────────────────────────
 ARM_JOINT_NAMES = [
     "L_shoulder_pitch_joint", "L_shoulder_roll_joint", "L_shoulder_yaw_joint",
     "L_elbow_roll_joint",     "L_elbow_yaw_joint",
-    "L_wrist_pitch_joint",    "L_wrist_roll_joint",
+    "L_wrist_pitch_joint",    "L_wrist_roll_joint",          # indices 0-6 (fixed)
     "R_shoulder_pitch_joint", "R_shoulder_roll_joint", "R_shoulder_yaw_joint",
     "R_elbow_roll_joint",     "R_elbow_yaw_joint",
-    "R_wrist_pitch_joint",    "R_wrist_roll_joint",
+    "R_wrist_pitch_joint",    "R_wrist_roll_joint",          # indices 7-13 (from model)
 ]
 
 FINGER_JOINT_NAMES = [
-    "L_finger1_joint", "L_finger2_joint",
-    "R_finger1_joint", "R_finger2_joint",
+    "L_finger1_joint", "L_finger2_joint",   # indices 0-1 (fixed)
+    "R_finger1_joint", "R_finger2_joint",   # indices 2-3 (from model)
 ]
 
 # Threshold để quyết định open/close gripper (giá trị từ CSV: -1=open, +1=close)
@@ -165,7 +165,8 @@ class ILPolicyRunner:
 
     def predict(self, state: np.ndarray) -> np.ndarray:
         """
-        Nhận state (48,), trả về action (20,) ở đơn vị radian (unnormalized).
+        Nhận state (48,), trả về action (10,) ở đơn vị radian (unnormalized).
+        Thứ tự: R_shoulder_pitch..R_wrist_roll (7), R_finger1, R_finger2, right_gripper.
         """
         assert self.model is not None, "Gọi runner.load() trước"
 
@@ -174,7 +175,7 @@ class ILPolicyRunner:
         with torch.no_grad():
             if self.model_type == "mlp":
                 s_t = torch.from_numpy(state_norm).float().to(self.device)
-                a_n = self.model(s_t).cpu().numpy()   # (1, 20)
+                a_n = self.model(s_t).cpu().numpy()   # (1, 10)
 
             else:  # lstm
                 # Thêm vào buffer
@@ -190,7 +191,7 @@ class ILPolicyRunner:
 
                 w_t = torch.from_numpy(window).float().unsqueeze(0).to(self.device)  # (1, W, 48)
                 a_n, self._lstm_hidden = self.model(w_t, self._lstm_hidden)
-                a_n = a_n.cpu().numpy()   # (1, 20)
+                a_n = a_n.cpu().numpy()   # (1, 10)
 
         action = self.a_norm.inverse_transform(a_n)[0]   # (20,) đơn vị radian
         return action
@@ -200,49 +201,46 @@ class ILPolicyRunner:
     @staticmethod
     def parse_action(action: np.ndarray) -> dict:
         """
-        Tách action (20,) thành arm_joints, fingers, gripper.
+        Tách action (10,) — chỉ cánh tay phải.
 
         Returns dict:
-            arm_joints:   np.ndarray (14,) radian
-            fingers:      np.ndarray (4,)  radian
-            left_gripper:  float  (-1=open, +1=close)
+            r_arm_joints:  np.ndarray (7,) radian  — R_shoulder_pitch..R_wrist_roll
+            r_fingers:     np.ndarray (2,) radian  — R_finger1, R_finger2
             right_gripper: float  (-1=open, +1=close)
         """
-        arm_joints    = action[:14]           # indices 0..13
-        fingers       = action[14:18]         # indices 14..17
-        left_gripper  = float(action[18])     # index 18
-        right_gripper = float(action[19])     # index 19
+        r_arm_joints  = action[:7]       # indices 0..6
+        r_fingers     = action[7:9]      # indices 7..8
+        right_gripper = float(action[9]) # index 9
         return {
-            "arm_joints":    arm_joints,
-            "fingers":       fingers,
-            "left_gripper":  left_gripper,
+            "r_arm_joints":  r_arm_joints,
+            "r_fingers":     r_fingers,
             "right_gripper": right_gripper,
         }
 
     # ── Apply action lên robot ────────────────────────────────────────────────
 
     @staticmethod
-    def apply_action_to_robot(robot, parsed_action: dict):
+    def apply_action_to_robot(
+        robot,
+        parsed_action: dict,
+        left_arm_positions: np.ndarray,
+        left_finger_positions: np.ndarray,
+    ):
         """
         Gửi action xuống robot trong Isaac Sim.
+        Cánh tay trái giữ nguyên vị trí hiện tại (left_arm_positions từ get_joint_states).
+
         robot: IsaacSimRobotInterface hoặc RobotArticulation
         """
-        # 1. 14 arm joints
-        robot.set_arm_joint_positions(
-            parsed_action["arm_joints"].tolist()
-        )
+        # 1. Ghép 7 khớp trái (cố định) + 7 khớp phải (từ model) → 14 joints
+        full_arm = np.concatenate([left_arm_positions, parsed_action["r_arm_joints"]])
+        robot.set_arm_joint_positions(full_arm.tolist())
 
-        # 2. 4 finger joints
-        robot.set_finger_positions(
-            parsed_action["fingers"].tolist()
-        )
+        # 2. Ghép 2 ngón trái (cố định) + 2 ngón phải (từ model) → 4 fingers
+        full_fingers = np.concatenate([left_finger_positions, parsed_action["r_fingers"]])
+        robot.set_finger_positions(full_fingers.tolist())
 
-        # 3. Gripper open/close
-        if parsed_action["left_gripper"] > GRIPPER_CLOSE_THRESHOLD:
-            robot.close_gripper(side="left")
-        else:
-            robot.open_gripper(side="left")
-
+        # 3. Chỉ điều khiển gripper phải
         if parsed_action["right_gripper"] > GRIPPER_CLOSE_THRESHOLD:
             robot.close_gripper(side="right")
         else:
@@ -267,7 +265,7 @@ class ILPolicyRunner:
             apply:           Nếu True, gửi action xuống robot luôn
 
         Returns:
-            action (20,) ở đơn vị radian
+            action (10,) ở đơn vị radian (chỉ cánh tay phải)
         """
         joint_states = robot.get_joint_states()
         if joint_states is None:
@@ -278,6 +276,8 @@ class ILPolicyRunner:
 
         if apply:
             parsed = self.parse_action(action)
-            self.apply_action_to_robot(robot, parsed)
+            left_arm     = np.array(joint_states["arm_positions"][:7],    dtype=np.float32)
+            left_fingers = np.array(joint_states["finger_positions"][:2], dtype=np.float32)
+            self.apply_action_to_robot(robot, parsed, left_arm, left_fingers)
 
         return action

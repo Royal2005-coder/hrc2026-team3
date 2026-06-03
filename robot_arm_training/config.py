@@ -32,23 +32,18 @@ for i in range(4):
 
 STATE_COLS = STATE_JOINT_COLS + STATE_OBJ_COLS   # 20 + 28 = 48
 
-# Cột action (output): 20 features
+# Cột action (output): 10 features — chỉ cánh tay phải (task 1: cánh tay trái cố định)
 ACTION_COLS = [
-    "action.L_shoulder_pitch_joint.pos", "action.L_shoulder_roll_joint.pos",
-    "action.L_shoulder_yaw_joint.pos",   "action.L_elbow_roll_joint.pos",
-    "action.L_elbow_yaw_joint.pos",      "action.L_wrist_pitch_joint.pos",
-    "action.L_wrist_roll_joint.pos",
     "action.R_shoulder_pitch_joint.pos", "action.R_shoulder_roll_joint.pos",
     "action.R_shoulder_yaw_joint.pos",   "action.R_elbow_roll_joint.pos",
     "action.R_elbow_yaw_joint.pos",      "action.R_wrist_pitch_joint.pos",
     "action.R_wrist_roll_joint.pos",
-    "action.L_finger1_joint.pos",        "action.L_finger2_joint.pos",
     "action.R_finger1_joint.pos",        "action.R_finger2_joint.pos",
-    "action.left_gripper_control",       "action.right_gripper_control",
+    "action.right_gripper_control",
 ]
 
 STATE_DIM  = len(STATE_COLS)   # 48
-ACTION_DIM = len(ACTION_COLS)  # 20
+ACTION_DIM = len(ACTION_COLS)  # 10
 
 # Hyperparameters chung
 SEED         = 42
