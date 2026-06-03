@@ -16,7 +16,7 @@ import sys
 # ── Parse args trước khi khởi động Isaac Sim ─────────────────────────────────
 def parse_args():
     p = argparse.ArgumentParser()
-    p.add_argument("--model",    choices=["mlp", "lstm"], default="mlp")
+    p.add_argument("--model",    choices=["mlp", "lstm"], default="lstm")
     p.add_argument("--headless", action="store_true")
     p.add_argument("--max_steps", type=int, default=500,
                    help="Số physics steps tối đa mỗi episode")

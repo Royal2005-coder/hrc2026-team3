@@ -122,41 +122,39 @@ class ILPolicyRunner:
         gripper_control: list[float] | None = None,
     ) -> np.ndarray:
         """
-        Ghép 48-dim state vector từ dữ liệu Isaac Sim.
+        Ghép 38-dim state vector từ dữ liệu Isaac Sim.
+        Task 1: chỉ dùng right arm — left arm cố định nên đã loại khỏi STATE_COLS.
 
         Args:
             robot_joint_states: Output của robot.get_joint_states()
             part_poses:         Output của scene.get_parts_world_poses()
                                 mỗi item có 'position' (3,) và 'orientation' (4,) [qw,qx,qy,qz]
-            gripper_control:    [left_gripper, right_gripper] = [-1.0, -1.0] (open) hoặc [1.0, 1.0]
+            gripper_control:    [left_gripper, right_gripper] = [-1.0, -1.0] (open)
 
         Returns:
-            state: np.ndarray shape (48,)
+            state: np.ndarray shape (38,)
         """
-        # 14 arm joints (theo thứ tự ARM_JOINT_NAMES)
-        arm_pos = np.array(robot_joint_states["arm_positions"], dtype=np.float32)  # (14,)
-
-        # 4 finger joints
+        arm_pos    = np.array(robot_joint_states["arm_positions"],    dtype=np.float32)  # (14,)
         finger_pos = np.array(robot_joint_states["finger_positions"], dtype=np.float32)  # (4,)
 
-        # 2 gripper control (-1 = open, 1 = close)
         if gripper_control is None:
             gripper_control = [-1.0, -1.0]
-        gripper = np.array(gripper_control, dtype=np.float32)  # (2,)
+
+        # Chỉ lấy right arm (indices 7..13) + right fingers (2..3) + right gripper
+        r_arm     = arm_pos[7:14]                                      # (7,)
+        r_fingers = finger_pos[2:4]                                    # (2,)
+        r_gripper = np.array([gripper_control[1]], dtype=np.float32)   # (1,)
 
         # 4 objects × 7 = 28 values  [x, y, z, qx, qy, qz, qw]
         obj_vec = np.zeros(28, dtype=np.float32)
         for i, part in enumerate(part_poses[:4]):
-            pos = np.array(part["position"], dtype=np.float32)          # (3,)
-            ori = np.array(part["orientation"], dtype=np.float32)       # (4,) [qw,qx,qy,qz]
+            pos = np.array(part["position"],    dtype=np.float32)  # (3,)
+            ori = np.array(part["orientation"], dtype=np.float32)  # (4,) [qw,qx,qy,qz]
             # CSV lưu theo [qx,qy,qz,qw], Isaac trả [qw,qx,qy,qz] → convert
             qw, qx, qy, qz = ori
-            obj_vec[i * 7: i * 7 + 7] = [
-                pos[0], pos[1], pos[2],
-                qx, qy, qz, qw,
-            ]
+            obj_vec[i * 7: i * 7 + 7] = [pos[0], pos[1], pos[2], qx, qy, qz, qw]
 
-        state = np.concatenate([arm_pos, finger_pos, gripper, obj_vec])  # (48,)
+        state = np.concatenate([r_arm, r_fingers, r_gripper, obj_vec])  # (38,)
         assert state.shape == (cfg.STATE_DIM,), f"State dim mismatch: {state.shape}"
         return state
 
@@ -164,12 +162,12 @@ class ILPolicyRunner:
 
     def predict(self, state: np.ndarray) -> np.ndarray:
         """
-        Nhận state (48,), trả về action (10,) ở đơn vị radian (unnormalized).
+        Nhận state (38,), trả về action (10,) ở đơn vị radian (unnormalized).
         Thứ tự: R_shoulder_pitch..R_wrist_roll (7), R_finger1, R_finger2, right_gripper.
         """
         assert self.model is not None, "Gọi runner.load() trước"
 
-        state_norm = self.s_norm.transform(state.reshape(1, -1))  # (1, 48)
+        state_norm = self.s_norm.transform(state.reshape(1, -1))  # (1, 38)
 
         with torch.no_grad():
             if self.model_type == "mlp":
@@ -177,22 +175,20 @@ class ILPolicyRunner:
                 a_n = self.model(s_t).cpu().numpy()   # (1, 10)
 
             else:  # lstm
-                # Thêm vào buffer
                 self._state_buffer.append(state_norm[0])
                 if len(self._state_buffer) > cfg.LSTM_WINDOW_SIZE:
                     self._state_buffer = self._state_buffer[-cfg.LSTM_WINDOW_SIZE:]
 
-                window = np.stack(self._state_buffer, axis=0)  # (T, 48)
-                # Pad nếu chưa đủ window
+                window = np.stack(self._state_buffer, axis=0)  # (T, 38)
                 if len(window) < cfg.LSTM_WINDOW_SIZE:
                     pad    = np.repeat(window[:1], cfg.LSTM_WINDOW_SIZE - len(window), axis=0)
                     window = np.concatenate([pad, window], axis=0)
 
-                w_t = torch.from_numpy(window).float().unsqueeze(0).to(self.device)  # (1, W, 48)
+                w_t = torch.from_numpy(window).float().unsqueeze(0).to(self.device)  # (1, W, 38)
                 a_n, self._lstm_hidden = self.model(w_t, self._lstm_hidden)
                 a_n = a_n.cpu().numpy()   # (1, 10)
 
-        action = self.a_norm.inverse_transform(a_n)[0]   # (20,) đơn vị radian
+        action = self.a_norm.inverse_transform(a_n)[0]   # (10,) đơn vị radian
         return action
 
     # ── Parse action vector thành các phần ───────────────────────────────────
