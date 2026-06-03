@@ -4,11 +4,11 @@ Cấu hình hyperparameters và đường dẫn cho robot arm training.
 
 import os
 
-# Đường dẫn
-ROOT_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-DATA_PATH = os.path.join(ROOT_DIR, "part_sorting_sample.csv")
-CHECKPOINT_DIR = os.path.join(os.path.dirname(__file__), "checkpoints")
-LOG_DIR = os.path.join(os.path.dirname(__file__), "logs")
+# Đường dẫn — task1 nằm ở robot_arm_training/task1/, root là 2 cấp trên
+ROOT_DIR      = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+DATA_PATH     = os.path.join(ROOT_DIR, "data", "task1", "part_sorting_sample.csv")
+CHECKPOINT_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "checkpoints")
+LOG_DIR       = os.path.join(ROOT_DIR, "logs", "task1")
 
 # Cột state (input): 48 features
 STATE_JOINT_COLS = [

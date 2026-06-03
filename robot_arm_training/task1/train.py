@@ -7,9 +7,14 @@ Cách dùng:
     python train.py --model mlp --epochs 50 --lr 5e-4 --batch 128
 """
 
+import os
+import sys
+_HERE = os.path.dirname(os.path.abspath(__file__))
+sys.path.insert(0, os.path.join(_HERE, "..", "shared"))  # model, data_loader
+sys.path.insert(0, _HERE)                                 # config
+
 import argparse
 import json
-import os
 import sys
 import time
 

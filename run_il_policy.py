@@ -50,7 +50,7 @@ from isaac_sim_robot_interface import IsaacSimRobotInterface
 from DataLogger import DataLogger
 
 # Import IL policy
-from robot_arm_training.inference_isaac import ILPolicyRunner
+from robot_arm_training.task1.inference_isaac import ILPolicyRunner
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Setup scene (giống test_isaac_init.py)
@@ -141,18 +141,19 @@ for episode in range(args.episodes):
         )
 
         # Cập nhật trạng thái gripper cho bước tiếp theo
-        gripper_state = [float(action[18]), float(action[19])]
+        # action[9] = right_gripper; left arm cố định nên luôn -1 (mở)
+        gripper_state = [-1.0, float(action[9])]
 
         # ── Bước simulation ───────────────────────────────────────────────
         world.step(render=not args.headless)
 
         if step % 60 == 0:
-            arm_mae = float(np.mean(np.abs(
-                np.array(joint_states["arm_positions"]) - action[:14]
+            # action[0:7] = R arm joints; robot arm_positions[7:14] = right arm
+            right_arm_mae = float(np.mean(np.abs(
+                np.array(joint_states["arm_positions"])[7:14] - action[:7]
             )))
-            print(f"  step={step:4d} | arm tracking MAE={arm_mae:.4f} rad "
-                  f"| gripper L={'C' if gripper_state[0] > 0 else 'O'} "
-                  f"R={'C' if gripper_state[1] > 0 else 'O'}")
+            print(f"  step={step:4d} | right arm MAE={right_arm_mae:.4f} rad "
+                  f"| right gripper={'C' if gripper_state[1] > 0 else 'O'}")
 
     # Reset robot về vị trí ban đầu sau mỗi episode
     robot.reset()

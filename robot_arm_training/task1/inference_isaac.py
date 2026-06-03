@@ -5,7 +5,7 @@ Class ILPolicyRunner nhận state từ robot + scene,
 chạy model predict action, rồi gửi xuống robot.
 
 Cách dùng trong simulation loop:
-    from robot_arm_training.inference_isaac import ILPolicyRunner
+    from robot_arm_training.task1.inference_isaac import ILPolicyRunner
 
     runner = ILPolicyRunner(model_type="mlp")   # hoặc "lstm"
     runner.load()
@@ -21,10 +21,9 @@ import sys
 import numpy as np
 import torch
 
-# Thêm thư mục robot_arm_training vào path để import được config, model, data_loader
-_THIS_DIR = os.path.dirname(os.path.abspath(__file__))
-if _THIS_DIR not in sys.path:
-    sys.path.insert(0, _THIS_DIR)
+_HERE = os.path.dirname(os.path.abspath(__file__))
+sys.path.insert(0, os.path.join(_HERE, "..", "shared"))  # model, data_loader
+sys.path.insert(0, _HERE)                                 # config
 
 import config as cfg
 from model import build_model, BCMlpPolicy, BCLstmPolicy

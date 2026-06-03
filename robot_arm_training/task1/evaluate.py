@@ -12,9 +12,13 @@ Cách dùng:
     python evaluate.py --model mlp --plot    # vẽ biểu đồ (cần matplotlib)
 """
 
-import argparse
 import os
+import sys
+_HERE = os.path.dirname(os.path.abspath(__file__))
+sys.path.insert(0, os.path.join(_HERE, "..", "shared"))
+sys.path.insert(0, _HERE)
 
+import argparse
 import numpy as np
 import pandas as pd
 import torch
