@@ -4,9 +4,8 @@ Chạy Imitation Learning policy trong Isaac Sim.
 Dùng model đã train ở robot_arm_training/ để điều khiển robot thật trong sim.
 
 Command:
-    python run_il_policy.py                    # lstm, headless
-    python run_il_policy.py --livestream       # xem qua browser tại http://<server-ip>:8211
-    python run_il_policy.py --headless         # headless (không GUI, không stream)
+    python run_il_policy.py                    # lstm, có GUI
+    python run_il_policy.py --headless         # không GUI (nhanh hơn)
     python run_il_policy.py --episodes 5
 """
 
@@ -17,14 +16,12 @@ import sys
 # ── Parse args trước khi khởi động Isaac Sim ─────────────────────────────────
 def parse_args():
     p = argparse.ArgumentParser()
-    p.add_argument("--model",      choices=["mlp", "lstm"], default="lstm")
-    p.add_argument("--headless",   action="store_true",
-                   help="Chạy không GUI, không stream (nhanh hơn)")
-    p.add_argument("--livestream", action="store_true",
-                   help="Stream GUI lên browser qua WebRTC tại http://<server-ip>:8211")
-    p.add_argument("--max_steps",  type=int, default=500,
+    p.add_argument("--model",    choices=["mlp", "lstm"], default="lstm")
+    p.add_argument("--headless", action="store_true",
+                   help="Chạy không GUI (nhanh hơn, dùng khi không có màn hình)")
+    p.add_argument("--max_steps", type=int, default=500,
                    help="Số physics steps tối đa mỗi episode")
-    p.add_argument("--episodes",   type=int, default=3,
+    p.add_argument("--episodes", type=int, default=3,
                    help="Số episode chạy liên tiếp")
     return p.parse_args()
 
@@ -33,11 +30,10 @@ args = parse_args()
 # ── Khởi động Isaac Sim ───────────────────────────────────────────────────────
 from isaacsim import SimulationApp
 
-sim_cfg = {"width": 1280, "height": 720, "headless": args.headless or args.livestream}
-if args.livestream:
-    sim_cfg["livestream"] = 2   # 2 = WebRTC (browser), 1 = Native Omniverse Streaming Client
-
-kit = SimulationApp(sim_cfg)
+kit = SimulationApp({
+    "width": 1280, "height": 720,
+    "headless": args.headless,
+})
 
 # Import sau khi SimulationApp đã khởi động
 from isaacsim.core.api import World
