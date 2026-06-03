@@ -162,18 +162,58 @@ def _impute_obj_outliers(df: pd.DataFrame) -> pd.DataFrame:
     return df
 
 
-def load_csv(path: str = config.DATA_PATH) -> pd.DataFrame:
+def _load_one_csv(path: str) -> pd.DataFrame:
     df = pd.read_csv(path)
     df = _impute_obj_outliers(df)
-    # Drop các frame cuối episode không có action (last step có NaN action)
-    action_cols = config.ACTION_COLS
     before = len(df)
-    df = df.dropna(subset=action_cols).reset_index(drop=True)
+    df = df.dropna(subset=config.ACTION_COLS).reset_index(drop=True)
     dropped = before - len(df)
     if dropped:
-        print(f"[data] Dropped {dropped} rows with NaN actions (last frames)")
-    print(f"[data] Loaded {len(df):,} rows, {df['episode_index'].nunique()} episodes")
+        print(f"[data]   Dropped {dropped} rows with NaN actions")
     return df
+
+
+def load_csv(
+    path: str | None = None,
+    extra_paths: list[str] | None = None,
+) -> pd.DataFrame:
+    """Load one or more CSV files and concatenate them.
+
+    episode_index is re-numbered globally so episodes from different files
+    never collide.  All other columns are preserved as-is.
+
+    Args:
+        path:        Primary CSV path. Defaults to config.DATA_PATH.
+        extra_paths: Additional CSVs to merge. Defaults to config.EXTRA_DATA_PATHS.
+    """
+    if path is None:
+        path = config.DATA_PATH
+    if extra_paths is None:
+        extra_paths = getattr(config, "EXTRA_DATA_PATHS", [])
+
+    all_paths = [path] + [p for p in extra_paths if p and os.path.exists(p)]
+
+    dfs = []
+    ep_offset = 0
+    for p in all_paths:
+        print(f"[data] Loading {p}")
+        df = _load_one_csv(p)
+        if df.empty:
+            continue
+        # Re-number episodes to avoid index collision across files
+        ep_map = {old: new + ep_offset
+                  for new, old in enumerate(sorted(df["episode_index"].unique()))}
+        df["episode_index"] = df["episode_index"].map(ep_map)
+        ep_offset += len(ep_map)
+        dfs.append(df)
+
+    if not dfs:
+        raise FileNotFoundError(f"No valid CSV found in {all_paths}")
+
+    result = pd.concat(dfs, ignore_index=True)
+    print(f"[data] Total: {len(result):,} rows, {result['episode_index'].nunique()} episodes "
+          f"(from {len(dfs)} file(s))")
+    return result
 
 
 def episode_split(

@@ -7,6 +7,13 @@ import os
 # Đường dẫn — task1 nằm ở robot_arm_training/task1/, root là 2 cấp trên
 ROOT_DIR      = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 DATA_PATH     = os.path.join(ROOT_DIR, "data", "task1", "part_sorting_sample.csv")
+
+# Danh sách CSV bổ sung (vd: planner_demos.csv từ teacher-student distillation).
+# Mỗi file được tự động renumber episode_index để tránh trùng lặp khi ghép.
+# Để trống nếu chỉ dùng DATA_PATH.
+EXTRA_DATA_PATHS: list[str] = [
+    # os.path.join(ROOT_DIR, "data", "task1", "planner_demos.csv"),
+]
 CHECKPOINT_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "checkpoints")
 LOG_DIR       = os.path.join(ROOT_DIR, "logs", "task1")
 
