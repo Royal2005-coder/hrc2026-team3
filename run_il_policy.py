@@ -124,6 +124,12 @@ for episode in range(args.episodes):
 
     gripper_state = [-1.0, -1.0]   # cả hai gripper đang mở
 
+    # Stall detection: if arm MAE stays < threshold for this many steps → stuck
+    _STALL_MAE_THRESH  = 0.002   # rad
+    _STALL_MIN_STEPS   = 60      # steps below threshold before declaring stall
+    _stall_counter     = 0
+    _prev_mae          = None
+
     for step in range(args.max_steps):
 
         # ── Lấy state từ sim ──────────────────────────────────────────────
@@ -148,13 +154,25 @@ for episode in range(args.episodes):
         # ── Bước simulation ───────────────────────────────────────────────
         world.step(render=not args.headless)
 
+        # ── Tính MAE và kiểm tra stall ────────────────────────────────────
+        right_arm_mae = float(np.mean(np.abs(
+            np.array(joint_states["arm_positions"])[7:14] - action[:7]
+        )))
+
+        if right_arm_mae < _STALL_MAE_THRESH:
+            _stall_counter += 1
+        else:
+            _stall_counter = 0
+
         if step % 60 == 0:
-            # action[0:7] = R arm joints; robot arm_positions[7:14] = right arm
-            right_arm_mae = float(np.mean(np.abs(
-                np.array(joint_states["arm_positions"])[7:14] - action[:7]
-            )))
             print(f"  step={step:4d} | right arm MAE={right_arm_mae:.4f} rad "
-                  f"| right gripper={'C' if gripper_state[1] > 0 else 'O'}")
+                  f"| right gripper={'C' if gripper_state[1] > 0 else 'O'}"
+                  f"| stall={_stall_counter}/{_STALL_MIN_STEPS}")
+
+        # Thoát sớm nếu arm bị kẹt và gripper đã đóng (không gắp được gì)
+        if _stall_counter >= _STALL_MIN_STEPS and gripper_state[1] > 0:
+            print(f"  [IL] Stall detected at step {step} (MAE<{_STALL_MAE_THRESH} for {_STALL_MIN_STEPS} steps, gripper=C) — ending episode early")
+            break
 
     # Reset robot về vị trí ban đầu sau mỗi episode
     robot.reset()
