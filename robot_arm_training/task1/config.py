@@ -12,17 +12,13 @@ LOG_DIR       = os.path.join(ROOT_DIR, "logs", "task1")
 
 # Cột state (input): 48 features
 STATE_JOINT_COLS = [
-    "state.L_shoulder_pitch_joint.pos", "state.L_shoulder_roll_joint.pos",
-    "state.L_shoulder_yaw_joint.pos",   "state.L_elbow_roll_joint.pos",
-    "state.L_elbow_yaw_joint.pos",      "state.L_wrist_pitch_joint.pos",
-    "state.L_wrist_roll_joint.pos",
+    # Left arm excluded: constant across all episodes in task 1 (std < 3e-4)
     "state.R_shoulder_pitch_joint.pos", "state.R_shoulder_roll_joint.pos",
     "state.R_shoulder_yaw_joint.pos",   "state.R_elbow_roll_joint.pos",
     "state.R_elbow_yaw_joint.pos",      "state.R_wrist_pitch_joint.pos",
     "state.R_wrist_roll_joint.pos",
-    "state.L_finger1_joint.pos",        "state.L_finger2_joint.pos",
     "state.R_finger1_joint.pos",        "state.R_finger2_joint.pos",
-    "state.left_gripper_control",       "state.right_gripper_control",
+    "state.right_gripper_control",
 ]
 
 STATE_OBJ_COLS = []
@@ -30,7 +26,7 @@ for i in range(4):
     for attr in ["x", "y", "z", "qx", "qy", "qz", "qw"]:
         STATE_OBJ_COLS.append(f"state.obj{i}_{attr}")
 
-STATE_COLS = STATE_JOINT_COLS + STATE_OBJ_COLS   # 20 + 28 = 48
+STATE_COLS = STATE_JOINT_COLS + STATE_OBJ_COLS   # 10 + 28 = 38
 
 # Cột action (output): 10 features — chỉ cánh tay phải (task 1: cánh tay trái cố định)
 ACTION_COLS = [
@@ -42,7 +38,7 @@ ACTION_COLS = [
     "action.right_gripper_control",
 ]
 
-STATE_DIM  = len(STATE_COLS)   # 48
+STATE_DIM  = len(STATE_COLS)   # 38
 ACTION_DIM = len(ACTION_COLS)  # 10
 
 # Hyperparameters chung

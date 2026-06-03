@@ -129,8 +129,42 @@ class RobotLSTMDataset(Dataset):
 # Hàm tiện ích
 # ─────────────────────────────────────────────────────────────────────────────
 
+_OBJ_COLS = [f"state.obj{i}_{a}" for i in range(4) for a in ["x", "y", "z", "qx", "qy", "qz", "qw"]]
+_OBJ_VALID_RANGE = (-3.0, 3.0)  # values outside this range are lost-track sentinels
+
+
+def _impute_obj_outliers(df: pd.DataFrame) -> pd.DataFrame:
+    """Forward-fill object pose columns that fall outside the valid spatial range."""
+    obj_xyz = [c for c in _OBJ_COLS if c.endswith(("_x", "_y", "_z")) and c in df.columns]
+    lo, hi = _OBJ_VALID_RANGE
+    mask = pd.DataFrame(False, index=df.index, columns=obj_xyz)
+    for c in obj_xyz:
+        mask[c] = (df[c] < lo) | (df[c] > hi)
+
+    n_bad = mask.any(axis=1).sum()
+    if n_bad:
+        # Replace outlier positions with NaN, then forward-fill within each episode
+        df = df.copy()
+        for c in obj_xyz:
+            df.loc[mask[c], c] = np.nan
+        # Also NaN the corresponding quaternion cols so orientation stays consistent
+        for i in range(4):
+            xyz_cols = [f"state.obj{i}_{a}" for a in ["x", "y", "z"]]
+            quat_cols = [f"state.obj{i}_{a}" for a in ["qx", "qy", "qz", "qw"]]
+            bad_rows = mask[[c for c in xyz_cols if c in mask.columns]].any(axis=1)
+            for c in quat_cols:
+                if c in df.columns:
+                    df.loc[bad_rows, c] = np.nan
+        all_obj_cols = [c for c in _OBJ_COLS if c in df.columns]
+        for c in all_obj_cols:
+            df[c] = df.groupby("episode_index")[c].transform(lambda x: x.ffill().bfill())
+        print(f"[data] Imputed {n_bad} frames with out-of-range object poses (forward-fill)")
+    return df
+
+
 def load_csv(path: str = config.DATA_PATH) -> pd.DataFrame:
     df = pd.read_csv(path)
+    df = _impute_obj_outliers(df)
     # Drop các frame cuối episode không có action (last step có NaN action)
     action_cols = config.ACTION_COLS
     before = len(df)
