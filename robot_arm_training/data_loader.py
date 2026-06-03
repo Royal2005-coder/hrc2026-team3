@@ -1,0 +1,246 @@
+"""
+Data loading, preprocessing và tạo PyTorch Dataset cho robot arm.
+
+- Split theo episode (không random row) để tránh data leakage.
+- Normalize bằng mean/std tính trên train set.
+- Hỗ trợ hai chế độ: MLP (single-step) và LSTM (sliding window).
+"""
+
+import os
+import numpy as np
+import pandas as pd
+import torch
+from torch.utils.data import Dataset, DataLoader
+
+import config
+
+
+class Normalizer:
+    """Z-score normalization, lưu mean/std để dùng cho inference."""
+
+    def __init__(self):
+        self.mean: np.ndarray | None = None
+        self.std:  np.ndarray | None = None
+
+    def fit(self, data: np.ndarray) -> "Normalizer":
+        self.mean = data.mean(axis=0)
+        self.std  = data.std(axis=0)
+        # Tránh chia cho 0 với các cột constant (ví dụ gripper luôn = -1)
+        self.std = np.where(self.std < 1e-8, 1.0, self.std)
+        return self
+
+    def transform(self, data: np.ndarray) -> np.ndarray:
+        return (data - self.mean) / self.std
+
+    def inverse_transform(self, data: np.ndarray) -> np.ndarray:
+        return data * self.std + self.mean
+
+    def save(self, path: str):
+        np.savez(path, mean=self.mean, std=self.std)
+
+    @classmethod
+    def load(cls, path: str) -> "Normalizer":
+        obj = cls()
+        data = np.load(path)
+        obj.mean = data["mean"]
+        obj.std  = data["std"]
+        return obj
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# MLP Dataset: mỗi sample = (state_t, action_t)
+# ─────────────────────────────────────────────────────────────────────────────
+
+class RobotMLPDataset(Dataset):
+    """Dataset cho Behavioral Cloning với MLP (single-step)."""
+
+    def __init__(
+        self,
+        states:  np.ndarray,   # (N, STATE_DIM)  đã normalize
+        actions: np.ndarray,   # (N, ACTION_DIM) đã normalize
+    ):
+        self.states  = torch.from_numpy(states).float()
+        self.actions = torch.from_numpy(actions).float()
+
+    def __len__(self) -> int:
+        return len(self.states)
+
+    def __getitem__(self, idx: int):
+        return self.states[idx], self.actions[idx]
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# LSTM Dataset: mỗi sample = (state_window_t-W..t, action_t)
+# ─────────────────────────────────────────────────────────────────────────────
+
+class RobotLSTMDataset(Dataset):
+    """Dataset cho Behavioral Cloning với LSTM (sliding window)."""
+
+    def __init__(
+        self,
+        states:      np.ndarray,   # (N, STATE_DIM) đã normalize
+        actions:     np.ndarray,   # (N, ACTION_DIM) đã normalize
+        window_size: int = config.LSTM_WINDOW_SIZE,
+        episode_lengths: list[int] | None = None,
+    ):
+        self.window_size = window_size
+
+        # Xây dựng danh sách valid indices, không lấy mẫu qua episode boundary
+        all_state_windows  = []
+        all_actions        = []
+
+        if episode_lengths is None:
+            episode_lengths = [len(states)]
+
+        idx = 0
+        for ep_len in episode_lengths:
+            ep_states  = states[idx: idx + ep_len]
+            ep_actions = actions[idx: idx + ep_len]
+            for t in range(window_size - 1, ep_len):
+                window = ep_states[t - window_size + 1: t + 1]   # (W, S)
+                all_state_windows.append(window)
+                all_actions.append(ep_actions[t])
+            idx += ep_len
+
+        self.state_windows = torch.from_numpy(
+            np.stack(all_state_windows, axis=0)
+        ).float()   # (N', W, STATE_DIM)
+        self.actions = torch.from_numpy(
+            np.stack(all_actions, axis=0)
+        ).float()   # (N', ACTION_DIM)
+
+    def __len__(self) -> int:
+        return len(self.actions)
+
+    def __getitem__(self, idx: int):
+        return self.state_windows[idx], self.actions[idx]
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Hàm tiện ích
+# ─────────────────────────────────────────────────────────────────────────────
+
+def load_csv(path: str = config.DATA_PATH) -> pd.DataFrame:
+    df = pd.read_csv(path)
+    # Drop các frame cuối episode không có action (last step có NaN action)
+    action_cols = config.ACTION_COLS
+    before = len(df)
+    df = df.dropna(subset=action_cols).reset_index(drop=True)
+    dropped = before - len(df)
+    if dropped:
+        print(f"[data] Dropped {dropped} rows with NaN actions (last frames)")
+    print(f"[data] Loaded {len(df):,} rows, {df['episode_index'].nunique()} episodes")
+    return df
+
+
+def episode_split(
+    df: pd.DataFrame,
+    val_ratio:  float = config.VAL_RATIO,
+    test_ratio: float = config.TEST_RATIO,
+    seed:       int   = config.SEED,
+) -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame]:
+    """Chia train/val/test theo episode, không theo row."""
+    rng = np.random.default_rng(seed)
+    eps = df["episode_index"].unique()
+    rng.shuffle(eps)
+
+    n_test  = max(1, int(len(eps) * test_ratio))
+    n_val   = max(1, int(len(eps) * val_ratio))
+
+    test_eps  = eps[:n_test]
+    val_eps   = eps[n_test: n_test + n_val]
+    train_eps = eps[n_test + n_val:]
+
+    train_df = df[df["episode_index"].isin(train_eps)].reset_index(drop=True)
+    val_df   = df[df["episode_index"].isin(val_eps)].reset_index(drop=True)
+    test_df  = df[df["episode_index"].isin(test_eps)].reset_index(drop=True)
+
+    print(f"[data] Split — train: {len(train_eps)} eps ({len(train_df):,} rows) | "
+          f"val: {len(val_eps)} eps ({len(val_df):,} rows) | "
+          f"test: {len(test_eps)} eps ({len(test_df):,} rows)")
+    return train_df, val_df, test_df
+
+
+def df_to_arrays(df: pd.DataFrame):
+    """Trả về (states, actions, episode_lengths) dưới dạng numpy."""
+    states  = df[config.STATE_COLS].values.astype(np.float32)
+    actions = df[config.ACTION_COLS].values.astype(np.float32)
+    ep_lengths = df.groupby("episode_index", sort=False).size().tolist()
+    return states, actions, ep_lengths
+
+
+def build_mlp_loaders(
+    batch_size: int = config.BATCH_SIZE,
+    num_workers: int = 2,
+) -> tuple[DataLoader, DataLoader, DataLoader, Normalizer, Normalizer]:
+    """
+    Trả về (train_loader, val_loader, test_loader, state_norm, action_norm).
+    """
+    df = load_csv()
+    train_df, val_df, test_df = episode_split(df)
+
+    train_s, train_a, _ = df_to_arrays(train_df)
+    val_s,   val_a,   _ = df_to_arrays(val_df)
+    test_s,  test_a,  _ = df_to_arrays(test_df)
+
+    s_norm = Normalizer().fit(train_s)
+    a_norm = Normalizer().fit(train_a)
+
+    def make_loader(s, a, shuffle):
+        ds = RobotMLPDataset(s_norm.transform(s), a_norm.transform(a))
+        return DataLoader(ds, batch_size=batch_size, shuffle=shuffle,
+                          num_workers=num_workers, pin_memory=True)
+
+    return (
+        make_loader(train_s, train_a, shuffle=True),
+        make_loader(val_s,   val_a,   shuffle=False),
+        make_loader(test_s,  test_a,  shuffle=False),
+        s_norm,
+        a_norm,
+    )
+
+
+def build_lstm_loaders(
+    batch_size:  int = config.BATCH_SIZE,
+    window_size: int = config.LSTM_WINDOW_SIZE,
+    num_workers: int = 2,
+) -> tuple[DataLoader, DataLoader, DataLoader, Normalizer, Normalizer]:
+    """
+    Trả về (train_loader, val_loader, test_loader, state_norm, action_norm).
+    """
+    df = load_csv()
+    train_df, val_df, test_df = episode_split(df)
+
+    train_s, train_a, train_ep = df_to_arrays(train_df)
+    val_s,   val_a,   val_ep   = df_to_arrays(val_df)
+    test_s,  test_a,  test_ep  = df_to_arrays(test_df)
+
+    s_norm = Normalizer().fit(train_s)
+    a_norm = Normalizer().fit(train_a)
+
+    def make_loader(s, a, eps, shuffle):
+        ds = RobotLSTMDataset(s_norm.transform(s), a_norm.transform(a),
+                              window_size=window_size, episode_lengths=eps)
+        return DataLoader(ds, batch_size=batch_size, shuffle=shuffle,
+                          num_workers=num_workers, pin_memory=True)
+
+    return (
+        make_loader(train_s, train_a, train_ep, shuffle=True),
+        make_loader(val_s,   val_a,   val_ep,   shuffle=False),
+        make_loader(test_s,  test_a,  test_ep,  shuffle=False),
+        s_norm,
+        a_norm,
+    )
+
+
+if __name__ == "__main__":
+    # Kiểm tra nhanh
+    train_l, val_l, test_l, sn, an = build_mlp_loaders()
+    for s, a in train_l:
+        print(f"MLP batch — state: {s.shape}, action: {a.shape}")
+        break
+
+    train_l, val_l, test_l, sn, an = build_lstm_loaders()
+    for s, a in train_l:
+        print(f"LSTM batch — state: {s.shape}, action: {a.shape}")
+        break
