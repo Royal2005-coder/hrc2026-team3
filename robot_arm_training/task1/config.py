@@ -47,31 +47,34 @@ ACTION_DIM = len(ACTION_COLS)  # 10
 
 # Hyperparameters chung
 SEED         = 42
-VAL_RATIO    = 0.15   # 15% episodes dùng validation
+VAL_RATIO    = 0.20   # 20% episodes → ~18 eps, giảm noise trong val metrics
 TEST_RATIO   = 0.10   # 10% episodes dùng test
 
-# MLP config
-MLP_HIDDEN_DIMS = [512, 512, 256]
-MLP_DROPOUT     = 0.2    # tăng từ 0.1 → 0.2 để chống overfitting
+# MLP config — thu nhỏ network (424k→112k params) để giảm overfitting
+MLP_HIDDEN_DIMS = [256, 256, 128]
+MLP_DROPOUT     = 0.3
 
 # LSTM config
 LSTM_HIDDEN_DIM    = 256
 LSTM_NUM_LAYERS    = 2
-LSTM_DROPOUT       = 0.2  # tăng từ 0.1 → 0.2
-LSTM_WINDOW_SIZE   = 10
+LSTM_DROPOUT       = 0.2
+LSTM_WINDOW_SIZE   = 15   # tăng 10→15 để nắm thêm ngữ cảnh thời gian
 
 # Training config
 BATCH_SIZE       = 256
 LEARNING_RATE    = 1e-3
-WEIGHT_DECAY     = 1e-4   # tăng từ 1e-5 → 1e-4
+WEIGHT_DECAY     = 2e-4   # tăng L2 regularization
 NUM_EPOCHS       = 200
-PATIENCE         = 20
+PATIENCE         = 25     # tăng để không dừng sớm do val noise
 LR_STEP_SIZE     = 30     # không dùng nữa (cosine scheduler)
 LR_GAMMA         = 0.5
 GRAD_CLIP        = 1.0
 
 # Data augmentation: thêm Gaussian noise vào state khi train
 STATE_NOISE_STD  = 0.01   # std noise tương đối so với normalized state
+
+# EMA smoothing cho early stopping (alpha: trọng số của epoch hiện tại)
+VAL_EMA_ALPHA    = 0.3    # ema = 0.3*val + 0.7*ema_prev
 
 # Logging
 LOG_EVERY_N_EPOCHS = 5

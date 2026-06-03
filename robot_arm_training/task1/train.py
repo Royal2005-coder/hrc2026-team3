@@ -188,7 +188,9 @@ def train(args):
     a_norm.save(os.path.join(ckpt_dir, "action_norm.npz"))
 
     # ── Loop ──────────────────────────────────────────────────────────────────
-    best_val_loss   = float("inf")
+    best_val_loss   = float("inf")   # best raw val — dùng để lưu checkpoint
+    ema_val_loss    = float("inf")   # EMA val hiện tại
+    best_ema_val    = float("inf")   # best EMA val — dùng để đếm patience
     patience_count  = 0
     history         = {"train_loss": [], "val_loss": [], "lr": []}
 
@@ -231,17 +233,24 @@ def train(args):
         }
         save_checkpoint(ckpt_data, last_ckpt)
 
+        # Lưu checkpoint theo raw val loss (chọn model tốt nhất thực sự)
         if val_loss < best_val_loss:
-            best_val_loss  = val_loss
-            patience_count = 0
+            best_val_loss = val_loss
             save_checkpoint(ckpt_data, best_ckpt)
             if epoch % config.LOG_EVERY_N_EPOCHS == 0 or epoch == 1:
                 print(f"       ↳ New best val MSE: {best_val_loss:.6f}")
+
+        # Đếm patience theo EMA val — tránh dừng sớm do một epoch nhiễu
+        alpha        = config.VAL_EMA_ALPHA
+        ema_val_loss = val_loss if epoch == 1 else alpha * val_loss + (1 - alpha) * ema_val_loss
+        if ema_val_loss < best_ema_val:
+            best_ema_val   = ema_val_loss
+            patience_count = 0
         else:
             patience_count += 1
             if patience_count >= args.patience:
                 print(f"\n[train] Early stopping at epoch {epoch} "
-                      f"(no improvement for {args.patience} epochs)")
+                      f"(EMA val no improvement for {args.patience} epochs)")
                 break
 
     # ── Final test evaluation ─────────────────────────────────────────────────
