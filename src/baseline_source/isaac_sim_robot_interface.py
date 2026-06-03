@@ -231,7 +231,10 @@ class IsaacSimRobotInterface:
 
         self._setup_cameras()
 
-        self.initialize_ik(urdf_path=self.urdf_path)
+        if self.urdf_path is not None:
+            self.initialize_ik(urdf_path=self.urdf_path)
+        else:
+            logger.info("No URDF provided — skipping IK initialization (IL policy mode)")
         logger.info(f"Robot initialization complete, controlling {len(self.arm_joint_indices)} arm joints")
 
     def _setup_cameras(self):
