@@ -53,8 +53,11 @@ ACT_DIM = 10
 
 class Policy(GaussianMixin, Model):
     def __init__(self, observation_space, action_space, device, **kwargs):
-        Model.__init__(self, observation_space, action_space, device)
+        Model.__init__(self)  # skrl 2.x: no args
         GaussianMixin.__init__(self, clip_actions=False)
+        self.observation_space = observation_space
+        self.action_space = action_space
+        self.device = device
 
         self.net = nn.Sequential(
             nn.Linear(OBS_DIM, 256), nn.ELU(),
@@ -74,8 +77,11 @@ class Policy(GaussianMixin, Model):
 
 class Value(DeterministicMixin, Model):
     def __init__(self, observation_space, action_space, device, **kwargs):
-        Model.__init__(self, observation_space, action_space, device)
+        Model.__init__(self)  # skrl 2.x: no args
         DeterministicMixin.__init__(self, clip_actions=False)
+        self.observation_space = observation_space
+        self.action_space = action_space
+        self.device = device
 
         self.net = nn.Sequential(
             nn.Linear(OBS_DIM, 256), nn.ELU(),
