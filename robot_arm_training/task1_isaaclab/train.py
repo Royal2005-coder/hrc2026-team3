@@ -92,11 +92,15 @@ from agent_cfg import (
 # ---------------------------------------------------------------------------
 
 class Policy(GaussianMixin, Model):
-    """Gaussian policy (stochastic) cho PPO."""
+    """Gaussian policy (stochastic) cho PPO.
 
-    def __init__(self, obs_space, act_space, device, clip_actions: bool = False):
-        Model.__init__(self, obs_space, act_space, device)
-        GaussianMixin.__init__(self, clip_actions)
+    skrl 2.x: dùng super().__init__() thay vì gọi từng base class trực tiếp,
+    vì Model.__init__ không nhận positional args nữa.
+    """
+
+    def __init__(self, obs_space, act_space, device, clip_actions: bool = False, **kwargs):
+        super().__init__(obs_space, act_space, device,
+                         clip_actions=clip_actions, **kwargs)
 
         obs_dim = obs_space.shape[0]
         act_dim = act_space.shape[0]
@@ -120,9 +124,9 @@ class Policy(GaussianMixin, Model):
 class Value(DeterministicMixin, Model):
     """Value function (critic) cho PPO."""
 
-    def __init__(self, obs_space, act_space, device, clip_actions: bool = False):
-        Model.__init__(self, obs_space, act_space, device)
-        DeterministicMixin.__init__(self, clip_actions)
+    def __init__(self, obs_space, act_space, device, clip_actions: bool = False, **kwargs):
+        super().__init__(obs_space, act_space, device,
+                         clip_actions=clip_actions, **kwargs)
 
         obs_dim = obs_space.shape[0]
 
