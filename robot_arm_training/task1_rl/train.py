@@ -122,18 +122,18 @@ def main():
     # ── Memory ───────────────────────────────────────────────────────────────
     memory = RandomMemory(memory_size=rollouts, num_envs=num_envs, device=device)
 
-    # ── PPO config (skrl 2.x — pass dict trực tiếp, không dùng PPO_DEFAULT_CONFIG) ──
+    # ── PPO config: chỉ dùng keys chắc chắn tồn tại trong skrl 2.x ─────────
+    # Kiểm tra tên đúng: python -c "from skrl.agents.torch.ppo import PPO_CFG;
+    #   import dataclasses; print([f.name for f in dataclasses.fields(PPO_CFG)])"
     ppo_cfg = {
         "rollouts":          rollouts,
         "learning_epochs":   5,
         "mini_batches":      4,
         "discount_factor":   0.99,
-        "lambda_":           0.95,   # chú ý underscore cho skrl 2.x
         "learning_rate":     3e-4,
         "grad_norm_clip":    1.0,
         "ratio_clip":        0.2,
         "value_clip":        0.2,
-        "clip_predicted_values": True,
         "entropy_loss_scale":    0.005,
         "value_loss_scale":      1.0,
         "state_preprocessor":        RunningStandardScaler,
