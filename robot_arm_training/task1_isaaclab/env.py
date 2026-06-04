@@ -82,6 +82,9 @@ class PickPlaceEnv(DirectRLEnv):
             l_arm_init, dtype=torch.float32, device=self.device
         ).unsqueeze(0).expand(self.num_envs, -1)  # (num_envs, 7)
 
+        # ── Resolve joint indices (physics view đã sẵn sàng sau super().__init__()) ──
+        self._resolve_joint_ids()
+
     # ── Scene setup ──────────────────────────────────────────────────────────
 
     def _setup_scene(self):
@@ -132,9 +135,8 @@ class PickPlaceEnv(DirectRLEnv):
         # Ánh sáng
         light_cfg = sim_utils.DomeLightCfg(intensity=2000.0, color=(0.75, 0.75, 0.75))
         light_cfg.func("/World/skyLight", light_cfg)
-
-        # ── Resolve joint indices sau khi articulation đã được spawn ────────
-        self._resolve_joint_ids()
+        # _resolve_joint_ids() gọi sau super().__init__() vì physics view
+        # chưa sẵn sàng ở đây (cần sim.play() + scene.initialize() trước)
 
     def _resolve_joint_ids(self):
         """Map tên khớp sang chỉ số Isaac Lab."""
