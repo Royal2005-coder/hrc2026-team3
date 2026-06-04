@@ -163,8 +163,9 @@ class PickPlaceGoalEnv(gym.Env):
     ) -> Tuple[Dict[str, np.ndarray], Dict]:
         super().reset(seed=seed)
         self._world.reset()
-        # Scatter vật ngẫu nhiên sau reset, rồi step vật lý để vật ổn định
+        # Scatter vật ngẫu nhiên, rồi resume physics và settle
         self._scene.scatter_after_reset()
+        self._world.play()
         for _ in range(SETTLE_STEPS):
             self._world.step(render=False)
 
@@ -262,30 +263,82 @@ class PickPlaceGoalEnv(gym.Env):
 # ─────────────────────────────────────────────────────────────────────────────
 
 def _init_isaac(config_path: str, headless: bool):
-    """Khởi tạo Isaac Sim và trả về (sim_app, world, robot, scene_builder)."""
+    """Khởi tạo Isaac Sim và trả về (sim_app, world, robot, scene_builder).
+
+    Tuân theo đúng thứ tự khởi động của run_il_policy.py:
+      open_stage → World → DataLogger → SceneBuilder → build_all
+      → rep.step → world.play → settle → pause → build_robot
+      → IsaacSimRobotInterface.initialize → world.play → warmup
+    """
     from isaacsim import SimulationApp
 
     sim_app = SimulationApp({"headless": headless, "anti_aliasing": 0})
 
-    # Import omni sau khi SimulationApp đã ready
-    import yaml
-    from omni.isaac.core import World
+    # ── Import SAU khi SimulationApp đã ready ────────────────────────────────
+    import omni
+    import omni.replicator.core as rep
+    from isaacsim.core.api import World          # Isaac Sim 5.x API
+    from config_loader import load_config, apply_scatter_config
     from SceneBuilder import SceneBuilder
+    from DataLogger import DataLogger
     from isaac_sim_robot_interface import IsaacSimRobotInterface
 
-    with open(config_path) as f:
-        cfg = yaml.safe_load(f)
+    # ── Load config (resolve root_path sang absolute path) ───────────────────
+    cfg = load_config(os.path.abspath(config_path))
 
-    world = World(physics_dt=1 / 60.0, rendering_dt=1 / 20.0)
-    world.scene.add_default_ground_plane()
+    # ── Mở scene USD ─────────────────────────────────────────────────────────
+    omni.usd.get_context().open_stage(
+        os.path.join(cfg["root_path"], cfg["scene_usd"])
+    )
 
-    scene_builder = SceneBuilder(cfg, world)
-    scene_builder.build_all()
+    # ── Tạo World ─────────────────────────────────────────────────────────────
+    world = World(
+        stage_units_in_meters=1.0,
+        physics_dt=1.0 / 60.0,
+        rendering_dt=1.0 / 20.0,
+    )
+    world.initialize_physics()
 
-    robot = IsaacSimRobotInterface(cfg, world)
-    world.reset()
+    # ── DataLogger (disabled — không cần ghi CSV khi train RL) ───────────────
+    log_dir = os.path.join(_ROOT, "logs")
+    os.makedirs(log_dir, exist_ok=True)
+    data_logger = DataLogger(
+        enabled=False,
+        csv_path=os.path.join(log_dir, "sac_her.csv"),
+        camera_enabled=False,
+        camera_hdf5_path=os.path.join(log_dir, "sac_her.hdf5"),
+    )
 
-    return sim_app, world, robot, scene_builder
+    # ── Build scene (table + parts + box) ────────────────────────────────────
+    scene = SceneBuilder(cfg, data_logger=data_logger)
+    apply_scatter_config(cfg)
+    scene.build_all()
+    rep.orchestrator.step()   # kích hoạt Replicator graph đặt vật vào scene
+
+    # ── Settle vật lý lần đầu ────────────────────────────────────────────────
+    grasp_cfg = cfg.get("grasp", {})
+    world.play()
+    settle_steps = int(grasp_cfg.get("settle_time", 2.0) / world.get_physics_dt())
+    for _ in range(settle_steps):
+        world.step(render=False)
+
+    # ── Build robot (sau khi physics đã ổn định) ──────────────────────────────
+    world.pause()
+    scene.build_robot()
+
+    robot_prim_path = scene.robot_prim_path or "/Root/Ref_Xform/Ref"
+    robot = IsaacSimRobotInterface(
+        prim_path=robot_prim_path,
+        name="walkerS2",
+        world=world,
+    )
+    robot.initialize()
+
+    world.play()
+    for _ in range(10):
+        world.step(render=False)
+
+    return sim_app, world, robot, scene, data_logger
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -313,7 +366,7 @@ def train(
     """
     os.makedirs(save_dir, exist_ok=True)
 
-    sim_app, world, robot, scene = _init_isaac(config_path, headless)
+    sim_app, world, robot, scene, data_logger = _init_isaac(config_path, headless)
 
     env = PickPlaceGoalEnv(
         world=world,
@@ -372,6 +425,7 @@ def train(
     final_path = os.path.join(save_dir, "sac_her_final")
     model.save(final_path)
     print(f"[SAC+HER] Done. Final model → {final_path}.zip")
+    data_logger.close()
     sim_app.close()
 
 
@@ -386,7 +440,7 @@ def run_inference(
     headless:    bool = False,
 ):
     """Chạy model đã train, in kết quả từng episode."""
-    sim_app, world, robot, scene = _init_isaac(config_path, headless)
+    sim_app, world, robot, scene, data_logger = _init_isaac(config_path, headless)
     env = PickPlaceGoalEnv(world=world, robot=robot, scene_builder=scene)
 
     model = SAC.load(model_path, env=env)
@@ -414,6 +468,7 @@ def run_inference(
         )
 
     print(f"\nSuccess rate: {successes}/{n_episodes} = {100 * successes / n_episodes:.0f}%")
+    data_logger.close()
     sim_app.close()
 
 
