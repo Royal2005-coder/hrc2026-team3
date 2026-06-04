@@ -50,13 +50,31 @@ ACT_DIM = 10
 
 # ── Model definitions ────────────────────────────────────────────────────────────
 
+def _extract_states(inputs):
+    """Extract state tensor from skrl inputs dict, handling multiple possible keys."""
+    if not isinstance(inputs, dict):
+        return inputs
+    # skrl 2.x may pass None for "states" when observation_space isn't set on Model;
+    # Isaac Lab SkrlVecEnvWrapper uses "policy" key; fall back through common aliases.
+    for key in ("states", "policy", "obs", "observation"):
+        val = inputs.get(key)
+        if val is not None:
+            return val
+    # Last resort: first non-None value
+    return next((v for v in inputs.values() if v is not None), None)
+
+
 class Policy(GaussianMixin, Model):
     def __init__(self, observation_space, action_space, device, **kwargs):
         Model.__init__(self)  # skrl 2.x: no args
         GaussianMixin.__init__(self, clip_actions=False)
-        self.observation_space = observation_space
-        self.action_space = action_space
-        self.device = device
+        # Set both public and private attrs so skrl internal preprocessing works
+        self.observation_space  = observation_space
+        self._observation_space = observation_space
+        self.action_space  = action_space
+        self._action_space = action_space
+        self.device  = device
+        self._device = device
 
         self.net = nn.Sequential(
             nn.Linear(OBS_DIM, 256), nn.ELU(),
@@ -67,7 +85,7 @@ class Policy(GaussianMixin, Model):
         self.log_std    = nn.Parameter(torch.zeros(ACT_DIM))
 
     def compute(self, inputs, role=""):
-        x = inputs["states"] if isinstance(inputs, dict) else inputs
+        x = _extract_states(inputs)
         feat = self.net(x)
         mean = self.mean_layer(feat)
         log_std = self.log_std.expand(x.shape[0], -1)
@@ -78,9 +96,12 @@ class Value(DeterministicMixin, Model):
     def __init__(self, observation_space, action_space, device, **kwargs):
         Model.__init__(self)  # skrl 2.x: no args
         DeterministicMixin.__init__(self, clip_actions=False)
-        self.observation_space = observation_space
-        self.action_space = action_space
-        self.device = device
+        self.observation_space  = observation_space
+        self._observation_space = observation_space
+        self.action_space  = action_space
+        self._action_space = action_space
+        self.device  = device
+        self._device = device
 
         self.net = nn.Sequential(
             nn.Linear(OBS_DIM, 256), nn.ELU(),
@@ -90,7 +111,7 @@ class Value(DeterministicMixin, Model):
         )
 
     def compute(self, inputs, role=""):
-        x = inputs["states"] if isinstance(inputs, dict) else inputs
+        x = _extract_states(inputs)
         return self.net(x), {}
 
 
