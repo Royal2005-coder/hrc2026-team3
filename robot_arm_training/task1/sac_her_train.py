@@ -300,7 +300,8 @@ def _init_isaac(config_path: str, headless: bool):
     world.initialize_physics()
 
     # ── DataLogger (disabled — không cần ghi CSV khi train RL) ───────────────
-    log_dir = os.path.join(_ROOT, "logs")
+    # Ghi vào ~/work theo yêu cầu admin (giảm Disk IO trên workspace)
+    log_dir = os.path.expanduser("~/work/sac_her/logs")
     os.makedirs(log_dir, exist_ok=True)
     data_logger = DataLogger(
         enabled=False,
@@ -348,7 +349,7 @@ def _init_isaac(config_path: str, headless: bool):
 def train(
     config_path:     str = "configs/Part_Sorting.yaml",
     total_timesteps: int = 500_000,
-    save_dir:        str = "robot_arm_training/task1/checkpoints/sac_her",
+    save_dir:        str = "~/work/sac_her/checkpoints",
     headless:        bool = True,
     seed:            int = 42,
 ):
@@ -360,10 +361,11 @@ def train(
         1–2M   → model học tiếp cận vật
         5M+    → model có thể gắp và đặt được
 
-    Checkpoints lưu mỗi 10k steps ở save_dir/sac_her_XXXXX_steps.zip
-    TensorBoard logs ở save_dir/tb_logs/ — xem bằng:
-        tensorboard --logdir robot_arm_training/task1/checkpoints/sac_her/tb_logs
+    Checkpoints lưu mỗi 10k steps ở ~/work/sac_her/checkpoints/
+    TensorBoard logs ở ~/work/sac_her/checkpoints/tb_logs/ — xem bằng:
+        tensorboard --logdir ~/work/sac_her/checkpoints/tb_logs
     """
+    save_dir = os.path.expanduser(save_dir)
     os.makedirs(save_dir, exist_ok=True)
 
     sim_app, world, robot, scene, data_logger = _init_isaac(config_path, headless)
