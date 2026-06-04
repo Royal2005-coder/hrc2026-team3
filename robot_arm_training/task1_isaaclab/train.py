@@ -94,13 +94,19 @@ from agent_cfg import (
 class Policy(GaussianMixin, Model):
     """Gaussian policy (stochastic) cho PPO.
 
-    skrl 2.x: dùng super().__init__() thay vì gọi từng base class trực tiếp,
-    vì Model.__init__ không nhận positional args nữa.
+    skrl 2.x: Model.__init__ và GaussianMixin.__init__ chỉ nhận self.
+    obs_space / act_space / device phải set thủ công sau khi init.
     """
 
-    def __init__(self, obs_space, act_space, device, clip_actions: bool = False, **kwargs):
-        super().__init__(obs_space, act_space, device,
-                         clip_actions=clip_actions, **kwargs)
+    def __init__(self, obs_space, act_space, device, clip_actions: bool = False):
+        # skrl 2.x: init từng class riêng, không pass positional args
+        Model.__init__(self)
+        GaussianMixin.__init__(self)
+        # Store attributes theo interface mà skrl PPO agent cần
+        self.observation_space = obs_space
+        self.action_space      = act_space
+        self.device            = device if isinstance(device, torch.device) \
+                                 else torch.device(device)
 
         obs_dim = obs_space.shape[0]
         act_dim = act_space.shape[0]
@@ -124,9 +130,13 @@ class Policy(GaussianMixin, Model):
 class Value(DeterministicMixin, Model):
     """Value function (critic) cho PPO."""
 
-    def __init__(self, obs_space, act_space, device, clip_actions: bool = False, **kwargs):
-        super().__init__(obs_space, act_space, device,
-                         clip_actions=clip_actions, **kwargs)
+    def __init__(self, obs_space, act_space, device, clip_actions: bool = False):
+        Model.__init__(self)
+        DeterministicMixin.__init__(self)
+        self.observation_space = obs_space
+        self.action_space      = act_space
+        self.device            = device if isinstance(device, torch.device) \
+                                 else torch.device(device)
 
         obs_dim = obs_space.shape[0]
 
