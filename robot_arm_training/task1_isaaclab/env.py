@@ -379,9 +379,11 @@ class PickPlaceEnv(DirectRLEnv):
                 torch.sin(half_yaw),           # z
             ], dim=-1)  # (N, 4) [w, x, y, z]
 
-            part.set_world_poses(scatter_pos, quat, env_ids=env_ids)
-            vel_zeros = torch.zeros(n, 6, device=self.device)
-            part.set_velocities(vel_zeros, env_ids=env_ids)
+            root_state = torch.cat(
+                [scatter_pos, quat, torch.zeros(n, 6, device=self.device)],
+                dim=-1,
+            )  # (N, 13): pos(3) + quat_wxyz(4) + lin_vel(3) + ang_vel(3)
+            part.write_root_state_to_sim(root_state, env_ids=env_ids)
 
         # Write changes to sim
         self.robot.write_data_to_sim()
