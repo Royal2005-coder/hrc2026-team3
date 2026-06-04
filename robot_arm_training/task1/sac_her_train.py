@@ -50,7 +50,7 @@ try:
     import gymnasium as gym
     from gymnasium import spaces
     from stable_baselines3 import SAC
-    from stable_baselines3.common.buffers import HerReplayBuffer
+    from stable_baselines3.her.her_replay_buffer import HerReplayBuffer
     from stable_baselines3.common.callbacks import CheckpointCallback
 except ImportError as e:
     raise ImportError(
