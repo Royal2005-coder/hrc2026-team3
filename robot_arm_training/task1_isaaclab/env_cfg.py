@@ -110,9 +110,10 @@ class PickPlaceEnvCfg(DirectRLEnvCfg):
     decimation: int = 3           # 3 physics steps per RL step → ~20 Hz control
     episode_length_s: float = 25.0  # 500 RL steps × 3 × (1/60) ≈ 25 s
 
-    # --- Obs / act dimensions ---
-    num_observations: int = 38
-    num_actions: int = 10
+    # --- Obs / act dimensions (Isaac Lab 2.x dùng observation_space / action_space) ---
+    observation_space: int = 38
+    action_space: int = 10
+    state_space: int = 0    # không dùng asymmetric actor-critic
 
     # --- Scene ---
     scene: InteractiveSceneCfg = InteractiveSceneCfg(
