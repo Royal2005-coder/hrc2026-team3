@@ -18,7 +18,7 @@ PPO_CFG: dict = {
 
     # ── Discount & GAE ───────────────────────────────────────────────────────
     "discount_factor": 0.99,
-    "lambda_": 0.95,          # GAE lambda (skrl 2.x: renamed from "lambda" to avoid Python keyword conflict)
+    "gae_lambda": 0.95,       # GAE lambda (skrl 2.x field name)
 
     # ── Learning rate ────────────────────────────────────────────────────────
     "learning_rate": 3e-4,
@@ -37,7 +37,6 @@ PPO_CFG: dict = {
     # ── PPO clip ─────────────────────────────────────────────────────────────
     "ratio_clip": 0.2,
     "value_clip": 0.2,
-    "clip_predicted_values": True,
 
     # ── Loss coefficients ────────────────────────────────────────────────────
     "entropy_loss_scale": 0.01,
