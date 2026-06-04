@@ -122,7 +122,10 @@ class Policy(GaussianMixin, Model):
         self.log_std    = nn.Parameter(torch.zeros(act_dim))
 
     def compute(self, inputs: dict, role: str = ""):
-        x    = self.net(inputs["states"])
+        states = inputs.get("states")
+        if states is None:
+            states = inputs.get("policy")
+        x    = self.net(states)
         mean = self.mean_layer(x)
         return mean, self.log_std, {}
 
@@ -150,7 +153,10 @@ class Value(DeterministicMixin, Model):
         self.value_layer = nn.Linear(in_dim, 1)
 
     def compute(self, inputs: dict, role: str = ""):
-        x = self.net(inputs["states"])
+        states = inputs.get("states")
+        if states is None:
+            states = inputs.get("policy")
+        x = self.net(states)
         return self.value_layer(x), {}
 
 
