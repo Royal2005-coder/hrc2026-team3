@@ -76,7 +76,7 @@ _PART_MASS_PROPS = sim_utils.MassPropertiesCfg(mass=0.1)  # 100g mỗi part
 # ---------------------------------------------------------------------------
 def _make_part_cfg(prim_suffix: str, usd_path: str, init_pos: tuple) -> RigidObjectCfg:
     return RigidObjectCfg(
-        prim_path=f"{/World/envs/env_.*}/{prim_suffix}",
+        prim_path=f"/World/envs/env_.*/{prim_suffix}",
         spawn=sim_utils.UsdFileCfg(
             usd_path=usd_path,
             rigid_props=_PART_RIGID_PROPS,
