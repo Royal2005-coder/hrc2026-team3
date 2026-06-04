@@ -140,7 +140,7 @@ def main():
             "write_interval":    500,
             "checkpoint_interval": 5000,
         },
-    })
+    }
 
     agent = PPO(
         models={"policy": policy, "value": value},
