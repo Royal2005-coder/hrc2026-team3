@@ -18,7 +18,7 @@ PPO_CFG: dict = {
 
     # ── Discount & GAE ───────────────────────────────────────────────────────
     "discount_factor": 0.99,
-    "lambda": 0.95,           # GAE lambda
+    "lambda_": 0.95,          # GAE lambda (skrl 2.x: renamed from "lambda" to avoid Python keyword conflict)
 
     # ── Learning rate ────────────────────────────────────────────────────────
     "learning_rate": 3e-4,
