@@ -103,7 +103,7 @@ class PickPlaceEnv(DirectRLEnv):
             collision_props=sim_utils.CollisionPropertiesCfg(collision_enabled=True),
         )
         table_spawn.func(
-            "{ENV_REGEX_NS}/Table",
+            "/World/envs/env_.*/Table",
             table_spawn,
             translation=(0.75, 0.3, 0.5),
             orientation=(1.0, 0.0, 0.0, 0.0),
@@ -116,7 +116,7 @@ class PickPlaceEnv(DirectRLEnv):
             collision_props=sim_utils.CollisionPropertiesCfg(collision_enabled=True),
         )
         box_spawn.func(
-            "{ENV_REGEX_NS}/Box",
+            "/World/envs/env_.*/Box",
             box_spawn,
             translation=(1.2, 0.3, 1.05),
             orientation=(1.0, 0.0, 0.0, 0.0),
