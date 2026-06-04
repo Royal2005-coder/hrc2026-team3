@@ -39,7 +39,7 @@ from env import PickPlaceEnv
 
 from isaaclab_rl.skrl import SkrlVecEnvWrapper
 
-from skrl.agents.torch.ppo import PPO, PPO_DEFAULT_CONFIG
+from skrl.agents.torch.ppo import PPO
 from skrl.memories.torch import RandomMemory
 from skrl.models.torch import DeterministicMixin, GaussianMixin, Model
 from skrl.resources.preprocessors.torch import RunningStandardScaler
@@ -116,9 +116,8 @@ def main():
     # ── Memory ───────────────────────────────────────────────────────────────
     memory = RandomMemory(memory_size=rollouts, num_envs=num_envs, device=device)
 
-    # ── PPO config (skrl 2.x) ─────────────────────────────────────────────────
-    ppo_cfg = PPO_DEFAULT_CONFIG.copy()
-    ppo_cfg.update({
+    # ── PPO config (skrl 2.x — pass dict trực tiếp, không dùng PPO_DEFAULT_CONFIG) ──
+    ppo_cfg = {
         "rollouts":          rollouts,
         "learning_epochs":   5,
         "mini_batches":      4,
