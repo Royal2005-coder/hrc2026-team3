@@ -42,7 +42,6 @@ from isaaclab_rl.skrl import SkrlVecEnvWrapper
 from skrl.agents.torch.ppo import PPO
 from skrl.memories.torch import RandomMemory
 from skrl.models.torch import DeterministicMixin, GaussianMixin, Model
-from skrl.resources.preprocessors.torch import RunningStandardScaler
 from skrl.trainers.torch import SequentialTrainer
 
 OBS_DIM = 38
@@ -122,31 +121,7 @@ def main():
     # ── Memory ───────────────────────────────────────────────────────────────
     memory = RandomMemory(memory_size=rollouts, num_envs=num_envs, device=device)
 
-    # ── PPO config: chỉ dùng keys chắc chắn tồn tại trong skrl 2.x ─────────
-    # Kiểm tra tên đúng: python -c "from skrl.agents.torch.ppo import PPO_CFG;
-    #   import dataclasses; print([f.name for f in dataclasses.fields(PPO_CFG)])"
-    ppo_cfg = {
-        "rollouts":          rollouts,
-        "learning_epochs":   5,
-        "mini_batches":      4,
-        "discount_factor":   0.99,
-        "learning_rate":     3e-4,
-        "grad_norm_clip":    1.0,
-        "ratio_clip":        0.2,
-        "value_clip":        0.2,
-        "entropy_loss_scale":    0.005,
-        "value_loss_scale":      1.0,
-        "state_preprocessor":        RunningStandardScaler,
-        "state_preprocessor_kwargs": {"size": OBS_DIM, "device": device},
-        "value_preprocessor":        RunningStandardScaler,
-        "value_preprocessor_kwargs": {"size": 1,       "device": device},
-        "experiment": {
-            "directory":         os.path.expanduser("~/work/task1_ppo"),
-            "experiment_name":   "run1",
-            "write_interval":    500,
-            "checkpoint_interval": 5000,
-        },
-    }
+    ppo_cfg = {}
 
     agent = PPO(
         models={"policy": policy, "value": value},
