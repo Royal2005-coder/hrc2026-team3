@@ -28,7 +28,7 @@ from isaaclab.assets import Articulation, RigidObject
 import isaaclab.sim as sim_utils
 from isaaclab.sim.spawners.from_files import GroundPlaneCfg, spawn_ground_plane
 
-from .env_cfg import PickPlaceEnvCfg, USD_TABLE, USD_BOX
+from env_cfg import PickPlaceEnvCfg, USD_TABLE, USD_BOX
 
 
 class PickPlaceEnv(DirectRLEnv):

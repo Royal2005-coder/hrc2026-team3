@@ -1,21 +1,22 @@
 """
 Training entry point: PPO + skrl cho Task 1 pick-and-place với Isaac Lab.
 
-Cách chạy (dùng Isaac Sim Python hoặc isaaclab.sh):
-    # Headless, 4096 envs, 100M steps
-    python robot_arm_training/task1_isaaclab/train.py --headless
+Cách chạy — dùng isaaclab.sh (recommended) hoặc python trực tiếp:
+    # Headless, 512 envs (debug trước)
+    /opt/IsaacLab/isaaclab.sh -p robot_arm_training/task1_isaaclab/train.py \
+        --headless --num_envs 512
 
-    # Debug: 512 envs, 5M steps
-    python robot_arm_training/task1_isaaclab/train.py --headless \\
-        --num_envs 512 --total_timesteps 5000000
+    # Scale lên 4096 envs
+    /opt/IsaacLab/isaaclab.sh -p robot_arm_training/task1_isaaclab/train.py \
+        --headless --num_envs 4096
 
     # Tiếp tục từ checkpoint
-    python robot_arm_training/task1_isaaclab/train.py --headless \\
-        --checkpoint ~/work/ppo_task1/checkpoints/agent_50000.pt
+    /opt/IsaacLab/isaaclab.sh -p robot_arm_training/task1_isaaclab/train.py \
+        --headless --checkpoint ~/work/ppo_task1/checkpoints/agent_50000.pt
 
     # Inference (GUI)
-    python robot_arm_training/task1_isaaclab/train.py \\
-        --checkpoint ~/work/ppo_task1/checkpoints/agent_best.pt \\
+    /opt/IsaacLab/isaaclab.sh -p robot_arm_training/task1_isaaclab/train.py \
+        --checkpoint ~/work/ppo_task1/checkpoints/agent_best.pt \
         --eval_only --num_envs 16
 
 TensorBoard:
@@ -30,6 +31,9 @@ from __future__ import annotations
 import argparse
 import os
 import sys
+
+# Thêm thư mục chứa train.py vào sys.path để import env_cfg / env / agent_cfg
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 # ── Isaac Sim / Isaac Lab launcher phải được gọi TRƯỚC khi import bất kỳ thứ gì ─
 # AppLauncher xử lý SimulationApp + các extension cần thiết
@@ -72,8 +76,6 @@ from skrl.models.torch import DeterministicMixin, GaussianMixin, Model
 from skrl.resources.preprocessors.torch import RunningStandardScaler
 from skrl.trainers.torch import SequentialTrainer
 from skrl.utils import set_seed
-
-from isaaclab_tasks.utils.wrappers.skrl import SkrlVecEnvWrapper  # Isaac Lab ↔ skrl bridge
 
 from env_cfg import PickPlaceEnvCfg
 from env import PickPlaceEnv
@@ -156,8 +158,8 @@ def main():
     env_raw = PickPlaceEnv(cfg=env_cfg, render_mode="human" if not args.headless else None)
 
     # ── Wrap cho skrl ─────────────────────────────────────────────────────
-    # SkrlVecEnvWrapper chuyển Isaac Lab env sang interface mà skrl hiểu
-    env = wrap_env(env_raw, wrapper="isaaclab")
+    # skrl auto-detect Isaac Lab DirectRLEnv (không cần chỉ định wrapper type)
+    env = wrap_env(env_raw)
 
     device = env.device
 
