@@ -121,10 +121,15 @@ class Policy(GaussianMixin, Model):
         self.mean_layer = nn.Linear(in_dim, act_dim)
         self.log_std    = nn.Parameter(torch.zeros(act_dim))
 
-    def compute(self, inputs: dict, role: str = ""):
-        states = inputs.get("states")
-        if states is None:
-            states = inputs.get("policy")
+    def compute(self, inputs, role: str = ""):
+        if isinstance(inputs, torch.Tensor):
+            states = inputs
+        else:
+            states = inputs.get("states")
+            if states is None:
+                states = next(
+                    (v for v in inputs.values() if isinstance(v, torch.Tensor)), None
+                )
         x    = self.net(states)
         mean = self.mean_layer(x)
         return mean, self.log_std, {}
@@ -152,10 +157,15 @@ class Value(DeterministicMixin, Model):
         self.net         = nn.Sequential(*layers)
         self.value_layer = nn.Linear(in_dim, 1)
 
-    def compute(self, inputs: dict, role: str = ""):
-        states = inputs.get("states")
-        if states is None:
-            states = inputs.get("policy")
+    def compute(self, inputs, role: str = ""):
+        if isinstance(inputs, torch.Tensor):
+            states = inputs
+        else:
+            states = inputs.get("states")
+            if states is None:
+                states = next(
+                    (v for v in inputs.values() if isinstance(v, torch.Tensor)), None
+                )
         x = self.net(states)
         return self.value_layer(x), {}
 
@@ -180,6 +190,28 @@ def main():
     # ── Wrap cho skrl ─────────────────────────────────────────────────────
     # skrl auto-detect Isaac Lab DirectRLEnv (không cần chỉ định wrapper type)
     env = wrap_env(env_raw)
+
+    # Isaac Lab DirectRLEnv trả về {"policy": tensor} thay vì flat tensor.
+    # skrl 2.x PPO.act() gọi inputs.get("states") trên dict này → None,
+    # rồi build {"states": None} trước khi gọi policy.act() → key "policy" bị mất.
+    # Patch reset/step để unwrap dict → flat tensor TRƯỚC khi PPO xử lý.
+    _orig_reset, _orig_step = env.reset, env.step
+
+    def _unpack_obs(obs):
+        if isinstance(obs, dict):
+            return obs.get("policy", next(iter(obs.values())))
+        return obs
+
+    def _reset_flat(*a, **kw):
+        obs, info = _orig_reset(*a, **kw)
+        return _unpack_obs(obs), info
+
+    def _step_flat(*a, **kw):
+        obs, rew, ter, trc, info = _orig_step(*a, **kw)
+        return _unpack_obs(obs), rew, ter, trc, info
+
+    env.reset = _reset_flat
+    env.step  = _step_flat
 
     device = env.device
 
