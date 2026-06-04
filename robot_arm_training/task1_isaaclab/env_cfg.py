@@ -8,6 +8,9 @@ trước khi SimulationApp khởi động.
 
 from __future__ import annotations
 
+import os
+import yaml
+
 import isaaclab.sim as sim_utils
 from isaaclab.actuators import ImplicitActuatorCfg
 from isaaclab.assets import ArticulationCfg, RigidObjectCfg
@@ -17,9 +20,20 @@ from isaaclab.sim import SimulationCfg
 from isaaclab.utils import configclass
 
 # ---------------------------------------------------------------------------
-# Đường dẫn assets  (root_path từ configs/Part_Sorting.yaml: ../../assets/resources)
+# Tính ASSETS_ROOT từ configs/Part_Sorting.yaml (giống config_loader.py)
+# → tự động đúng trên mọi server, không hardcode path
 # ---------------------------------------------------------------------------
-ASSETS_ROOT = "/home/ncd/workspace/assets/resources"
+_HERE        = os.path.dirname(os.path.abspath(__file__))
+_PROJECT_ROOT = os.path.dirname(os.path.dirname(_HERE))  # lên 2 cấp: task1_isaaclab/ → robot_arm_training/ → project/
+_CONFIG_FILE  = os.path.join(_PROJECT_ROOT, "configs", "Part_Sorting.yaml")
+
+def _resolve_assets_root() -> str:
+    with open(_CONFIG_FILE, "r") as f:
+        cfg = yaml.safe_load(f)
+    config_dir = os.path.dirname(_CONFIG_FILE)
+    return os.path.abspath(os.path.join(config_dir, cfg["root_path"]))
+
+ASSETS_ROOT = _resolve_assets_root()
 
 USD_ROBOT  = f"{ASSETS_ROOT}/Collected_s2_v1_ecbg/s2_v1.usd"
 USD_PART_A = f"{ASSETS_ROOT}/Collected_Task1_PartA_ori_color/Task1_PartA.usd"
