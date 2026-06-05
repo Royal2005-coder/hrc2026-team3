@@ -135,6 +135,7 @@ class PartSortingEnvCfg(DirectRLEnvCfg):
     # Prim path derived from robot USD: R_camera_link/.../R_wrist_Camera
     wrist_camera: TiledCameraCfg = TiledCameraCfg(
         prim_path="/World/envs/env_.*/Robot/R_camera_link/R_camera_link/R_wrist_camera/R_wrist_Camera",
+        spawn=None,  # camera prim already exists inside robot USD
         data_types=["distance_to_image_plane"],
         width=32,
         height=32,
