@@ -71,7 +71,8 @@ class PartSortingEnv(DirectRLEnv):
         )
 
         # ── Grasp signal from wrist camera (0=open/empty, 1=grasped) ─────────
-        self._grasp_signal = torch.zeros(self.num_envs, dtype=torch.float32, device=self.device)
+        self._grasp_signal      = torch.zeros(self.num_envs, dtype=torch.float32, device=self.device)
+        self._prev_grasp_signal = torch.zeros(self.num_envs, dtype=torch.float32, device=self.device)
 
         # ── Left arm fixed targets ────────────────────────────────────────────
         l_arm_init = [
@@ -218,6 +219,7 @@ class PartSortingEnv(DirectRLEnv):
             obj_vecs.append(torch.cat([pos, quat[:, 1:2], quat[:, 2:3], quat[:, 3:4], quat[:, 0:1]], dim=-1))
 
         # Grasp detection: min depth in centre 8×8 patch of wrist depth image
+        self._prev_grasp_signal = self._grasp_signal.clone()
         depth = self.wrist_cam.data.output["distance_to_image_plane"]  # (N, H, W, 1)
         H, W  = depth.shape[1], depth.shape[2]
         cy, cx = H // 2, W // 2
@@ -226,7 +228,11 @@ class PartSortingEnv(DirectRLEnv):
         self._grasp_signal = (min_depth < self.cfg.grasp_depth_threshold).float()
         grasp_obs = self._grasp_signal.unsqueeze(1)  # (N, 1)
 
-        obs = torch.cat([r_arm, r_fing, gripper, tcp_pos, *obj_vecs, grasp_obs], dim=-1)  # (N, 42)
+        # Sorted status: 4 bits cho policy biết vật nào đã xong
+        obj_positions_now = torch.stack([p.data.root_pos_w for p in self.parts], dim=1)
+        sorted_status = self._get_sorted_mask(obj_positions_now).float()  # (N, 4)
+
+        obs = torch.cat([r_arm, r_fing, gripper, tcp_pos, *obj_vecs, grasp_obs, sorted_status], dim=-1)  # (N, 46)
         return {"policy": obs}
 
     # ── Rewards ──────────────────────────────────────────────────────────────
@@ -260,11 +266,16 @@ class PartSortingEnv(DirectRLEnv):
         dist_obj_to_target = torch.linalg.norm(nearest_obj_pos - correct_target, dim=-1)
         reward += is_grasping.float() * (-dist_obj_to_target * 2.0 + 5.0)
 
-        # 3. Bonus per vật đã vào đúng bin
+        # 3. Release bonus: vừa thả (prev=1 → curr=0) và vật gần đúng bin
+        just_released = self._prev_grasp_signal.bool() & ~self._grasp_signal.bool()
+        in_bin_radius = dist_obj_to_target < (self.cfg.success_threshold * 2.0)
+        reward += just_released.float() * in_bin_radius.float() * self.cfg.release_bonus
+
+        # 4. Bonus per vật đã vào đúng bin (mỗi step)
         n_sorted = self._get_sorted_mask(obj_positions).sum(dim=-1).float()  # (N,)
         reward += n_sorted * 20.0
 
-        # 4. Step penalty
+        # 5. Step penalty
         reward += -0.01
 
         return reward
@@ -313,8 +324,10 @@ class PartSortingEnv(DirectRLEnv):
         joint_vel = torch.zeros_like(joint_pos)
         self.robot.set_joint_position_target(joint_pos, env_ids=env_ids)
         self.robot.write_joint_state_to_sim(joint_pos, joint_vel, env_ids=env_ids)
-        self._joint_targets[env_ids] = joint_pos
-        self._gripper_state[env_ids] = -1.0
+        self._joint_targets[env_ids]      = joint_pos
+        self._gripper_state[env_ids]      = -1.0
+        self._grasp_signal[env_ids]       = 0.0
+        self._prev_grasp_signal[env_ids]  = 0.0
 
         # Scatter parts ngẫu nhiên (không chồng lên nhau)
         for part in self.parts:

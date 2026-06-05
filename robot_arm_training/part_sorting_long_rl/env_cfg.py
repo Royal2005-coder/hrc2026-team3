@@ -126,8 +126,8 @@ class PartSortingEnvCfg(DirectRLEnvCfg):
     episode_length_s: float = 30.0  # dài hơn task1 vì 4 grasps riêng biệt
 
     # --- Obs / act ---
-    # 38 base + 3 tcp_pos + 1 grasp_signal = 42
-    observation_space: int = 42
+    # 38 base + 3 tcp_pos + 1 grasp_signal + 4 sorted_status = 46
+    observation_space: int = 46
     action_space: int = 10
     state_space: int = 0
 
@@ -142,6 +142,9 @@ class PartSortingEnvCfg(DirectRLEnvCfg):
 
     # Depth threshold (metres): pixels closer than this → object in gripper
     grasp_depth_threshold: float = 0.12
+
+    # Bonus khi thả đúng bin (large to overcome sparse-reward problem)
+    release_bonus: float = 50.0
 
     # --- Scene ---
     scene: InteractiveSceneCfg = InteractiveSceneCfg(
