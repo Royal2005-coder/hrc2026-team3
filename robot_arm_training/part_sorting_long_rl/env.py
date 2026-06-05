@@ -24,7 +24,7 @@ import torch
 
 from isaaclab.envs import DirectRLEnv
 from isaaclab.assets import Articulation, RigidObject
-from isaaclab.sensors import TiledCamera
+from isaaclab.sensors import ContactSensor
 import isaaclab.sim as sim_utils
 from isaaclab.sim.spawners.from_files import GroundPlaneCfg, spawn_ground_plane
 
@@ -102,8 +102,8 @@ class PartSortingEnv(DirectRLEnv):
             self.scene.rigid_objects[f"part{i}"] = part
             self.parts.append(part)
 
-        self.wrist_cam = TiledCamera(self.cfg.wrist_camera)
-        self.scene.sensors["wrist_cam"] = self.wrist_cam
+        self.finger_contact = ContactSensor(self.cfg.finger_contact)
+        self.scene.sensors["finger_contact"] = self.finger_contact
 
         # Table
         table_spawn = sim_utils.UsdFileCfg(
@@ -218,14 +218,11 @@ class PartSortingEnv(DirectRLEnv):
             quat = part.data.root_quat_w  # [w, x, y, z]
             obj_vecs.append(torch.cat([pos, quat[:, 1:2], quat[:, 2:3], quat[:, 3:4], quat[:, 0:1]], dim=-1))
 
-        # Grasp detection: min depth in centre 8×8 patch of wrist depth image
+        # Grasp detection: contact force trên ngón tay phải với bất kỳ part nào
         self._prev_grasp_signal = self._grasp_signal.clone()
-        depth = self.wrist_cam.data.output["distance_to_image_plane"]  # (N, H, W, 1)
-        H, W  = depth.shape[1], depth.shape[2]
-        cy, cx = H // 2, W // 2
-        centre_depth = depth[:, cy-4:cy+4, cx-4:cx+4, 0]  # (N, 8, 8)
-        min_depth = centre_depth.reshape(self.num_envs, -1).min(dim=-1).values  # (N,)
-        self._grasp_signal = (min_depth < self.cfg.grasp_depth_threshold).float()
+        contact_forces = self.finger_contact.data.net_forces_w  # (N, 1, 3)
+        contact_mag = torch.linalg.norm(contact_forces[:, 0, :], dim=-1)  # (N,)
+        self._grasp_signal = (contact_mag > self.cfg.grasp_contact_threshold).float()
         grasp_obs = self._grasp_signal.unsqueeze(1)  # (N, 1)
 
         # Sorted status: 4 bits cho policy biết vật nào đã xong

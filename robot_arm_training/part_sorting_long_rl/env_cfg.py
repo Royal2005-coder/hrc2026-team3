@@ -16,7 +16,7 @@ from isaaclab.actuators import ImplicitActuatorCfg
 from isaaclab.assets import ArticulationCfg, RigidObjectCfg
 from isaaclab.envs import DirectRLEnvCfg
 from isaaclab.scene import InteractiveSceneCfg
-from isaaclab.sensors import TiledCameraCfg
+from isaaclab.sensors import ContactSensorCfg
 from isaaclab.sim import SimulationCfg
 from isaaclab.utils import configclass
 
@@ -131,18 +131,21 @@ class PartSortingEnvCfg(DirectRLEnvCfg):
     action_space: int = 10
     state_space: int = 0
 
-    # --- Wrist camera (depth only, small res to minimise overhead) ---
-    # Prim path derived from robot USD: R_camera_link/.../R_wrist_Camera
-    wrist_camera: TiledCameraCfg = TiledCameraCfg(
-        prim_path="/World/envs/env_.*/Robot/R_camera_link/R_camera_link/R_wrist_camera/R_wrist_Camera",
-        spawn=None,  # camera prim already exists inside robot USD
-        data_types=["distance_to_image_plane"],
-        width=32,
-        height=32,
+    # --- Contact sensor on right finger (grasp detection, no camera needed) ---
+    finger_contact: ContactSensorCfg = ContactSensorCfg(
+        prim_path="/World/envs/env_.*/Robot/R_finger1_link",
+        history_length=3,
+        track_air_time=False,
+        filter_prim_paths_expr=[
+            "/World/envs/env_.*/Part0",
+            "/World/envs/env_.*/Part1",
+            "/World/envs/env_.*/Part2",
+            "/World/envs/env_.*/Part3",
+        ],
     )
 
-    # Depth threshold (metres): pixels closer than this → object in gripper
-    grasp_depth_threshold: float = 0.12
+    # Contact force threshold (N): above this → object is grasped
+    grasp_contact_threshold: float = 0.5
 
     # Bonus khi thả đúng bin (large to overcome sparse-reward problem)
     release_bonus: float = 50.0
