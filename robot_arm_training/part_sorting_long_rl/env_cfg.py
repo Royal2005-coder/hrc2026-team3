@@ -126,8 +126,8 @@ class PartSortingEnvCfg(DirectRLEnvCfg):
     episode_length_s: float = 30.0  # dài hơn task1 vì 4 grasps riêng biệt
 
     # --- Obs / act ---
-    # 38 base + 3 tcp_pos + 1 grasp_signal + 4 sorted_status = 46
-    observation_space: int = 46
+    # 38 base + 3 tcp_pos + 3 finger1_pos + 3 finger2_pos + 1 grasp_signal + 4 sorted_status = 52
+    observation_space: int = 52
     action_space: int = 10
     state_space: int = 0
 

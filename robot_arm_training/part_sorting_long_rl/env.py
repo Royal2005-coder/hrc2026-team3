@@ -173,6 +173,20 @@ class PartSortingEnv(DirectRLEnv):
                 self._tcp_body_idx = idxs[0]
                 break
 
+        self._r_finger1_body_idx = None
+        for name in ["R_finger1_link", "R_finger1"]:
+            idxs, _ = self.robot.find_bodies(name)
+            if idxs:
+                self._r_finger1_body_idx = idxs[0]
+                break
+
+        self._r_finger2_body_idx = None
+        for name in ["R_finger2_link", "R_finger2"]:
+            idxs, _ = self.robot.find_bodies(name)
+            if idxs:
+                self._r_finger2_body_idx = idxs[0]
+                break
+
         self._joint_targets = self.robot.data.default_joint_pos.clone()
 
     # ── Physics step ─────────────────────────────────────────────────────────
@@ -212,6 +226,11 @@ class PartSortingEnv(DirectRLEnv):
         gripper = self._gripper_state.unsqueeze(1)
         tcp_pos = self._get_tcp_pos()  # (N, 3)
 
+        # Fingertip positions — fallback to TCP nếu không tìm thấy body
+        body_pos = self.robot.data.body_pos_w
+        finger1_pos = body_pos[:, self._r_finger1_body_idx, :] if self._r_finger1_body_idx is not None else tcp_pos
+        finger2_pos = body_pos[:, self._r_finger2_body_idx, :] if self._r_finger2_body_idx is not None else tcp_pos
+
         obj_vecs = []
         for part in self.parts:
             pos  = part.data.root_pos_w
@@ -229,7 +248,7 @@ class PartSortingEnv(DirectRLEnv):
         obj_positions_now = torch.stack([p.data.root_pos_w for p in self.parts], dim=1)
         sorted_status = self._get_sorted_mask(obj_positions_now).float()  # (N, 4)
 
-        obs = torch.cat([r_arm, r_fing, gripper, tcp_pos, *obj_vecs, grasp_obs, sorted_status], dim=-1)  # (N, 46)
+        obs = torch.cat([r_arm, r_fing, gripper, tcp_pos, finger1_pos, finger2_pos, *obj_vecs, grasp_obs, sorted_status], dim=-1)  # (N, 52)
         return {"policy": obs}
 
     # ── Rewards ──────────────────────────────────────────────────────────────
