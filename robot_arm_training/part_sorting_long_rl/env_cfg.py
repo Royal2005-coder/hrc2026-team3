@@ -152,10 +152,17 @@ class PartSortingEnvCfg(DirectRLEnvCfg):
         prim_path="/World/envs/env_.*/Robot",
         spawn=sim_utils.UsdFileCfg(
             usd_path=USD_ROBOT,
-            rigid_props=sim_utils.RigidBodyPropertiesCfg(disable_gravity=False),
+            rigid_props=sim_utils.RigidBodyPropertiesCfg(
+                disable_gravity=False,
+                max_depenetration_velocity=1.0,
+            ),
             articulation_props=sim_utils.ArticulationRootPropertiesCfg(
                 enabled_self_collisions=False,
                 fix_root_link=True,
+            ),
+            collision_props=sim_utils.CollisionPropertiesCfg(
+                contact_offset=0.005,
+                rest_offset=0.0,
             ),
         ),
         init_state=ArticulationCfg.InitialStateCfg(
