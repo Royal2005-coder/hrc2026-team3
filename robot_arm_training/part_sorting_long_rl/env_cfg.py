@@ -16,6 +16,7 @@ from isaaclab.actuators import ImplicitActuatorCfg
 from isaaclab.assets import ArticulationCfg, RigidObjectCfg
 from isaaclab.envs import DirectRLEnvCfg
 from isaaclab.scene import InteractiveSceneCfg
+from isaaclab.sensors import TiledCameraCfg
 from isaaclab.sim import SimulationCfg
 from isaaclab.utils import configclass
 
@@ -125,9 +126,22 @@ class PartSortingEnvCfg(DirectRLEnvCfg):
     episode_length_s: float = 30.0  # dài hơn task1 vì 4 grasps riêng biệt
 
     # --- Obs / act ---
-    observation_space: int = 38
+    # 38 base + 3 tcp_pos + 1 grasp_signal = 42
+    observation_space: int = 42
     action_space: int = 10
     state_space: int = 0
+
+    # --- Wrist camera (depth only, small res to minimise overhead) ---
+    # Prim path derived from robot USD: R_camera_link/.../R_wrist_Camera
+    wrist_camera: TiledCameraCfg = TiledCameraCfg(
+        prim_path="/World/envs/env_.*/Robot/R_camera_link/R_camera_link/R_wrist_camera/R_wrist_Camera",
+        data_types=["distance_to_image_plane"],
+        width=32,
+        height=32,
+    )
+
+    # Depth threshold (metres): pixels closer than this → object in gripper
+    grasp_depth_threshold: float = 0.12
 
     # --- Scene ---
     scene: InteractiveSceneCfg = InteractiveSceneCfg(

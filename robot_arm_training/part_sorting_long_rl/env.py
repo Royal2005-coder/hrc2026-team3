@@ -24,6 +24,7 @@ import torch
 
 from isaaclab.envs import DirectRLEnv
 from isaaclab.assets import Articulation, RigidObject
+from isaaclab.sensors import TiledCamera
 import isaaclab.sim as sim_utils
 from isaaclab.sim.spawners.from_files import GroundPlaneCfg, spawn_ground_plane
 
@@ -69,6 +70,9 @@ class PartSortingEnv(DirectRLEnv):
             (self.num_envs,), -1.0, dtype=torch.float32, device=self.device
         )
 
+        # ── Grasp signal from wrist camera (0=open/empty, 1=grasped) ─────────
+        self._grasp_signal = torch.zeros(self.num_envs, dtype=torch.float32, device=self.device)
+
         # ── Left arm fixed targets ────────────────────────────────────────────
         l_arm_init = [
             cfg.robot.init_state.joint_pos.get(j, 0.0)
@@ -96,6 +100,9 @@ class PartSortingEnv(DirectRLEnv):
             part = RigidObject(getattr(self.cfg, f"part{i}"))
             self.scene.rigid_objects[f"part{i}"] = part
             self.parts.append(part)
+
+        self.wrist_cam = TiledCamera(self.cfg.wrist_camera)
+        self.scene.sensors["wrist_cam"] = self.wrist_cam
 
         # Table
         table_spawn = sim_utils.UsdFileCfg(
@@ -202,6 +209,7 @@ class PartSortingEnv(DirectRLEnv):
         r_arm   = joint_pos[:, self._r_arm_ids]
         r_fing  = joint_pos[:, self._r_finger_ids]
         gripper = self._gripper_state.unsqueeze(1)
+        tcp_pos = self._get_tcp_pos()  # (N, 3)
 
         obj_vecs = []
         for part in self.parts:
@@ -209,7 +217,16 @@ class PartSortingEnv(DirectRLEnv):
             quat = part.data.root_quat_w  # [w, x, y, z]
             obj_vecs.append(torch.cat([pos, quat[:, 1:2], quat[:, 2:3], quat[:, 3:4], quat[:, 0:1]], dim=-1))
 
-        obs = torch.cat([r_arm, r_fing, gripper, *obj_vecs], dim=-1)  # (N, 38)
+        # Grasp detection: min depth in centre 8×8 patch of wrist depth image
+        depth = self.wrist_cam.data.output["distance_to_image_plane"]  # (N, H, W, 1)
+        H, W  = depth.shape[1], depth.shape[2]
+        cy, cx = H // 2, W // 2
+        centre_depth = depth[:, cy-4:cy+4, cx-4:cx+4, 0]  # (N, 8, 8)
+        min_depth = centre_depth.reshape(self.num_envs, -1).min(dim=-1).values  # (N,)
+        self._grasp_signal = (min_depth < self.cfg.grasp_depth_threshold).float()
+        grasp_obs = self._grasp_signal.unsqueeze(1)  # (N, 1)
+
+        obs = torch.cat([r_arm, r_fing, gripper, tcp_pos, *obj_vecs, grasp_obs], dim=-1)  # (N, 42)
         return {"policy": obs}
 
     # ── Rewards ──────────────────────────────────────────────────────────────
@@ -234,8 +251,8 @@ class PartSortingEnv(DirectRLEnv):
         min_dist_to_obj, nearest_idx = dist_tcp_to_unsorted.min(dim=-1)
         reward += -min_dist_to_obj.clamp(max=2.0) * 1.0
 
-        # 2. Khi đang gắp: kéo vật về đúng bin của nó
-        is_grasping = (min_dist_to_obj < 0.05) & (self._gripper_state > 0.0)  # (N,)
+        # 2. Khi đang gắp: dùng wrist camera signal thay vì proximity heuristic
+        is_grasping = self._grasp_signal.bool()  # (N,)
         nearest_obj_pos = obj_positions[
             torch.arange(self.num_envs, device=self.device), nearest_idx
         ]  # (N, 3)
