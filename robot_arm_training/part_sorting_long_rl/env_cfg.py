@@ -167,6 +167,7 @@ class PartSortingEnvCfg(DirectRLEnvCfg):
                 enabled_self_collisions=False,
                 fix_root_link=True,
             ),
+            activate_contact_sensors=True,
         ),
         init_state=ArticulationCfg.InitialStateCfg(
             pos=(0.7, -0.2, 0.9),
