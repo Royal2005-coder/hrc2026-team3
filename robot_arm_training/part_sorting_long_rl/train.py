@@ -81,7 +81,7 @@ class Policy(GaussianMixin, Model):
         states = inputs if isinstance(inputs, torch.Tensor) else (
             inputs.get("states") or next(v for v in inputs.values() if isinstance(v, torch.Tensor))
         )
-        return self.mean_layer(self.net(states)), self.log_std, {}
+        return self.mean_layer(self.net(states)), {"log_std": self.log_std}
 
 
 class Value(DeterministicMixin, Model):
