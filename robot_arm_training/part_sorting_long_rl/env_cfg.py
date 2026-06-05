@@ -114,7 +114,13 @@ class PartSortingEnvCfg(DirectRLEnvCfg):
     """
 
     # --- Simulation ---
-    sim: SimulationCfg = SimulationCfg(dt=1.0 / 60.0, render_interval=3)
+    sim: SimulationCfg = SimulationCfg(
+        dt=1.0 / 60.0,
+        render_interval=3,
+        physx=sim_utils.PhysxCfg(
+            gpu_collision_stack_size=2**30,  # 1 GB — prevents buffer overflow with 512+ envs
+        ),
+    )
     decimation: int = 3
     episode_length_s: float = 30.0  # dài hơn task1 vì 4 grasps riêng biệt
 
