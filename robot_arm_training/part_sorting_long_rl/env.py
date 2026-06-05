@@ -24,7 +24,6 @@ import torch
 
 from isaaclab.envs import DirectRLEnv
 from isaaclab.assets import Articulation, RigidObject
-from isaaclab.sensors import ContactSensor
 import isaaclab.sim as sim_utils
 from isaaclab.sim.spawners.from_files import GroundPlaneCfg, spawn_ground_plane
 
@@ -70,9 +69,10 @@ class PartSortingEnv(DirectRLEnv):
             (self.num_envs,), -1.0, dtype=torch.float32, device=self.device
         )
 
-        # ── Grasp signal from wrist camera (0=open/empty, 1=grasped) ─────────
+        # ── Grasp signal (0=not grasping, 1=grasping) ───────────────────────
         self._grasp_signal      = torch.zeros(self.num_envs, dtype=torch.float32, device=self.device)
         self._prev_grasp_signal = torch.zeros(self.num_envs, dtype=torch.float32, device=self.device)
+        self._nearest_idx       = torch.zeros(self.num_envs, dtype=torch.long,    device=self.device)
 
         # ── Left arm fixed targets ────────────────────────────────────────────
         l_arm_init = [
@@ -102,8 +102,6 @@ class PartSortingEnv(DirectRLEnv):
             self.scene.rigid_objects[f"part{i}"] = part
             self.parts.append(part)
 
-        self.finger_contact = ContactSensor(self.cfg.finger_contact)
-        self.scene.sensors["finger_contact"] = self.finger_contact
 
         # Table
         table_spawn = sim_utils.UsdFileCfg(
@@ -232,21 +230,27 @@ class PartSortingEnv(DirectRLEnv):
         finger2_pos = body_pos[:, self._r_finger2_body_idx, :] if self._r_finger2_body_idx is not None else tcp_pos
 
         obj_vecs = []
+        obj_positions_now = torch.stack([p.data.root_pos_w for p in self.parts], dim=1)  # (N, 4, 3)
         for part in self.parts:
             pos  = part.data.root_pos_w
             quat = part.data.root_quat_w  # [w, x, y, z]
             obj_vecs.append(torch.cat([pos, quat[:, 1:2], quat[:, 2:3], quat[:, 3:4], quat[:, 0:1]], dim=-1))
 
-        # Grasp detection: contact force trên ngón tay phải với bất kỳ part nào
+        # Grasp detection: finger thực sự đóng + TCP gần object + gripper command đóng
         self._prev_grasp_signal = self._grasp_signal.clone()
-        contact_forces = self.finger_contact.data.net_forces_w  # (N, 1, 3)
-        contact_mag = torch.linalg.norm(contact_forces[:, 0, :], dim=-1)  # (N,)
-        self._grasp_signal = (contact_mag > self.cfg.grasp_contact_threshold).float()
+        sorted_mask = self._get_sorted_mask(obj_positions_now)
+        dist_tcp = torch.linalg.norm(tcp_pos.unsqueeze(1) - obj_positions_now, dim=-1)  # (N, 4)
+        dist_tcp[sorted_mask] = 1e3  # bỏ qua vật đã vào bin
+        min_dist_to_obj, self._nearest_idx = dist_tcp.min(dim=-1)  # cache lại cho _get_rewards
+
+        r_fing_actual = joint_pos[:, self._r_finger_ids].mean(dim=-1)  # (N,)
+        finger_closed = r_fing_actual > self.cfg.grasp_finger_threshold
+        tcp_near_obj  = min_dist_to_obj < self.cfg.grasp_proximity
+        self._grasp_signal = (finger_closed & tcp_near_obj & (self._gripper_state > 0.0)).float()
         grasp_obs = self._grasp_signal.unsqueeze(1)  # (N, 1)
 
         # Sorted status: 4 bits cho policy biết vật nào đã xong
-        obj_positions_now = torch.stack([p.data.root_pos_w for p in self.parts], dim=1)
-        sorted_status = self._get_sorted_mask(obj_positions_now).float()  # (N, 4)
+        sorted_status = sorted_mask.float()  # (N, 4)
 
         obs = torch.cat([r_arm, r_fing, gripper, tcp_pos, finger1_pos, finger2_pos, *obj_vecs, grasp_obs, sorted_status], dim=-1)  # (N, 52)
         return {"policy": obs}
@@ -262,18 +266,18 @@ class PartSortingEnv(DirectRLEnv):
             [p.data.root_pos_w for p in self.parts], dim=1
         )  # (N, 4, 3)
 
-        # 1. Kéo TCP đến gần vật nào chưa vào đúng bin
-        not_sorted = ~self._get_sorted_mask(obj_positions)  # (N, 4) bool
-        dist_tcp_to_objs = torch.linalg.norm(
+        # 1. Kéo TCP đến gần vật chưa sort — dùng nearest_idx đã tính trong _get_observations
+        nearest_idx = self._nearest_idx
+        dist_tcp_to_unsorted = torch.linalg.norm(
             tcp_pos.unsqueeze(1) - obj_positions, dim=-1
         )  # (N, 4)
-        # Chỉ tính khoảng cách đến vật chưa sort xong; vật đã sort thì ignore
-        dist_tcp_to_unsorted = dist_tcp_to_objs.clone()
-        dist_tcp_to_unsorted[~not_sorted] = 1e3  # loại ra nếu đã vào bin
-        min_dist_to_obj, nearest_idx = dist_tcp_to_unsorted.min(dim=-1)
+        dist_tcp_to_unsorted[~(~self._get_sorted_mask(obj_positions))] = 1e3
+        min_dist_to_obj = dist_tcp_to_unsorted[
+            torch.arange(self.num_envs, device=self.device), nearest_idx
+        ]
         reward += -min_dist_to_obj.clamp(max=2.0) * 1.0
 
-        # 2. Khi đang gắp: dùng wrist camera signal thay vì proximity heuristic
+        # 2. Khi đang gắp: finger đóng + gần object + gripper command
         is_grasping = self._grasp_signal.bool()  # (N,)
         nearest_obj_pos = obj_positions[
             torch.arange(self.num_envs, device=self.device), nearest_idx

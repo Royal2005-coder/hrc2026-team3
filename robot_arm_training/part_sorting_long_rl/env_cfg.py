@@ -16,7 +16,6 @@ from isaaclab.actuators import ImplicitActuatorCfg
 from isaaclab.assets import ArticulationCfg, RigidObjectCfg
 from isaaclab.envs import DirectRLEnvCfg
 from isaaclab.scene import InteractiveSceneCfg
-from isaaclab.sensors import ContactSensorCfg
 from isaaclab.sim import SimulationCfg
 from isaaclab.utils import configclass
 
@@ -131,21 +130,12 @@ class PartSortingEnvCfg(DirectRLEnvCfg):
     action_space: int = 10
     state_space: int = 0
 
-    # --- Contact sensor on right finger (grasp detection, no camera needed) ---
-    finger_contact: ContactSensorCfg = ContactSensorCfg(
-        prim_path="/World/envs/env_.*/Robot/R_finger1_link",
-        history_length=3,
-        track_air_time=False,
-        filter_prim_paths_expr=[
-            "/World/envs/env_.*/Part0",
-            "/World/envs/env_.*/Part1",
-            "/World/envs/env_.*/Part2",
-            "/World/envs/env_.*/Part3",
-        ],
-    )
+    # Grasp detection: finger joint angle (rad) phải vượt ngưỡng này
+    # 0.0 = mở hoàn toàn, 0.04 = đóng hoàn toàn → 0.015 ≈ nửa chừng
+    grasp_finger_threshold: float = 0.015
 
-    # Contact force threshold (N): above this → object is grasped
-    grasp_contact_threshold: float = 0.5
+    # TCP phải trong vòng này (m) với object thì mới tính là gắp
+    grasp_proximity: float = 0.06
 
     # Bonus khi thả đúng bin (large to overcome sparse-reward problem)
     release_bonus: float = 50.0
@@ -167,7 +157,6 @@ class PartSortingEnvCfg(DirectRLEnvCfg):
                 enabled_self_collisions=False,
                 fix_root_link=True,
             ),
-            activate_contact_sensors=True,
         ),
         init_state=ArticulationCfg.InitialStateCfg(
             pos=(0.7, -0.2, 0.9),
