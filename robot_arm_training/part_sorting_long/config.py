@@ -49,8 +49,8 @@ MLP_DROPOUT     = 0.3
 LSTM_HIDDEN_DIM  = 256
 LSTM_NUM_LAYERS  = 2
 LSTM_DROPOUT     = 0.2
-# Episode = 768 frames; grasps every ~192 frames → window covers ~1 grasp cycle
-LSTM_WINDOW_SIZE = 30
+# Episode = 768 frames; 4 grasps → 192 frames/grasp → window = 1 full grasp cycle
+LSTM_WINDOW_SIZE = 192
 
 # ── Training ──────────────────────────────────────────────────────────────────
 BATCH_SIZE      = 512
