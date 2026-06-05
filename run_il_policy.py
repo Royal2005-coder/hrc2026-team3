@@ -127,19 +127,21 @@ for episode in range(args.episodes):
     print(f"\n[IL] ===== Episode {episode + 1}/{args.episodes} =====")
     runner.reset()
 
-    # Lấy pose các vật thể
     part_poses = scene.get_parts_world_poses()
     print(f"[IL] {len(part_poses)} parts detected")
 
     gripper_state = [-1.0, -1.0]   # cả hai gripper đang mở
+    _prev_gripper_closed = False
 
     # Stall detection: if arm MAE stays < threshold for this many steps → stuck
     _STALL_MAE_THRESH  = 0.002   # rad
-    _STALL_MIN_STEPS   = 60      # steps below threshold before declaring stall
+    _STALL_MIN_STEPS   = 120     # tăng lên để cho phép robot dừng ngắn giữa các grasp
     _stall_counter     = 0
-    _prev_mae          = None
 
     for step in range(args.max_steps):
+
+        # ── Cập nhật pose vật thể mỗi bước (quan trọng: model cần biết vật đang ở đâu) ──
+        part_poses = scene.get_parts_world_poses()
 
         # ── Lấy state từ sim ──────────────────────────────────────────────
         joint_states = robot.get_joint_states()
@@ -158,7 +160,14 @@ for episode in range(args.episodes):
 
         # Cập nhật trạng thái gripper cho bước tiếp theo
         # action[9] = right_gripper; left arm cố định nên luôn -1 (mở)
+        new_gripper_closed = float(action[9]) > 0
         gripper_state = [-1.0, float(action[9])]
+
+        # Log khi gripper chuyển trạng thái
+        if new_gripper_closed != _prev_gripper_closed:
+            state_str = "CLOSE" if new_gripper_closed else "OPEN"
+            print(f"  step={step:4d} | gripper → {state_str}")
+        _prev_gripper_closed = new_gripper_closed
 
         # ── Bước simulation ───────────────────────────────────────────────
         world.step(render=not args.headless)
