@@ -118,7 +118,7 @@ class PartSortingEnvCfg(DirectRLEnvCfg):
         dt=1.0 / 60.0,
         render_interval=3,
         physx=sim_utils.PhysxCfg(
-            gpu_collision_stack_size=2**30,  # 1 GB — prevents buffer overflow with 512+ envs
+            gpu_collision_stack_size=2**31 - 1,  # 2 GB max signed int32 — for 512 envs
         ),
     )
     decimation: int = 3
