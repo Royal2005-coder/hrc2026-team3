@@ -303,8 +303,14 @@ def run_evolution(env, env_raw, policy_model, num_generations: int = 1000, n_ste
 
         if gen % log_every == 0:
             tag = "  <-- SPIKE (thoát stagnation)" if spike_triggered else ""
+            # In thêm 5 fitness thấp nhất — kiểm tra xem "worst" đứng yên là do 1 cá thể
+            # bị kẹt, hay cả 1 CỤM cá thể suy biến (genome khác nhau, layout khác nhau
+            # mỗi thế hệ) đều hội tụ về cùng 1 giá trị "đáy" do hành vi cực đoan/bão hoà
+            # lấn át hoàn toàn ảnh hưởng của layout ngẫu nhiên.
+            worst5 = np.sort(fitness)[:5]
             print(f"[GA] gen {gen:4d}/{num_generations} | best={fitness[best_idx]:.2f} | "
                   f"mean={fitness.mean():.2f} | worst={fitness.min():.2f} | "
+                  f"worst5={np.round(worst5, 2)} | "
                   f"mutation_rate={cur_mutation_rate:.3f} | stagnation={stagnation_count}{tag}")
 
         if save_dir is not None:
