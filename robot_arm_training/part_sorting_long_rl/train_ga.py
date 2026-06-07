@@ -107,8 +107,10 @@ def main():
         "cập nhật lại để genome_to_state_dict() map đúng kiến trúc."
     )
 
-    # 1 instance Policy dùng làm "khung" — nạp lại trọng số của từng cá thể trước khi forward
-    policy_model = Policy(env.observation_space, env.action_space, device)
+    # 1 instance Policy dùng làm "khung" — nạp lại trọng số của từng cá thể trước khi forward.
+    # .to(device) BẮT BUỘC: Policy.__init__ chỉ lưu self.device chứ không tự chuyển tham số
+    # nn.Module sang GPU (việc đó bình thường do skrl.Agent làm hộ khi train qua train.py).
+    policy_model = Policy(env.observation_space, env.action_space, device).to(device)
 
     run_dir = os.path.expanduser("~/work/ga_part_sorting")
     print(f"[GA] {pop_size} cá thể chia sẻ {env.num_envs} env (~{env.num_envs // pop_size} env/cá thể)")
