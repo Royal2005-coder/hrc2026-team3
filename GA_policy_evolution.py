@@ -198,7 +198,9 @@ def evaluate_population(pop: np.ndarray, env, policy_model, env_slices: list[np.
 
     obs, _ = env.reset()
     for _ in range(n_steps):
-        actions = torch.zeros((NUM_ENVS, ACT_DIM), device=env.device)
+        # Dùng env.num_envs thực tế (không phải hằng số NUM_ENVS) — cho phép chạy với
+        # --num_envs khác (vd 512 khi debug) mà không lệch shape khi env.step()
+        actions = torch.zeros((env.num_envs, ACT_DIM), device=env.device)
         for i, ids in enumerate(env_slices):
             sd = genome_to_state_dict(decoded[i])
             policy_model.load_state_dict({k: torch.as_tensor(v, dtype=torch.float32, device=env.device)
