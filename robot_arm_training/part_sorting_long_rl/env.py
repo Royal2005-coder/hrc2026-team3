@@ -293,7 +293,18 @@ class PartSortingEnv(DirectRLEnv):
         min_dist_to_obj = dist_tcp_to_unsorted[
             torch.arange(self.num_envs, device=self.device), nearest_idx
         ]
-        reward += -min_dist_to_obj.clamp(max=2.0) * 1.0
+        # Trần clamp(max=...) chỉ để chặn giá trị canh giữ 1e3 (khi cả 4 vật đã sort —
+        # dist_tcp_to_unsorted bị gán 1e3 ở dòng trên) khỏi làm phần thưởng "nổ" âm.
+        # KHÔNG được đặt trần thấp hơn khoảng cách thực tế trong cảnh (TCP ở tư thế mặc
+        # định cách vùng rải vật > 2.0 đơn vị) — nếu không, MỌI cá thể có tay chưa từng
+        # tới gần vật sẽ nhận đúng cùng 1 giá trị thưởng không đổi mỗi bước (-2.0), tạo
+        # ra 1 "vùng phẳng" hoàn toàn không có gradient để tiến hoá leo lên — đây chính
+        # là nguyên nhân khiến gần như toàn bộ quần thể GA bị kẹt ở "trần" -289.44/-241.2
+        # (= (-2.0 - 0.01 step penalty) * 24 bước * số env/cá thể), không có tín hiệu nào
+        # phân biệt cá thể tốt/xấu khi tay còn ở xa. Nâng trần lên xa hơn mọi khoảng cách
+        # thực tế có thể xảy ra (nhưng vẫn thấp hơn nhiều so với canh giữ 1e3) để khoảng
+        # cách LUÔN đóng góp gradient tỉ lệ thuận, dù tay đang ở rất xa vật.
+        reward += -min_dist_to_obj.clamp(max=10.0) * 1.0
 
         # 2. Khi đang gắp: finger đóng + gần object + gripper command
         is_grasping = self._grasp_signal.bool()  # (N,)
