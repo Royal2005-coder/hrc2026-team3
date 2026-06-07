@@ -46,6 +46,11 @@ class PartSortingEnv(DirectRLEnv):
         self._fing_scale = torch.tensor((f_max - f_min) / 2.0, device=self.device)
         self._fing_bias  = torch.tensor((f_max + f_min) / 2.0, device=self.device)
 
+        # Tốc độ thay đổi target khớp tối đa mỗi bước điều khiển — 10% biên độ khớp/bước
+        # (giống giới hạn vận tốc khớp của tay máy thật). Xem _pre_physics_step để biết
+        # lý do cần giới hạn này.
+        self._arm_max_delta = 0.2 * self._arm_scale
+
         # ── Target positions per part type ───────────────────────────────────
         # part0, part1 (PartA) → bin_a_targets[0], bin_a_targets[1]
         # part2, part3 (PartB) → bin_b_targets[0], bin_b_targets[1]
@@ -192,8 +197,21 @@ class PartSortingEnv(DirectRLEnv):
     def _pre_physics_step(self, actions: torch.Tensor) -> None:
         self._actions = actions.clone().clamp(-1.0, 1.0)
 
-        r_arm_targets  = self._actions[:, :7] * self._arm_scale  + self._arm_bias
+        r_arm_desired  = self._actions[:, :7] * self._arm_scale  + self._arm_bias
         r_fing_targets = self._actions[:, 7:9] * self._fing_scale + self._fing_bias
+
+        # Giới hạn tốc độ thay đổi target khớp tay phải: KHÔNG ghi đè tuyệt đối
+        # (target có thể "nhảy" hết biên này sang biên kia chỉ trong 1 bước nếu action
+        # bão hoà ở ±1 — vd policy GA/ES có trọng số cực đoan). Ghi đè trực tiếp khiến
+        # robot giật cục dữ dội, tự va chạm, sinh số lượng tiếp xúc khổng lồ và làm
+        # tràn buffer va chạm GPU của PhysX (PxGpuDynamicsMemoryConfig::collisionStackSize
+        # overflow -> "Contacts have been dropped" -> vật rơi tự do xuyên qua bàn ->
+        # toàn bộ cá thể "cực đoan" hội tụ về cùng 1 quỹ đạo suy biến, cùng 1 fitness —
+        # xem debug_ga_pipeline.py). Thay vào đó chỉ cho phép target tiến tới giá trị
+        # mong muốn tối đa _arm_max_delta mỗi bước, giống giới hạn vận tốc khớp thật.
+        cur_arm_targets = self._joint_targets[:, self._r_arm_ids]
+        delta = (r_arm_desired - cur_arm_targets).clamp(-self._arm_max_delta, self._arm_max_delta)
+        r_arm_targets = cur_arm_targets + delta
 
         self._gripper_state = torch.where(
             self._actions[:, 9] > 0.0,
