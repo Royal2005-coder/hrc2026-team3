@@ -70,7 +70,7 @@ min_max  = [-0.2, 0.2]             # khoảng giá trị của 1 trọng số sa
                                    # (thử thu hẹp từ [-1, 1] -> [-0.2, 0.2]: gần thang trọng số init
                                    # mặc định của PyTorch hơn, giảm bão hoà Tanh ở các lớp ẩn — đồng thời
                                    # giảm biên độ "nhảy" mỗi khi 1 chữ số gen bị đột biến, từ ~0.2 xuống ~0.04)
-mutation_rate = 0.01               # đổi min_max thành [-10, 10] hoặc tuỳ chỉnh nếu cần biên độ lớn hơn
+mutation_rate = 0.03               # đổi min_max thành [-10, 10] hoặc tuỳ chỉnh nếu cần biên độ lớn hơn
 
 
 # ============================================================
