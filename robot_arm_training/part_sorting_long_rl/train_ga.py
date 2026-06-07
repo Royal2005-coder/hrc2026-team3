@@ -1,10 +1,13 @@
 """
-Training entry point: GA (neuroevolution) cho Part Sorting Long — chia sẻ đúng 1
-simulation context với 100 cá thể (xem GA_policy_evolution.py ở repo root).
+Training entry point: Evolution Strategies (neuroevolution) cho Part Sorting Long
+— chia sẻ đúng 1 simulation context với 100 bản sao nhiễu (xem GA_policy_evolution.py
+ở repo root để biết lý do chuyển từ GA digit-encoding cổ điển sang ES).
 
-Khác với train.py (PPO): không có gradient/value-network, mỗi cá thể GA "mang"
-toàn bộ trọng số mạng Policy (mã hoá thành 10 đoạn gen 0-9 / trọng số), được nạp
-lần lượt vào CÙNG 1 instance Policy để rollout trên dải env riêng của nó.
+Khác với train.py (PPO): không có gradient/value-network qua backprop. Thay vào
+đó, một vector trọng số trung tâm `theta` (= chính trọng số Policy, số thực)
+được nhiễu Gaussian thành `pop_size` bản sao, mỗi bản sao nạp vào CÙNG 1 instance
+Policy để rollout trên dải env riêng, rồi `theta` được cập nhật theo ước lượng
+natural-gradient từ fitness của các bản sao (OpenAI-ES, Salimans et al. 2017).
 
 Cách chạy:
     /opt/IsaacLab/isaaclab.sh -p robot_arm_training/part_sorting_long_rl/train_ga.py \
@@ -91,7 +94,7 @@ def main():
     set_seed(args.seed)
 
     if args.num_envs != pop_size and args.num_envs % pop_size != 0:
-        print(f"[GA] Lưu ý: {args.num_envs} env không chia hết cho {pop_size} cá thể "
+        print(f"[ES] Lưu ý: {args.num_envs} env không chia hết cho {pop_size} bản sao "
               f"-> sẽ rải phần dư đều (xem split_envs).")
 
     env_cfg = PartSortingEnvCfg()
@@ -121,12 +124,12 @@ def main():
     policy_model = Policy(env.observation_space, env.action_space, device).to(device)
 
     run_dir = os.path.expanduser("~/work/ga_part_sorting")
-    print(f"[GA] {pop_size} cá thể chia sẻ {env.num_envs} env (~{env.num_envs // pop_size} env/cá thể)")
-    print(f"[GA] npar (tổng tham số Policy {OBS_DIM}->{HIDDEN}->{ACT_DIM}) = {npar}")
-    print(f"[GA] Train {args.generations} thế hệ x {args.rollout_steps} bước rollout/thế hệ")
-    print(f"[GA] Lưu best genome + lịch sử fitness -> {run_dir}")
+    print(f"[ES] {pop_size} bản sao nhiễu chia sẻ {env.num_envs} env (~{env.num_envs // pop_size} env/bản sao)")
+    print(f"[ES] npar (tổng tham số Policy {OBS_DIM}->{HIDDEN}->{ACT_DIM}) = {npar}")
+    print(f"[ES] Train {args.generations} thế hệ x {args.rollout_steps} bước rollout/thế hệ")
+    print(f"[ES] Lưu theta (policy đang train) + lịch sử fitness -> {run_dir}")
 
-    final_pop, history = run_evolution(
+    theta_final, history = run_evolution(
         env=env,
         policy_model=policy_model,
         num_generations=args.generations,
@@ -135,8 +138,9 @@ def main():
         save_dir=run_dir,
     )
 
-    print(f"[GA] Xong. Best fitness cuối cùng = {history[-1]:.2f} "
-          f"(genome lưu tại {os.path.join(run_dir, 'best_genome.npy')})")
+    print(f"[ES] Xong. Best fitness cuối cùng = {history[-1]:.2f} "
+          f"(theta đã train lưu tại {os.path.join(run_dir, 'theta.npy')}, "
+          f"||theta||={(theta_final ** 2).sum() ** 0.5:.2f})")
 
     env.close()
     simulation_app.close()
