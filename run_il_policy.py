@@ -14,6 +14,7 @@ Command:
 """
 
 import argparse
+import json
 import os
 import sys
 
@@ -30,6 +31,9 @@ def parse_args():
                    help="Số physics steps tối đa mỗi episode")
     p.add_argument("--episodes", type=int, default=3,
                    help="Số episode chạy liên tiếp")
+    p.add_argument("--debug_obj_pose", action="store_true",
+                   help="Ghi log pose vật (obj0..3) mỗi step ra logs/inference_obj_pose.json "
+                        "để đối chiếu với train (xem robot_arm_training/part_sorting_long/check_obj_pose.py)")
     return p.parse_args()
 
 args = parse_args()
@@ -124,6 +128,10 @@ runner.load()
 # ─────────────────────────────────────────────────────────────────────────────
 PHYSICS_DT = world.get_physics_dt()
 
+# Log pose vật lúc inference để đối chiếu với train (xem check_obj_pose.py)
+_OBJ_POSE_LOG_PATH = os.path.join(base_dir, "logs", "inference_obj_pose.json")
+_obj_pose_log = {}
+
 for episode in range(args.episodes):
     print(f"\n[IL] ===== Episode {episode + 1}/{args.episodes} =====")
     runner.reset()
@@ -133,6 +141,8 @@ for episode in range(args.episodes):
 
     gripper_state = [-1.0, -1.0]   # cả hai gripper đang mở
     _prev_gripper_closed = False
+    if args.debug_obj_pose:
+        _obj_pose_log[f"episode_{episode + 1}"] = []
 
     # Stall detection: if arm MAE stays < threshold for this many steps → stuck
     _STALL_MAE_THRESH  = 0.002   # rad
@@ -150,6 +160,17 @@ for episode in range(args.episodes):
             print(f"[IL] Step {step}: cannot read joint states, skipping")
             world.step(render=True)
             continue
+
+        # ── Ghi log pose vật (obj0..3) để đối chiếu với train ──────────────
+        if args.debug_obj_pose:
+            state_dbg = runner.build_state_vector(joint_states, part_poses, gripper_state)
+            obj_block = state_dbg[-28:].reshape(4, 7)   # (4, [x,y,z,qx,qy,qz,qw])
+            frame_log = {"step": step}
+            for i in range(4):
+                frame_log[f"obj{i}"] = dict(zip(
+                    ["x", "y", "z", "qx", "qy", "qz", "qw"], obj_block[i].tolist()
+                ))
+            _obj_pose_log[f"episode_{episode + 1}"].append(frame_log)
 
         # ── Chạy model → predict action ───────────────────────────────────
         action = runner.step(
@@ -198,6 +219,15 @@ for episode in range(args.episodes):
     for _ in range(30):
         world.step(render=False)
     print(f"[IL] Episode {episode + 1} done, robot reset")
+
+if args.debug_obj_pose:
+    os.makedirs(os.path.dirname(_OBJ_POSE_LOG_PATH), exist_ok=True)
+    with open(_OBJ_POSE_LOG_PATH, "w") as f:
+        json.dump(_obj_pose_log, f, indent=2)
+    print(f"\n[IL] Đã ghi log pose vật lúc inference → {_OBJ_POSE_LOG_PATH}")
+    print("[IL] So sánh với train bằng:")
+    print("       python robot_arm_training/part_sorting_long/check_obj_pose.py "
+          f"--mode compare --inference_log {_OBJ_POSE_LOG_PATH}")
 
 # ─────────────────────────────────────────────────────────────────────────────
 print("\n[IL] Finished. Cleaning up...")
