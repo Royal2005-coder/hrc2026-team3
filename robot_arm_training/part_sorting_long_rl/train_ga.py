@@ -128,6 +128,7 @@ def main():
 
     final_pop, history = run_evolution(
         env=env,
+        env_raw=env_raw,
         policy_model=policy_model,
         num_generations=args.generations,
         n_steps=args.rollout_steps,

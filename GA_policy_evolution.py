@@ -176,11 +176,13 @@ def mutation(pop: np.ndarray, mutation_rate: float) -> np.ndarray:
 # 7. ĐÁNH GIÁ FITNESS — chạy CHUNG 1 simulation context, mỗi cá thể dùng dải env riêng
 #    (khung sườn — điền phần forward/env.step khi chạy trong IsaacLab runtime)
 # ============================================================
-def evaluate_population(pop: np.ndarray, env, policy_model, env_slices: list[np.ndarray],
+def evaluate_population(pop: np.ndarray, env, env_raw, policy_model, env_slices: list[np.ndarray],
                         n_steps: int) -> np.ndarray:
     """Đánh giá fitness cho cả quần thể trong 1 lượt rollout chung.
 
-    env          : PartSortingEnv đã khởi tạo với scene.num_envs == NUM_ENVS
+    env          : PartSortingEnv đã khởi tạo với scene.num_envs == NUM_ENVS, BỌC qua wrap_env()
+    env_raw      : chính instance PartSortingEnv đó nhưng KHÔNG bọc — cần để gọi thẳng
+                   _reset_idx() (xem ghi chú "ép reset toàn bộ" bên dưới)
     policy_model : 1 instance Policy (train.py) dùng làm "khung", nạp lại trọng số
                    của từng cá thể trước khi forward dải env tương ứng
     env_slices   : kết quả split_envs(NUM_ENVS, pop_size) — env_slices[i] là các env_id
@@ -199,6 +201,18 @@ def evaluate_population(pop: np.ndarray, env, policy_model, env_slices: list[np.
     decoded = decode(pop)
     fitness = np.zeros(pop_size, dtype=np.float64)
 
+    # Ép _reset_idx() chạy cho TOÀN BỘ env trước mỗi lượt đánh giá.
+    # env.reset() (DirectRLEnv) chỉ thực sự scatter lại 4 vật cho các env đang ở trạng thái
+    # "done" — ngay sau khi vừa khởi tạo / vừa reset xong KHÔNG env nào "done", nên các lần
+    # gọi env.reset() sau đó gần như no-op: layout (vị trí 4 vật + robot) bị đóng băng y
+    # nguyên từ thế hệ đầu tiên (đã xác minh bằng debug_ga_pipeline.py — Test C: 2 lần
+    # reset() liên tiếp cho vị trí vật lệch nhau đúng 0.000000m). Hệ quả: tất cả các thế hệ
+    # đánh giá quần thể trên CÙNG 1 layout cố định -> phần lớn dải env hội tụ về 1 quỹ đạo
+    # không phụ thuộc action (Test B), khiến fitness "đứng yên" giống hệt qua hàng trăm thế
+    # hệ bất kể genome. Gọi thẳng _reset_idx() trên env GỐC (chưa bọc wrap_env) cho mọi
+    # env_id để đảm bảo mỗi thế hệ thực sự bắt đầu từ 1 layout random mới.
+    all_ids = torch.arange(env.num_envs, device=env.device)
+    env_raw._reset_idx(all_ids)
     obs, _ = env.reset()
     for _ in range(n_steps):
         # Dùng env.num_envs thực tế (không phải hằng số NUM_ENVS) — cho phép chạy với
@@ -223,7 +237,7 @@ def evaluate_population(pop: np.ndarray, env, policy_model, env_slices: list[np.
 # ============================================================
 # 8. VÒNG LẶP TRAIN — lặp qua các thế hệ: đánh giá -> chọn lọc -> lai ghép -> đột biến
 # ============================================================
-def run_evolution(env, policy_model, num_generations: int = 1000, n_steps: int = 24,
+def run_evolution(env, env_raw, policy_model, num_generations: int = 1000, n_steps: int = 24,
                   log_every: int = 1, save_dir: str | None = None,
                   adaptive_mutation: bool = True,
                   stagnation_patience: int = 20,
@@ -264,7 +278,7 @@ def run_evolution(env, policy_model, num_generations: int = 1000, n_steps: int =
     stagnation_count = 0
 
     for gen in range(num_generations):
-        fitness = evaluate_population(pop, env, policy_model, env_slices, n_steps)
+        fitness = evaluate_population(pop, env, env_raw, policy_model, env_slices, n_steps)
         best_idx = int(np.argmax(fitness))
         best_now = float(fitness[best_idx])
         history.append(best_now)
