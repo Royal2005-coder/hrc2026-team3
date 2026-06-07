@@ -70,9 +70,12 @@ class Policy(GaussianMixin, Model):
         self.log_std    = nn.Parameter(torch.zeros(act_space.shape[0]))
 
     def compute(self, inputs, role=""):
-        states = inputs if isinstance(inputs, torch.Tensor) else (
-            inputs.get("states") or next(v for v in inputs.values() if isinstance(v, torch.Tensor))
-        )
+        if isinstance(inputs, torch.Tensor):
+            states = inputs
+        elif "states" in inputs:
+            states = inputs["states"]          # tránh `or` trên tensor nhiều phần tử (bool ambiguous)
+        else:
+            states = next(v for v in inputs.values() if isinstance(v, torch.Tensor))
         return self.mean_layer(self.net(states)), {"log_std": self.log_std}
 
 
