@@ -63,7 +63,10 @@ class Policy(GaussianMixin, Model):
 
         layers, in_dim = [], obs_space.shape[0]
         for out_dim in HIDDEN:
-            layers += [nn.Linear(in_dim, out_dim), nn.ELU()]
+            # Tanh thay vì ELU (như train.py): đầu ra bị chặn [-1, 1], khớp với khoảng giá trị
+            # gen sau giải mã (min_max trong GA_policy_evolution.py) — không tính gradient nên
+            # không lo "vanishing gradient" như khi train bằng PPO
+            layers += [nn.Linear(in_dim, out_dim), nn.Tanh()]
             in_dim = out_dim
         self.net        = nn.Sequential(*layers)
         self.mean_layer = nn.Linear(in_dim, act_space.shape[0])
