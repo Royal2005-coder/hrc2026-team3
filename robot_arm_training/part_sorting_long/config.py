@@ -52,6 +52,18 @@ LSTM_DROPOUT     = 0.2
 # Episode = 768 frames; 4 grasps → 192 frames/grasp → window = 1 full grasp cycle
 LSTM_WINDOW_SIZE = 192
 
+# ── Action-Chunking hyperparameters (kiểu ACT) ────────────────────────────────
+# Dự đoán cùng lúc CHUNK_SIZE bước hành động liên tiếp từ 1 state.
+# 32 ≈ 1/6 chu kỳ gắp (192 frame/grasp) — đủ dài để mượt, đủ ngắn để chính xác.
+CHUNK_SIZE       = 32
+CHUNK_HIDDEN_DIM = 256
+CHUNK_NUM_LAYERS = 4
+CHUNK_NUM_HEADS  = 8
+CHUNK_DROPOUT    = 0.1
+# Số bước thực thi trước khi re-plan (action queue). <= CHUNK_SIZE.
+# Nhỏ hơn CHUNK_SIZE để tận dụng temporal ensembling khi suy luận.
+CHUNK_EXEC_HORIZON = 8
+
 # ── Training ──────────────────────────────────────────────────────────────────
 BATCH_SIZE      = 512
 LEARNING_RATE   = 1e-3

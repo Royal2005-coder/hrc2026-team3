@@ -2,10 +2,12 @@
 Training Behavioral Cloning cho Part_Sorting Long dataset (756 episodes, 4 grasps/ep).
 
 Cách dùng:
-    python train.py                    # MLP, default hyperparams
-    python train.py --model lstm       # LSTM với sliding window
+    python train.py                          # MLP, default hyperparams
+    python train.py --model lstm             # LSTM với sliding window
+    python train.py --model chunk            # Action-chunking (kiểu ACT, không ảnh)
     python train.py --model mlp --epochs 200 --lr 5e-4 --batch 256
     python train.py --model lstm --window 30 --patience 40
+    python train.py --model chunk --chunk_size 32 --patience 40
 """
 
 import argparse
@@ -25,7 +27,7 @@ from torch.optim import Adam
 from torch.optim.lr_scheduler import CosineAnnealingLR
 
 import config
-from data_loader import build_mlp_loaders, build_lstm_loaders
+from data_loader import build_mlp_loaders, build_lstm_loaders, build_chunk_loaders
 from model import build_model, count_parameters
 
 
@@ -123,6 +125,34 @@ def eval_epoch_lstm(model, loader, criterion, device) -> float:
     return meter.avg
 
 
+def train_epoch_chunk(model, loader, optimizer, criterion, device, grad_clip: float) -> float:
+    model.train()
+    meter = AverageMeter()
+    for states, chunks in loader:
+        states = states.to(device)
+        chunks = chunks.to(device)               # (B, K, A)
+        optimizer.zero_grad()
+        preds = model(states)                    # (B, K, A)
+        loss = criterion(preds, chunks)
+        loss.backward()
+        nn.utils.clip_grad_norm_(model.parameters(), grad_clip)
+        optimizer.step()
+        meter.update(loss.item(), states.size(0))
+    return meter.avg
+
+
+@torch.no_grad()
+def eval_epoch_chunk(model, loader, criterion, device) -> float:
+    model.eval()
+    meter = AverageMeter()
+    for states, chunks in loader:
+        states = states.to(device)
+        chunks = chunks.to(device)
+        preds = model(states)
+        meter.update(criterion(preds, chunks).item(), states.size(0))
+    return meter.avg
+
+
 # ─────────────────────────────────────────────────────────────────────────────
 # Checkpoint
 # ─────────────────────────────────────────────────────────────────────────────
@@ -153,11 +183,16 @@ def train(args):
             build_mlp_loaders(batch_size=args.batch)
         train_fn = train_epoch_mlp
         eval_fn  = eval_epoch_mlp
-    else:
+    elif args.model == "lstm":
         train_loader, val_loader, test_loader, s_norm, a_norm = \
             build_lstm_loaders(batch_size=args.batch, window_size=args.window)
         train_fn = train_epoch_lstm
         eval_fn  = eval_epoch_lstm
+    else:  # chunk
+        train_loader, val_loader, test_loader, s_norm, a_norm = \
+            build_chunk_loaders(batch_size=args.batch, chunk_size=args.chunk_size)
+        train_fn = train_epoch_chunk
+        eval_fn  = eval_epoch_chunk
 
     # ── Model ─────────────────────────────────────────────────────────────────
     model = build_model(args.model).to(device)
@@ -254,13 +289,15 @@ def train(args):
 
 def parse_args():
     p = argparse.ArgumentParser(description="BC training — Part Sorting Long dataset")
-    p.add_argument("--model",    choices=["mlp", "lstm"], default="mlp")
-    p.add_argument("--epochs",   type=int,   default=config.NUM_EPOCHS)
-    p.add_argument("--lr",       type=float, default=config.LEARNING_RATE)
-    p.add_argument("--batch",    type=int,   default=config.BATCH_SIZE)
-    p.add_argument("--window",   type=int,   default=config.LSTM_WINDOW_SIZE,
+    p.add_argument("--model",      choices=["mlp", "lstm", "chunk"], default="mlp")
+    p.add_argument("--epochs",     type=int,   default=config.NUM_EPOCHS)
+    p.add_argument("--lr",         type=float, default=config.LEARNING_RATE)
+    p.add_argument("--batch",      type=int,   default=config.BATCH_SIZE)
+    p.add_argument("--window",     type=int,   default=config.LSTM_WINDOW_SIZE,
                    help="LSTM sliding window size")
-    p.add_argument("--patience", type=int,   default=config.PATIENCE)
+    p.add_argument("--chunk_size", type=int,   default=config.CHUNK_SIZE,
+                   help="Số bước hành động dự đoán cùng lúc (action-chunking)")
+    p.add_argument("--patience",   type=int,   default=config.PATIENCE)
     return p.parse_args()
 
 

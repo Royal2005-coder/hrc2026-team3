@@ -1,8 +1,10 @@
 """
 Định nghĩa các kiến trúc neural network cho Behavioral Cloning.
 
-1. BCMlpPolicy  — MLP đơn giản, input: state_t → output: action_t
-2. BCLstmPolicy — LSTM với sliding window, input: (state_t-W..t,) → action_t
+1. BCMlpPolicy   — MLP đơn giản, input: state_t → output: action_t
+2. BCLstmPolicy  — LSTM với sliding window, input: (state_t-W..t,) → action_t
+3. BCChunkPolicy — Action-chunking (kiểu ACT, không ảnh), input: state_t
+                   → output: chunk K hành động liên tiếp [action_t..action_t+K-1]
 """
 
 import torch
@@ -164,6 +166,89 @@ class BCLstmPolicy(nn.Module):
 
 
 # ─────────────────────────────────────────────────────────────────────────────
+# 3. Action-Chunking Policy (kiểu ACT, không dùng ảnh)
+# ─────────────────────────────────────────────────────────────────────────────
+
+class BCChunkPolicy(nn.Module):
+    """
+    Behavioral Cloning với action-chunking (rút gọn theo kiến trúc ACT).
+
+    Thay vì dự đoán từng action_t một (dễ tích lũy sai số — compounding error,
+    và dễ bị "trung bình hoá" giữa các cách demo khác nhau → giật/khựng),
+    model dự đoán MỘT LÚC một chuỗi K hành động liên tiếp [a_t, a_t+1, ..., a_t+K-1]
+    từ state hiện tại. Khi suy luận, robot thực thi vài bước đầu của chuỗi này
+    (hoặc trung bình trọng số các chuỗi chồng lấp — temporal ensembling) trước khi
+    re-plan, giúp chuyển động mượt và nhất quán hơn, giống quỹ đạo demo gốc.
+
+    Input:  state (B, STATE_DIM)
+    Output: action_chunk (B, CHUNK_SIZE, ACTION_DIM)
+
+    Kiến trúc:
+      state → Linear encoder → context token (B, 1, H)
+      learned query embeddings (K, H) → TransformerDecoder cross-attend vào context
+        → action head cho từng vị trí trong chunk
+    """
+
+    def __init__(
+        self,
+        state_dim:   int   = config.STATE_DIM,
+        action_dim:  int   = config.ACTION_DIM,
+        chunk_size:  int   = config.CHUNK_SIZE,
+        hidden_dim:  int   = config.CHUNK_HIDDEN_DIM,
+        num_layers:  int   = config.CHUNK_NUM_LAYERS,
+        num_heads:   int   = config.CHUNK_NUM_HEADS,
+        dropout:     float = config.CHUNK_DROPOUT,
+    ):
+        super().__init__()
+        self.chunk_size = chunk_size
+        self.action_dim = action_dim
+
+        # Encode state hiện tại thành 1 "context token"
+        self.state_encoder = nn.Sequential(
+            nn.Linear(state_dim, hidden_dim),
+            nn.LayerNorm(hidden_dim),
+            nn.ReLU(),
+        )
+
+        # Mỗi vị trí trong chunk có 1 learned query embedding riêng
+        # (giống object queries trong DETR / action queries trong ACT)
+        self.query_embed = nn.Parameter(torch.randn(chunk_size, hidden_dim) * 0.02)
+
+        decoder_layer = nn.TransformerDecoderLayer(
+            d_model=hidden_dim,
+            nhead=num_heads,
+            dim_feedforward=hidden_dim * 4,
+            dropout=dropout,
+            activation="relu",
+            batch_first=True,
+        )
+        self.decoder = nn.TransformerDecoder(decoder_layer, num_layers=num_layers)
+
+        self.action_head = nn.Linear(hidden_dim, action_dim)
+
+        self._init_weights()
+
+    def _init_weights(self):
+        for m in self.modules():
+            if isinstance(m, nn.Linear):
+                nn.init.xavier_uniform_(m.weight)
+                if m.bias is not None:
+                    nn.init.zeros_(m.bias)
+
+    def forward(self, state: torch.Tensor) -> torch.Tensor:
+        B = state.shape[0]
+        memory  = self.state_encoder(state).unsqueeze(1)               # (B, 1, H) — "memory" cho cross-attention
+        queries = self.query_embed.unsqueeze(0).expand(B, -1, -1)      # (B, K, H)
+        decoded = self.decoder(tgt=queries, memory=memory)             # (B, K, H)
+        return self.action_head(decoded)                               # (B, K, A)
+
+    def predict(self, state: torch.Tensor) -> torch.Tensor:
+        self.eval()
+        with torch.no_grad():
+            return self.forward(state)
+
+
+# ─────────────────────────────────────────────────────────────────────────────
 # Factory
 # ─────────────────────────────────────────────────────────────────────────────
 
@@ -172,8 +257,10 @@ def build_model(model_type: str) -> nn.Module:
         return BCMlpPolicy()
     elif model_type == "lstm":
         return BCLstmPolicy()
+    elif model_type == "chunk":
+        return BCChunkPolicy()
     else:
-        raise ValueError(f"Unknown model_type: {model_type}. Choose 'mlp' or 'lstm'.")
+        raise ValueError(f"Unknown model_type: {model_type}. Choose 'mlp', 'lstm' or 'chunk'.")
 
 
 def count_parameters(model: nn.Module) -> int:
@@ -181,17 +268,21 @@ def count_parameters(model: nn.Module) -> int:
 
 
 if __name__ == "__main__":
-    mlp  = BCMlpPolicy()
-    lstm = BCLstmPolicy()
-    print(f"MLP  params: {count_parameters(mlp):,}")
-    print(f"LSTM params: {count_parameters(lstm):,}")
+    mlp   = BCMlpPolicy()
+    lstm  = BCLstmPolicy()
+    chunk = BCChunkPolicy()
+    print(f"MLP   params: {count_parameters(mlp):,}")
+    print(f"LSTM  params: {count_parameters(lstm):,}")
+    print(f"Chunk params: {count_parameters(chunk):,}")
 
     # Dummy forward pass
     B, W = 4, config.LSTM_WINDOW_SIZE
     s  = torch.randn(B, config.STATE_DIM)
     sw = torch.randn(B, W, config.STATE_DIM)
 
-    a_mlp       = mlp(s)
-    a_lstm, _   = lstm(sw)
-    print(f"MLP  output: {a_mlp.shape}")
-    print(f"LSTM output: {a_lstm.shape}")
+    a_mlp     = mlp(s)
+    a_lstm, _ = lstm(sw)
+    a_chunk   = chunk(s)
+    print(f"MLP   output: {a_mlp.shape}")
+    print(f"LSTM  output: {a_lstm.shape}")
+    print(f"Chunk output: {a_chunk.shape}")

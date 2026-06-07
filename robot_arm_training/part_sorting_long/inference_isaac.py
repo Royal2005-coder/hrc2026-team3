@@ -1,11 +1,13 @@
 """
-Tích hợp LSTM/MLP đã train (part_sorting_long) vào Isaac Sim.
+Tích hợp MLP/LSTM/Chunk (action-chunking, kiểu ACT) đã train (part_sorting_long)
+vào Isaac Sim.
 
 Cách dùng trong simulation loop:
     from robot_arm_training.part_sorting_long.inference_isaac import ILPolicyRunner
 
-    runner = ILPolicyRunner(model_type="lstm")
+    runner = ILPolicyRunner(model_type="chunk")   # hoặc "lstm" / "mlp"
     runner.load()
+    runner.reset()                                 # gọi lại mỗi khi episode mới bắt đầu
 
     # Trong mỗi physics step:
     action = runner.step(robot, part_poses, gripper_control=gripper_state)
@@ -32,7 +34,7 @@ sys.modules["config"] = cfg
 _cfg_spec.loader.exec_module(cfg)
 del _ilu, _cfg_spec
 
-from model import BCLstmPolicy, BCMlpPolicy, build_model
+from model import BCChunkPolicy, BCLstmPolicy, BCMlpPolicy, build_model
 from data_loader import Normalizer
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -67,7 +69,7 @@ class ILPolicyRunner:
     Chạy IL policy (MLP hoặc LSTM) cho Part Sorting Long task.
 
     Args:
-        model_type: "mlp" hoặc "lstm"
+        model_type: "mlp", "lstm" hoặc "chunk" (action-chunking, kiểu ACT)
         ckpt_dir:   Thư mục chứa best.pt + normalizer (mặc định tự tìm)
         device:     "cuda" / "cpu" (mặc định tự chọn)
     """
@@ -83,12 +85,16 @@ class ILPolicyRunner:
         self.device     = torch.device(
             device or ("cuda" if torch.cuda.is_available() else "cpu")
         )
-        self.model:  BCMlpPolicy | BCLstmPolicy | None = None
+        self.model:  BCMlpPolicy | BCLstmPolicy | BCChunkPolicy | None = None
         self.s_norm: Normalizer | None = None
         self.a_norm: Normalizer | None = None
 
         self._state_buffer: list[np.ndarray] = []
         self._lstm_hidden = None
+        # Action queue cho "chunk": chứa các action (radian, đã unnormalize)
+        # còn lại của chunk vừa dự đoán — thực thi hết rồi mới re-plan
+        # (receding-horizon control, tránh chạy model mỗi bước rất tốn).
+        self._action_queue: list[np.ndarray] = []
 
     def load(self):
         best_ckpt = os.path.join(self.ckpt_dir, "best.pt")
@@ -111,9 +117,10 @@ class ILPolicyRunner:
               f"on {self.device}")
 
     def reset(self):
-        """Reset LSTM hidden state giữa các episode."""
+        """Reset trạng thái nội bộ (LSTM hidden / chunk action-queue) giữa các episode."""
         self._state_buffer = []
         self._lstm_hidden  = None
+        self._action_queue = []
 
     # ── Build state vector (38-dim) từ Isaac Sim ──────────────────────────────
 
@@ -172,8 +179,9 @@ class ILPolicyRunner:
             if self.model_type == "mlp":
                 s_t = torch.from_numpy(state_norm).float().to(self.device)
                 a_n = self.model(s_t).cpu().numpy()
+                return self.a_norm.inverse_transform(a_n)[0]  # (10,) radian
 
-            else:  # lstm
+            elif self.model_type == "lstm":
                 self._state_buffer.append(state_norm[0])
                 if len(self._state_buffer) > cfg.LSTM_WINDOW_SIZE:
                     self._state_buffer = self._state_buffer[-cfg.LSTM_WINDOW_SIZE:]
@@ -186,9 +194,21 @@ class ILPolicyRunner:
 
                 w_t = torch.from_numpy(window).float().unsqueeze(0).to(self.device)  # (1, 30, 38)
                 a_n, self._lstm_hidden = self.model(w_t, self._lstm_hidden)
-                a_n = a_n.cpu().numpy()
+                return self.a_norm.inverse_transform(a_n.cpu().numpy())[0]  # (10,) radian
 
-        return self.a_norm.inverse_transform(a_n)[0]  # (10,) radian
+            else:  # chunk — receding-horizon control qua action queue
+                # Hết hàng đợi → dự đoán 1 chunk K hành động từ state hiện tại,
+                # lấy CHUNK_EXEC_HORIZON bước đầu để thực thi rồi mới re-plan.
+                # Dự đoán cả chuỗi cùng lúc (thay vì từng bước) giúp chuyển động
+                # nhất quán/mượt hơn — giảm hiện tượng "khựng" do compounding error.
+                if not self._action_queue:
+                    s_t     = torch.from_numpy(state_norm).float().to(self.device)
+                    chunk_n = self.model(s_t).cpu().numpy()[0]              # (K, A) normalized
+                    chunk   = self.a_norm.inverse_transform(chunk_n)         # (K, A) radian
+                    horizon = min(cfg.CHUNK_EXEC_HORIZON, len(chunk))
+                    self._action_queue = list(chunk[:horizon])
+
+                return self._action_queue.pop(0)  # (10,) radian
 
     # ── Parse action thành các phần ─────────────────────────────────────────
 

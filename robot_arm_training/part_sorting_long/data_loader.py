@@ -201,6 +201,55 @@ class RobotLSTMDataset(Dataset):
         return w, self.actions[idx]
 
 
+class RobotChunkDataset(Dataset):
+    """
+    Mỗi sample = (state_t, action_chunk[t : t+K]).
+    Chunk không vượt ranh giới episode — nếu thiếu (gần cuối episode),
+    pad bằng cách lặp lại action cuối cùng (giống ACT: model học "đứng yên"
+    ở cuối chuỗi thay vì học một hành động bịa đặt không có thật).
+    """
+
+    def __init__(
+        self,
+        states:          np.ndarray,
+        actions:         np.ndarray,
+        episode_lengths: list[int],
+        chunk_size:      int   = config.CHUNK_SIZE,
+        noise_std:       float = 0.0,
+    ):
+        self.chunk_size = chunk_size
+        self.noise_std  = noise_std
+
+        all_states = []
+        all_chunks = []
+
+        idx = 0
+        for ep_len in episode_lengths:
+            ep_s = states[idx: idx + ep_len]
+            ep_a = actions[idx: idx + ep_len]
+            for t in range(ep_len):
+                end = min(t + chunk_size, ep_len)
+                chunk = ep_a[t:end]
+                if len(chunk) < chunk_size:
+                    pad   = np.repeat(chunk[-1:], chunk_size - len(chunk), axis=0)
+                    chunk = np.concatenate([chunk, pad], axis=0)
+                all_states.append(ep_s[t])
+                all_chunks.append(chunk)
+            idx += ep_len
+
+        self.states = torch.from_numpy(np.stack(all_states)).float()       # (N, S)
+        self.chunks = torch.from_numpy(np.stack(all_chunks)).float()       # (N, K, A)
+
+    def __len__(self) -> int:
+        return len(self.states)
+
+    def __getitem__(self, idx: int):
+        s = self.states[idx]
+        if self.noise_std > 0.0:
+            s = s + torch.randn_like(s) * self.noise_std
+        return s, self.chunks[idx]
+
+
 # ─────────────────────────────────────────────────────────────────────────────
 # Builder functions
 # ─────────────────────────────────────────────────────────────────────────────
@@ -268,6 +317,33 @@ def build_lstm_loaders(
     )
 
 
+def build_chunk_loaders(
+    batch_size:  int   = config.BATCH_SIZE,
+    chunk_size:  int   = config.CHUNK_SIZE,
+    noise_std:   float = config.STATE_NOISE_STD,
+    num_workers: int   = 2,
+) -> tuple[DataLoader, DataLoader, DataLoader, Normalizer, Normalizer]:
+    """Trả về (train_loader, val_loader, test_loader, state_norm, action_norm)."""
+    states, actions, episode_ids = load_dataset()
+    (tr_s, tr_a, tr_ep), (va_s, va_a, va_ep), (te_s, te_a, te_ep) = \
+        episode_split(states, actions, episode_ids)
+
+    s_norm = Normalizer().fit(tr_s)
+    a_norm = Normalizer().fit(tr_a)
+
+    tr_ds = RobotChunkDataset(s_norm.transform(tr_s), a_norm.transform(tr_a), tr_ep, chunk_size, noise_std)
+    va_ds = RobotChunkDataset(s_norm.transform(va_s), a_norm.transform(va_a), va_ep, chunk_size)
+    te_ds = RobotChunkDataset(s_norm.transform(te_s), a_norm.transform(te_a), te_ep, chunk_size)
+
+    return (
+        _make_loader(tr_ds, shuffle=True,  batch_size=batch_size, num_workers=num_workers),
+        _make_loader(va_ds, shuffle=False, batch_size=batch_size, num_workers=num_workers),
+        _make_loader(te_ds, shuffle=False, batch_size=batch_size, num_workers=num_workers),
+        s_norm,
+        a_norm,
+    )
+
+
 if __name__ == "__main__":
     print("=== MLP loaders ===")
     tl, vl, tel, sn, an = build_mlp_loaders()
@@ -278,3 +354,8 @@ if __name__ == "__main__":
     tl, vl, tel, sn, an = build_lstm_loaders()
     w, a = next(iter(tl))
     print(f"  train batch: window={w.shape}, action={a.shape}")
+
+    print("=== Chunk loaders ===")
+    tl, vl, tel, sn, an = build_chunk_loaders()
+    s, c = next(iter(tl))
+    print(f"  train batch: state={s.shape}, action_chunk={c.shape}")
