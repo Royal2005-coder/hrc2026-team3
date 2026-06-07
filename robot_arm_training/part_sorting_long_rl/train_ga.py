@@ -35,17 +35,45 @@ app_launcher = AppLauncher(args)
 simulation_app = app_launcher.app
 
 import torch
+import torch.nn as nn
+
 from skrl.envs.wrappers.torch import wrap_env
+from skrl.models.torch import GaussianMixin, Model
 from skrl.utils import set_seed
 
 from env_cfg import PartSortingEnvCfg
 from env import PartSortingEnv
-from train import Policy   # tái dùng đúng kiến trúc Policy đã định nghĩa trong train.py
 
 from GA_policy_evolution import (
     pop_size, NUM_ENVS, OBS_DIM, ACT_DIM, HIDDEN, npar,
     run_evolution,
 )
+
+
+# Định nghĩa lại Policy giống HỆT class trong train.py (KHÔNG import từ train.py vì
+# import đó sẽ chạy lại toàn bộ top-level code của train.py — bao gồm cả AppLauncher
+# riêng của nó — gây xung đột 2 SimulationApp cùng khởi tạo, app sẽ tự shutdown).
+class Policy(GaussianMixin, Model):
+    def __init__(self, obs_space, act_space, device, clip_actions=False):
+        Model.__init__(self)
+        GaussianMixin.__init__(self)
+        self.observation_space = obs_space
+        self.action_space      = act_space
+        self.device = device if isinstance(device, torch.device) else torch.device(device)
+
+        layers, in_dim = [], obs_space.shape[0]
+        for out_dim in HIDDEN:
+            layers += [nn.Linear(in_dim, out_dim), nn.ELU()]
+            in_dim = out_dim
+        self.net        = nn.Sequential(*layers)
+        self.mean_layer = nn.Linear(in_dim, act_space.shape[0])
+        self.log_std    = nn.Parameter(torch.zeros(act_space.shape[0]))
+
+    def compute(self, inputs, role=""):
+        states = inputs if isinstance(inputs, torch.Tensor) else (
+            inputs.get("states") or next(v for v in inputs.values() if isinstance(v, torch.Tensor))
+        )
+        return self.mean_layer(self.net(states)), {"log_std": self.log_std}
 
 
 def main():
