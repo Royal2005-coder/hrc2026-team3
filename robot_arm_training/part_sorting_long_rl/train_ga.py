@@ -79,7 +79,12 @@ class Policy(GaussianMixin, Model):
             states = inputs["states"]          # tránh `or` trên tensor nhiều phần tử (bool ambiguous)
         else:
             states = next(v for v in inputs.values() if isinstance(v, torch.Tensor))
-        return self.mean_layer(self.net(states)), {"log_std": self.log_std}
+        # Tanh trên đầu ra: action_space của env được thiết kế cho khoảng [-1, 1]
+        # (xem docstring PartSortingEnvCfg). mean_layer là Linear thuần, không bị chặn —
+        # nếu không ép về [-1, 1], action gửi vào env có thể "tràn" khỏi khoảng mong đợi.
+        # PPO (train.py) không cần dòng này vì GaussianMixin tự clip khi lấy mẫu hành động,
+        # còn GA dùng thẳng output này làm action nên phải tự đảm bảo đúng range.
+        return torch.tanh(self.mean_layer(self.net(states))), {"log_std": self.log_std}
 
 
 def main():
