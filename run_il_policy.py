@@ -8,6 +8,7 @@ Command:
     python run_il_policy.py --task part_sorting_long     # long dataset (4 grasps)
     python run_il_policy.py --task task1                 # task1 dataset (1 grasp)
     python run_il_policy.py --model mlp                  # dùng MLP thay vì LSTM
+    python run_il_policy.py --model chunk                # dùng action-chunking (kiểu ACT)
     python run_il_policy.py --headless                   # không GUI
     python run_il_policy.py --episodes 5
 """
@@ -22,7 +23,7 @@ def parse_args():
     p.add_argument("--task",     choices=["task1", "part_sorting_long"],
                    default="part_sorting_long",
                    help="Dataset/task đã dùng để train model")
-    p.add_argument("--model",    choices=["mlp", "lstm"], default="lstm")
+    p.add_argument("--model",    choices=["mlp", "lstm", "chunk"], default="lstm")
     p.add_argument("--headless", action="store_true",
                    help="Chạy không GUI (nhanh hơn, dùng khi không có màn hình)")
     p.add_argument("--max_steps", type=int, default=800,
