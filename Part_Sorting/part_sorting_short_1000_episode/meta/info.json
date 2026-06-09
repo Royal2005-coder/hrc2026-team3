@@ -1,0 +1,236 @@
+{
+    "codebase_version": "v3.0",
+    "robot_type": "walker_s2_sim",
+    "total_episodes": 1000,
+    "total_frames": 192000,
+    "total_tasks": 1,
+    "chunks_size": 1000,
+    "fps": 30,
+    "splits": {
+        "train": "0:1000"
+    },
+    "data_path": "data/chunk-{chunk_index:03d}/file-{file_index:03d}.parquet",
+    "video_path": "videos/{video_key}/chunk-{chunk_index:03d}/file-{file_index:03d}.mp4",
+    "features": {
+        "observation.state": {
+            "dtype": "float32",
+            "shape": [
+                48
+            ],
+            "names": [
+                "L_shoulder_pitch_joint.pos",
+                "L_shoulder_roll_joint.pos",
+                "L_shoulder_yaw_joint.pos",
+                "L_elbow_roll_joint.pos",
+                "L_elbow_yaw_joint.pos",
+                "L_wrist_pitch_joint.pos",
+                "L_wrist_roll_joint.pos",
+                "R_shoulder_pitch_joint.pos",
+                "R_shoulder_roll_joint.pos",
+                "R_shoulder_yaw_joint.pos",
+                "R_elbow_roll_joint.pos",
+                "R_elbow_yaw_joint.pos",
+                "R_wrist_pitch_joint.pos",
+                "R_wrist_roll_joint.pos",
+                "L_finger1_joint.pos",
+                "L_finger2_joint.pos",
+                "R_finger1_joint.pos",
+                "R_finger2_joint.pos",
+                "left_gripper_control",
+                "right_gripper_control",
+                "obj0_x",
+                "obj0_y",
+                "obj0_z",
+                "obj0_qx",
+                "obj0_qy",
+                "obj0_qz",
+                "obj0_qw",
+                "obj1_x",
+                "obj1_y",
+                "obj1_z",
+                "obj1_qx",
+                "obj1_qy",
+                "obj1_qz",
+                "obj1_qw",
+                "obj2_x",
+                "obj2_y",
+                "obj2_z",
+                "obj2_qx",
+                "obj2_qy",
+                "obj2_qz",
+                "obj2_qw",
+                "obj3_x",
+                "obj3_y",
+                "obj3_z",
+                "obj3_qx",
+                "obj3_qy",
+                "obj3_qz",
+                "obj3_qw"
+            ],
+            "fps": 30
+        },
+        "action": {
+            "dtype": "float32",
+            "shape": [
+                20
+            ],
+            "names": [
+                "L_shoulder_pitch_joint.pos",
+                "L_shoulder_roll_joint.pos",
+                "L_shoulder_yaw_joint.pos",
+                "L_elbow_roll_joint.pos",
+                "L_elbow_yaw_joint.pos",
+                "L_wrist_pitch_joint.pos",
+                "L_wrist_roll_joint.pos",
+                "R_shoulder_pitch_joint.pos",
+                "R_shoulder_roll_joint.pos",
+                "R_shoulder_yaw_joint.pos",
+                "R_elbow_roll_joint.pos",
+                "R_elbow_yaw_joint.pos",
+                "R_wrist_pitch_joint.pos",
+                "R_wrist_roll_joint.pos",
+                "L_finger1_joint.pos",
+                "L_finger2_joint.pos",
+                "R_finger1_joint.pos",
+                "R_finger2_joint.pos",
+                "left_gripper_control",
+                "right_gripper_control"
+            ],
+            "fps": 30
+        },
+        "observation.images.head_left": {
+            "dtype": "video",
+            "shape": [
+                3,
+                480,
+                640
+            ],
+            "names": [
+                "channels",
+                "height",
+                "width"
+            ],
+            "info": {
+                "video.fps": 30.0,
+                "video.height": 480,
+                "video.width": 640,
+                "video.channels": 3,
+                "video.codec": "h264",
+                "video.pix_fmt": "yuv420p",
+                "video.is_depth_map": false,
+                "has_audio": false
+            }
+        },
+        "observation.images.head_right": {
+            "dtype": "video",
+            "shape": [
+                3,
+                480,
+                640
+            ],
+            "names": [
+                "channels",
+                "height",
+                "width"
+            ],
+            "info": {
+                "video.fps": 30.0,
+                "video.height": 480,
+                "video.width": 640,
+                "video.channels": 3,
+                "video.codec": "h264",
+                "video.pix_fmt": "yuv420p",
+                "video.is_depth_map": false,
+                "has_audio": false
+            }
+        },
+        "observation.images.wrist_left": {
+            "dtype": "video",
+            "shape": [
+                3,
+                480,
+                640
+            ],
+            "names": [
+                "channels",
+                "height",
+                "width"
+            ],
+            "info": {
+                "video.fps": 30.0,
+                "video.height": 480,
+                "video.width": 640,
+                "video.channels": 3,
+                "video.codec": "h264",
+                "video.pix_fmt": "yuv420p",
+                "video.is_depth_map": false,
+                "has_audio": false
+            }
+        },
+        "observation.images.wrist_right": {
+            "dtype": "video",
+            "shape": [
+                3,
+                480,
+                640
+            ],
+            "names": [
+                "channels",
+                "height",
+                "width"
+            ],
+            "info": {
+                "video.fps": 30.0,
+                "video.height": 480,
+                "video.width": 640,
+                "video.channels": 3,
+                "video.codec": "h264",
+                "video.pix_fmt": "yuv420p",
+                "video.is_depth_map": false,
+                "has_audio": false
+            }
+        },
+        "timestamp": {
+            "dtype": "float32",
+            "shape": [
+                1
+            ],
+            "names": null,
+            "fps": 30
+        },
+        "frame_index": {
+            "dtype": "int64",
+            "shape": [
+                1
+            ],
+            "names": null,
+            "fps": 30
+        },
+        "episode_index": {
+            "dtype": "int64",
+            "shape": [
+                1
+            ],
+            "names": null,
+            "fps": 30
+        },
+        "index": {
+            "dtype": "int64",
+            "shape": [
+                1
+            ],
+            "names": null,
+            "fps": 30
+        },
+        "task_index": {
+            "dtype": "int64",
+            "shape": [
+                1
+            ],
+            "names": null,
+            "fps": 30
+        }
+    },
+    "data_files_size_in_mb": 100,
+    "video_files_size_in_mb": 200
+}
