@@ -75,7 +75,7 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="${SCRIPT_DIR}"
 
 IMAGE_NAME="${IMAGE_NAME:-ghrc_2026:v0}"
-CONTAINER_NAME="${CONTAINER_NAME:-isaac_sim_ubt}"
+CONTAINER_NAME="${CONTAINER_NAME:-isaac_sim_lerobot_ubt}"
 HOST_WORKSPACE="${HOST_WORKSPACE:-${PROJECT_ROOT}}"
 CONTAINER_WORKSPACE="${CONTAINER_WORKSPACE:-/workspace/GlobalHumanoidRobotChallenge_2026_Baseline}"
 SHM_SIZE="${SHM_SIZE:-8g}"
@@ -171,7 +171,7 @@ DOCKER_ARGS+=(
 )
 
 # --- 挂载：设备（仅当路径存在时挂载，避免报错）---
-for dev_path in /dev/bus/usb /run/udev /var/run/dbus; do
+for dev_path in /dev/bus/usb /dev/input /run/udev /var/run/dbus; do
     if [ -e "$dev_path" ]; then
         DOCKER_ARGS+=(-v "${dev_path}:${dev_path}:rw")
     fi

@@ -27,7 +27,7 @@ from source.coordinate_utils import CoordinateTransform
 from source.grasp_planner import GraspPlanner
 
 # ── 1. Configuration ─────────────────────────────────────────────────
-config_path = os.path.join(os.path.dirname(__file__), "config/Part_Sorting.yaml")
+config_path = os.path.join(os.path.dirname(__file__), "config/task1.yaml")
 cfg = load_config(config_path)
 grasp_cfg = cfg.get("grasp", {})
 
@@ -52,7 +52,7 @@ data_logger = DataLogger(
 )
 
 # ── 4. Scene (scatter area → build → physics settle) ────────────────
-scene = SceneBuilder(cfg, data_logger=data_logger)
+scene = SceneBuilder(cfg, data_logger=data_logger, world=world)
 apply_scatter_config(cfg)
 
 scene.build_all()
@@ -98,7 +98,7 @@ compensation_matrix = np.array([
     [0.00000e+00,  0.00000e+00,  0.00000e+00,  1.00000e+00]
 ], dtype=np.float64)
 
-coord_transform = CoordinateTransform.from_torso_link(ik_solver=robot.ik_solver)
+coord_transform = CoordinateTransform.from_torso_link(ik_solver=robot.ik_solver,compensation_matrix=compensation_matrix)
 for _ in range(10):
     coord_transform.verify_ee_alignment(robot.ik_solver)
 

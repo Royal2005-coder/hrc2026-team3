@@ -11,3 +11,8 @@ assets
 lerobot
 Ubtech_sim_ref
 core
+outputs/
+datasets/
+*.pt
+*.pth
+Part_Sorting/

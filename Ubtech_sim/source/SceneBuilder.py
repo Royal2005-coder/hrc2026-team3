@@ -7,7 +7,12 @@ import numpy as np
 from isaacsim.core.cloner import Cloner
 from functools import partial
 import omni.replicator.core as rep
+from pxr import UsdGeom
+from pxr import Gf
+import omni.usd
 from isaacsim.core.prims import SingleRigidPrim, RigidPrim, Articulation
+
+from Ubtech_sim.source.coordinate_utils import CoordinateTransform
 from isaacsim.core.simulation_manager import SimulationManager
 import json
 from pathlib import Path
@@ -35,20 +40,76 @@ class SceneBuilder:
         # 存储各物体的prim路径
         self.table_prim_paths = []
         self.box_prim_paths = []
+        self.foam_prim_paths = []
         self.parts_prim_paths = []
+        self.part_type_by_prim_path = {}
         self.pose_logger = data_logger
         self._physics_sim_view = SimulationManager.get_physics_sim_view()
+        self.coordinate_transform = None  # initialized via init_coordinate_transform()
         # SimulationManager.initialize_physics()
 
     def _usd_path(self, relative):
         return os.path.join(self.root_path, relative)
 
+    @staticmethod
+    def _non_negative_int(value, field_name: str) -> int:
+        try:
+            count = int(value)
+        except (TypeError, ValueError) as exc:
+            raise ValueError(f"{field_name} must be a non-negative integer, got {value!r}") from exc
+        if count < 0:
+            raise ValueError(f"{field_name} must be >= 0, got {count}")
+        return count
+
+    @staticmethod
+    def _asset_pool_has_entries(pool) -> bool:
+        if isinstance(pool, (list, tuple)):
+            return len(pool) > 0
+        return bool(pool)
+
+    @staticmethod
+    def _choose_asset_from_pool(pool):
+        if isinstance(pool, (list, tuple)):
+            return random.choice(pool)
+        return pool
+
+    def _resolve_asset_path(self, asset):
+        """Return a usable USD path for either relative or already-resolved assets."""
+        asset_path = str(asset)
+        if os.path.isabs(asset_path) or asset_path.startswith(str(self.root_path)):
+            return asset_path
+        return self._usd_path(asset_path)
+
+    def _get_task1_part_plan(self):
+        """Return validated Task1 part creation plan as (part_type, asset_pool, count)."""
+        fallback_count = self.part_cfg.get('num_parts', 2)
+        num_a = self._non_negative_int(
+            self.part_cfg.get('num_parts_a', fallback_count),
+            'part.num_parts_a',
+        )
+        num_b = self._non_negative_int(
+            self.part_cfg.get('num_parts_b', fallback_count),
+            'part.num_parts_b',
+        )
+        plan = [
+            ('part_a', self.part_cfg.get('part_a_assets', []), num_a),
+            ('part_b', self.part_cfg.get('part_b_assets', []), num_b),
+        ]
+
+        for part_type, pool, count in plan:
+            if count > 0 and not self._asset_pool_has_entries(pool):
+                raise ValueError(
+                    f"Task1 config requires {part_type}_assets when "
+                    f"num_parts_{part_type[-1]} is {count}"
+                )
+        return plan
+
     def build_table(self):
         self.table_cfg = self.cfg['table']
         self.table = rep.create.from_usd(
             self._usd_path(self.table_cfg['table_usd']),
-            position=(self.table_cfg['table_position'][0] if len(self.table_cfg['table_position'])==1 else rep.distribution.choice(self.table_cfg['table_position'], with_replacements=False)),
-            scale=(self.table_cfg['table_scale'][0] if len(self.table_cfg['table_scale'])==1 else rep.distribution.choice(self.table_cfg['table_scale'], with_replacements=False)),
+            position=rep.distribution.choice(self.table_cfg['table_position'], with_replacements=False),
+            scale=rep.distribution.choice(self.table_cfg['table_scale'], with_replacements=False),
             count=len(self.table_cfg['table_position']),
         )
         # 保存prim路径
@@ -70,7 +131,30 @@ class SceneBuilder:
         )
         # 保存传送带初始位置，用于重置
         self._conveyor_initial_position = self.ConveyorBelt_cfg['ConveyorBelt_position']
+
+        #设置传送带初始速度
+        Conveyor_speed=self.ConveyorBelt_cfg['ConveyorBelt_speed']
+        self.set_conveyor_speed(Conveyor_speed)
+
         return self.ConveyorBelt
+    #设置传送带表面速度
+    def set_conveyor_speed(self,speed):
+        def _set_conveyor_surface_velocity(velocity_vec3)-> None:
+            import omni.usd
+            from pxr import PhysxSchema
+            stage = omni.usd.get_context().get_stage()
+            for prim in stage.Traverse():
+                if prim.HasAPI(PhysxSchema.PhysxSurfaceVelocityAPI):
+                            PhysxSchema.PhysxSurfaceVelocityAPI(prim).GetSurfaceVelocityAttr().Set(
+                                velocity_vec3
+                            )
+        try:
+            from pxr import Gf
+            _set_conveyor_surface_velocity(Gf.Vec3f(*speed))
+            print(f"[SceneBuilder] 传送带已启动，设置速度为 {speed}")
+
+        except Exception as e:
+            print(f"[SceneBuilder] 传送带启动失败: {e}")
 
     def build_parts(self):
         self.plane_cfg = self.cfg['plane']
@@ -90,84 +174,107 @@ class SceneBuilder:
         self.parts_list = []
 
         if self.cfg['task_number'] == 3:
-            for i in range(len(self.box_cfg['box_position'])):
-            # 使用索引 i 同时指定当前的零件和对应的平面
-            # 箱子 0 对应零件 A，箱子 1 对应零件 B
-                current_part_usd = part_usds[i] 
-                target_plane = self.planes[i]
+            task3_part_assets = [
+                self.part_cfg.get('part_a_assets', self.part_cfg.get('part_a_usd')),
+                self.part_cfg.get('part_b_assets', self.part_cfg.get('part_b_usd')),
+            ]
+            if self.part_cfg.get('fixed_spawn', {}).get('enabled', False):
+                parts_per_group = self.part_cfg.get('num_parts', 3)
+                self.parts_prim_paths = []
+                for i in range(len(self.box_cfg['box_position'])):
+                    current_part_asset = task3_part_assets[i]
+                    part_label = "part_a" if i == 0 else "part_b"
+                    group_paths = [
+                        f"/Root/Task3_{part_label}_{j:02d}"
+                        for j in range(parts_per_group)
+                    ]
+                    created_paths = self._create_parts_at_paths(
+                        part_pools=[(current_part_asset, parts_per_group, part_label)],
+                        target_paths=group_paths,
+                        plane_index=i,
+                    )
+                    self.parts_prim_paths.extend(created_paths)
 
-            # 每次生成 num_parts 个该种类的工件
-                new_parts = rep.create.from_usd(
-                usd=current_part_usd,
-                count=self.part_cfg.get('num_parts', 3),
-                semantics={"class": "part"}
-                )
+                self._rigid_body_paths = []
+                self._parts_rigid_prims = []
+                self._rigid_prims_initialized = False
+                self._initial_parts_prim_paths = list(self.parts_prim_paths)
+                print(f"[SceneBuilder] Task3 fixed_spawn: 初始创建 {len(self.parts_prim_paths)} 个固定点工件")
+            else:
+                for i in range(len(self.box_cfg['box_position'])):
+                # 使用索引 i 同时指定当前的零件和对应的平面
+                # 箱子 0 对应零件 A，箱子 1 对应零件 B
+                    current_part_usd = self._resolve_asset_path(
+                        self._choose_asset_from_pool(task3_part_assets[i])
+                    )
+                    target_plane = self.planes[i]
 
-                self.parts_list.append(new_parts)
-
-                with new_parts:
-                    rep.physics.rigid_body(overwrite=True)
-                    rep.physics.mass(mass=0.2)
-
-                    # 随机旋转
-                    rep.modify.pose(
-                        rotation=rep.distribution.uniform((-90, -90, -90), (90, 90, 90))
+                # 每次生成 num_parts 个该种类的工件
+                    new_parts = rep.create.from_usd(
+                    usd=current_part_usd,
+                    count=self.part_cfg.get('num_parts', 3),
+                    semantics={"class": "part"}
                     )
 
-                    # 散布到对应的箱子平面上
-                    rep.randomizer.scatter_2d(
-                        surface_prims=target_plane,
-                        check_for_collisions=True,
-                    )            
+                    self.parts_list.append(new_parts)
 
-            # 保存零件 prim 路径
-            self._extract_parts_prim_paths()
+                    with new_parts:
+                        rep.physics.rigid_body(overwrite=True)
+                        rep.physics.mass(mass=0.2)
+
+                        # 随机旋转
+                        rep.modify.pose(
+                            rotation=rep.distribution.uniform((-90, -90, -90), (90, 90, 90))
+                        )
+
+                        # 散布到对应的箱子平面上
+                        rep.randomizer.scatter_2d(
+                            surface_prims=target_plane,
+                            check_for_collisions=True,
+                        )
+
+                # 保存零件 prim 路径
+                self._extract_parts_prim_paths()
 
         elif self.cfg['task_number'] == 2:
             from isaacsim.core.prims import RigidPrim
 
-            num_parts = self.part_cfg.get('num_parts', 4)
-
-            # 源 prim 直接命名为 _0，与 generate_paths 输出对齐
             self.part_A = stage_utils.add_reference_to_stage(
                 usd_path=part_usds[0],
-                prim_path='/Root/Part_A_0',
+                prim_path='/Root/Part_A',
             )
+
             self.part_B = stage_utils.add_reference_to_stage(
                 usd_path=part_usds[1],
-                prim_path='/Root/Part_B_0',
+                prim_path='/Root/Part_B',
             )
 
             self.cloner = Cloner()
-            # generate_paths("/Root/Part_A", num_parts) → [_0, _1, ..., _{num_parts-1}]
-            # 含源 prim _0，克隆体以 USD Inherits 继承源，物理状态各自独立
-            target_paths_A = self.cloner.generate_paths("/Root/Part_A", num_parts)
+            target_paths_A = self.cloner.generate_paths("/Root/Part_A", 3)
             self.cloner.clone(
-                source_prim_path="/Root/Part_A_0",
-                prim_paths=target_paths_A,
+                source_prim_path="/Root/Part_A",
+                prim_paths=target_paths_A
             )
 
-            target_paths_B = self.cloner.generate_paths("/Root/Part_B", num_parts)
+            target_paths_B = self.cloner.generate_paths("/Root/Part_B", 3)
             self.cloner.clone(
-                source_prim_path="/Root/Part_B_0",
-                prim_paths=target_paths_B,
+                source_prim_path="/Root/Part_B",
+                prim_paths=target_paths_B
             )
 
-            clone_paths = list(target_paths_A) + list(target_paths_B)
-
-            # RigidPrim 使用精确路径列表，总数 = num_parts * 2
             self.rigid_prim = RigidPrim(
-                prim_paths_expr=clone_paths,
+                prim_paths_expr="/Root/Part_.*",
                 name="rigid_prim_view"
             )
 
-            total_parts = num_parts * 2
-            random_indices = np.random.permutation(np.arange(total_parts))
-            start_position = -0.3 - total_parts * self.part_cfg['part_distance']
+            random_indices = np.random.permutation(np.array([0, 1, 2, 3, 4, 5, 6, 7]))
+
+            start_position = -0.3 - 8 * self.part_cfg['part_distance']
+
             init_positions = np.column_stack([
-                np.linspace(start_position, -0.3, total_parts),
-                np.full(total_parts, 0.278),
-                np.full(total_parts, 0.98),
+                np.linspace(start_position, -0.3, 8),
+                np.full(8, 0.278),
+                np.full(8, 0.98),
             ])
 
             self.rigid_prim.set_world_poses(
@@ -175,55 +282,43 @@ class SceneBuilder:
                 indices=random_indices
             )
 
-            # 保存 Task2 初始位姿，用于 scatter_after_reset 和 reset
+            # 保存 Task2 初始位姿，用于 reset
             self._task2_initial_positions = init_positions.copy()
             self._task2_initial_indices = random_indices.copy()
 
-            # 保存零件 prim 路径，用于 get_parts_world_poses 和 save_parts_poses
-            self.parts_prim_paths = clone_paths
-            print(f"[SceneBuilder] Task2 初始化: 发现 {len(self.parts_prim_paths)} 个零件")
 
 
         elif self.cfg['task_number'] == 1:
-            part_a_pool = self.part_cfg.get('part_a_assets', [])
-            part_b_pool = self.part_cfg.get('part_b_assets', [])
-            num_to_create = self.part_cfg.get('num_parts', 2) # 每种创建几个
-
             self.parts_list = []
-
-            # 1. 为 Part A 随机选择资产并创建
-            for i in range(num_to_create):
-                chosen_a = self._usd_path(random.choice(part_a_pool))
-                self.parts_list.append(rep.create.from_usd(
-                    usd=chosen_a,
-                    count=1, # 每次创建一个，确保独立随机
-                    semantics={"class": "part_a"}
-                ))
-
-            # 2. 为 Part B 随机选择资产并创建
-            for i in range(num_to_create):
-                chosen_b = self._usd_path(random.choice(part_b_pool))
-                self.parts_list.append(rep.create.from_usd(
-                    usd=chosen_b,
-                    count=1,
-                    semantics={"class": "part_b"}
-                ))
-
-            # 3. 统一处理物理和随机位置（保持原有逻辑）
-            self.parts_group = rep.create.group(items=self.parts_list)
-
-            with self.parts_group:
-                rep.physics.rigid_body(overwrite=True)
-                rep.physics.mass(mass=self.part_cfg.get('mass', 0.2))
-                rep.modify.pose(
-                    rotation=rep.distribution.uniform((-90, -90, -90), (90, 90, 90))
+            self.part_type_by_prim_path = {}
+            target_paths = []
+            part_pools = []
+            for part_type, asset_pool, count in self._get_task1_part_plan():
+                count = self._non_negative_int(count, f"part.num_parts_{part_type[-1]}")
+                start_idx = len(target_paths)
+                target_paths.extend(
+                    f"/Root/Task1_{part_type}_{start_idx + j:02d}"
+                    for j in range(count)
                 )
-                rep.randomizer.scatter_2d(
-                    surface_prims=self.planes[0],
-                    check_for_collisions=True
+                part_pools.append((asset_pool, count, part_type))
+
+            if target_paths:
+                created_paths = self._create_parts_at_paths(
+                    part_pools=part_pools,
+                    target_paths=target_paths,
+                    plane_index=0,
                 )
-            # 保存零件 prim 路径（仅 Task1）
-            self._extract_parts_prim_paths()
+                self.parts_prim_paths = created_paths
+                self._initial_parts_prim_paths = list(self.parts_prim_paths)
+                self._rigid_body_paths = []
+                self._parts_rigid_prims = []
+                self._rigid_prims_initialized = False
+                print(f"[SceneBuilder] Task1 随机非重叠创建 {len(self.parts_prim_paths)} 个零件")
+            else:
+                self.parts_group = None
+                self.parts_prim_paths = []
+                self._initial_parts_prim_paths = []
+                print("[SceneBuilder] Task1 配置零件总数为 0，跳过零件创建")
 
     def _extract_parts_prim_paths(self):
         """从 replicator 节点中提取零件的 USD prim 路径。
@@ -238,6 +333,8 @@ class SceneBuilder:
         self._rigid_body_paths = []
         self._parts_rigid_prims = []
         self._rigid_prims_initialized = False
+        self.part_type_by_prim_path = {}
+        part_type_by_rep_id = getattr(self, '_part_type_by_rep_id', {})
 
         for part_rep in self.parts_list:
             try:
@@ -249,6 +346,9 @@ class SceneBuilder:
                     for prim in prims_in:
                         path = str(prim.GetPath())
                         self.parts_prim_paths.append(path)
+                        part_type = part_type_by_rep_id.get(id(part_rep))
+                        if part_type is not None:
+                            self.part_type_by_prim_path[path] = part_type
             except Exception as e:
                 print(f"[SceneBuilder] 提取零件路径失败: {e}")
 
@@ -304,13 +404,89 @@ class SceneBuilder:
         if not prim.IsValid():
             return None
         # 优先检查自身
-        if prim.HasAPI(UsdPhysics.RigidBodyAPI):
+        if prim.HasAPI(UsdPhysics.RigidBodyAPI) and SceneBuilder._is_xformable_prim(prim):
             return base_path
         # 检查直接子 prim
         for child in prim.GetChildren():
-            if child.HasAPI(UsdPhysics.RigidBodyAPI):
+            if child.HasAPI(UsdPhysics.RigidBodyAPI) and SceneBuilder._is_xformable_prim(child):
                 return str(child.GetPath())
         return None
+
+    @staticmethod
+    def _is_xformable_prim(prim) -> bool:
+        if prim is None or not prim.IsValid():
+            return False
+        try:
+            return bool(UsdGeom.Xformable(prim))
+        except Exception:
+            return False
+
+    @staticmethod
+    def _remove_rigid_body_api(prim) -> bool:
+        try:
+            from pxr import UsdPhysics
+            if prim.HasAPI(UsdPhysics.RigidBodyAPI):
+                prim.RemoveAPI(UsdPhysics.RigidBodyAPI)
+                return True
+        except Exception:
+            pass
+        return False
+
+    @classmethod
+    def _apply_rigid_body_to_prim(cls, prim, mass=None, enabled=True):
+        """Apply physics only to xformable prims, then remove nested rigid bodies."""
+        from pxr import UsdPhysics
+
+        if not cls._is_xformable_prim(prim):
+            return None
+
+        rb_api = UsdPhysics.RigidBodyAPI.Apply(prim)
+        rb_api.CreateRigidBodyEnabledAttr(enabled)
+        if mass is not None:
+            UsdPhysics.MassAPI.Apply(prim).CreateMassAttr(mass)
+        return rb_api
+
+    @classmethod
+    def _sanitize_rigid_bodies_under_paths(cls, stage, root_paths, label="RigidBody"):
+        """Remove RigidBodyAPI from non-xformable prims and nested descendants."""
+        from pxr import Usd, UsdPhysics
+
+        if isinstance(root_paths, str):
+            root_paths = [root_paths]
+
+        removed_non_xformable = 0
+        removed_nested = 0
+        for root_path in root_paths:
+            root_prim = stage.GetPrimAtPath(root_path)
+            if not root_prim.IsValid():
+                continue
+
+            for prim in Usd.PrimRange(root_prim):
+                has_rigid_body = prim.HasAPI(UsdPhysics.RigidBodyAPI)
+                if has_rigid_body and not cls._is_xformable_prim(prim):
+                    if cls._remove_rigid_body_api(prim):
+                        removed_non_xformable += 1
+                    continue
+
+                has_rigid_ancestor = False
+                parent = prim.GetParent()
+                while parent.IsValid():
+                    if parent.HasAPI(UsdPhysics.RigidBodyAPI):
+                        has_rigid_ancestor = True
+                        break
+                    if str(parent.GetPath()) == root_path:
+                        break
+                    parent = parent.GetParent()
+
+                if has_rigid_body and has_rigid_ancestor:
+                    if cls._remove_rigid_body_api(prim):
+                        removed_nested += 1
+
+        if removed_non_xformable or removed_nested:
+            print(
+                f"[SceneBuilder] {label}: removed invalid RigidBodyAPI "
+                f"(non-xformable={removed_non_xformable}, nested={removed_nested})"
+            )
 
     def get_parts_world_poses(self):
         """查询所有零件当前的世界坐标位姿 (通过 USD XformCache)
@@ -352,21 +528,30 @@ class SceneBuilder:
         return results
 
     # ===================== 统一物体位姿接口（供数据采集/回放使用） =====================
-
     @staticmethod
     def compute_num_tracked_objects(task_cfg: dict) -> int:
         """根据任务配置计算被追踪物体的数量（不需要场景实例，可在 connect 前调用）"""
         task = task_cfg.get('task_number', 0)
         if task == 1:
-            return task_cfg.get('part', {}).get('num_parts', 2) * 2
+            part_cfg = task_cfg.get('part', {})
+            fallback_count = part_cfg.get('num_parts', 2)
+            num_a = SceneBuilder._non_negative_int(
+                part_cfg.get('num_parts_a', fallback_count),
+                'part.num_parts_a',
+            )
+            num_b = SceneBuilder._non_negative_int(
+                part_cfg.get('num_parts_b', fallback_count),
+                'part.num_parts_b',
+            )
+            return num_a + num_b
         elif task == 2:
-            return task_cfg.get('part', {}).get('num_parts', 4) * 2
+            return task_cfg.get('part', {}).get('num_parts', 5) * 2
         elif task == 3:
             num_boxes = len(task_cfg.get('box', {}).get('box_position', []))
             num_parts = task_cfg.get('part', {}).get('num_parts', 3)
             return num_boxes * num_parts
         elif task == 4:
-            return 0  # 箱子为静态 XFormPrim，位置固定，无需记录
+            return 0  
         return 0
 
     def get_object_poses_flat(self) -> np.ndarray:
@@ -452,8 +637,24 @@ class SceneBuilder:
             print(f"[SceneBuilder] 已从 flat 数据恢复 {restored}/{count} 个物体位姿")
 
         elif task == 2:
+            # Task 2: 确保 rigid_prim 视图有效（可能在 world.reset() 后失效）
             if not hasattr(self, 'rigid_prim') or self.rigid_prim is None:
-                return
+                # 尝试重新创建 rigid_prim 视图
+                from isaacsim.core.prims import RigidPrim
+                num_parts = self.part_cfg.get('num_parts', 5)
+                clone_paths = []
+                for i in range(num_parts):
+                    clone_paths.append(f"/Root/Part_A{i}")
+                    clone_paths.append(f"/Root/Part_B{i}")
+                try:
+                    self.rigid_prim = RigidPrim(
+                        prim_paths_expr="/Root/Part_.*",
+                        name="rigid_prim_view"
+                    )
+                    print(f"[SceneBuilder] Task 2: 重新创建了 rigid_prim 视图")
+                except Exception as e:
+                    print(f"[SceneBuilder] Task 2: 重新创建 rigid_prim 失败：{e}")
+                    return
             positions = poses_7[:, :3].astype(np.float64)
             # xyzw → wxyz
             quats = poses_7[:, 3:].astype(np.float64)
@@ -473,64 +674,96 @@ class SceneBuilder:
 
         print(f"[SceneBuilder] 已从 flat 数据恢复 {num_objects} 个物体位姿")
 
-    # Deprecated: 接口没实现功能，需要reset后保存parts的world poses。 replay时直接读取JSON文件，将parts放置到指定位姿。 TODO
-    def set_parts_world_poses(self, json_file_path: Optional[str] = None) -> None:
-        """
-        从JSON文件读取位姿配置，使用 Isaac Sim / USD 官方标准接口设置世界位姿
-        
-        JSON 格式要求：
+    def set_object_poses_from_json(self, json_file_path: Optional[str] = None) -> None:
+        """从 JSON 读取位姿，并在 world.reset() 之后用 SingleRigidPrim 恢复。
+
+        设计对齐 _scatter_parts_direct：
+        - 使用 SingleRigidPrim.set_world_pose 直接写入物理对象
+        - 同步清零线速度/角速度，避免继承上一轮动力学状态
+
+        JSON 格式：
         - prim_path: 物体路径
         - position: [x, y, z]
-        - orientation: [x, y, z, w]  (XYZW顺序，和你的get接口一致)
+        - orientation: [qx, qy, qz, qw] (xyzw)
         """
-        repo_root = Path(__file__).resolve().parent.parent
+        repo_root = Path(__file__).parent.parent.parent / "outputs"
         if json_file_path is None:
-            pose_path = repo_root / "task1_parts_poses_20260331_161915.json"
+            pose_path = repo_root / "task1_parts_poses_init.json"
         else:
             p = Path(json_file_path).expanduser()
             pose_path = p.resolve() if p.is_absolute() else (repo_root / p).resolve()
-        # 读取JSON
-        with open(pose_path, 'r', encoding='utf-8') as f:
-            pose_configs = json.load(f)
-        from pxr import Usd, UsdGeom, Gf
-        import omni.usd
-        stage = omni.usd.get_context().get_stage()
 
+        if not pose_path.exists():
+            print(f"[SceneBuilder] set_parts_world_poses: JSON 不存在，跳过恢复: {pose_path}")
+            return
+
+        try:
+            with open(pose_path, 'r', encoding='utf-8') as f:
+                pose_configs = json.load(f)
+        except Exception as e:
+            print(f"[SceneBuilder] set_parts_world_poses: 读取 JSON 失败: {e}")
+            return
+
+        if not isinstance(pose_configs, list):
+            print("[SceneBuilder] set_parts_world_poses: JSON 格式错误，期望 list")
+            return
+
+        # 先保证刚体缓存已基于当前 prim 重建（需要在 world.reset() 之后调用）
+        self._ensure_rigid_prims()
+        rigid_prims = getattr(self, '_parts_rigid_prims', [])
+
+        # 使用 prim_path 作为主键匹配；同时兼容 rb_path 被记录到 JSON 的情况
+        pose_by_path = {}
         for cfg in pose_configs:
-            prim_path = cfg["prim_path"]
-            pos = cfg["position"]
-            orient = cfg["orientation"]  # 输入顺序：x y z w
-
-            # 获取prim
-            prim = stage.GetPrimAtPath(prim_path)
-            if not prim or not prim.IsValid():
+            prim_path = cfg.get('prim_path')
+            pos = cfg.get('position')
+            orient = cfg.get('orientation')
+            if (not isinstance(prim_path, str)
+                    or not isinstance(pos, (list, tuple))
+                    or not isinstance(orient, (list, tuple))
+                    or len(pos) != 3
+                    or len(orient) != 4):
                 continue
-            if not prim.IsA(UsdGeom.Xformable):
+            pose_by_path[prim_path] = (pos, orient)
+
+        if not pose_by_path:
+            print("[SceneBuilder] set_parts_world_poses: JSON 中没有有效位姿")
+            return
+
+        restored = 0
+        attempted = 0
+        for i, part_path in enumerate(self.parts_prim_paths):
+            rigid = rigid_prims[i] if i < len(rigid_prims) else None
+            if rigid is None:
+                print(f"[SceneBuilder] set_parts_world_poses: 无缓存刚体 {part_path}")
                 continue
 
-            xformable = UsdGeom.Xformable(prim)
+            rb_path = None
+            if hasattr(self, '_rigid_body_paths') and i < len(self._rigid_body_paths):
+                rb_path = self._rigid_body_paths[i]
 
-            # ======================= 官方唯一正确方式 =======================
-            # 1. 清空所有变换（官方标准）
-            xformable.ClearXformOpOrder()
+            pose = pose_by_path.get(part_path)
+            if pose is None and rb_path is not None:
+                pose = pose_by_path.get(rb_path)
+            if pose is None:
+                continue
 
-            # 2. 四元数转换 XYZW → WXYZ
-            x_q, y_q, z_q, w_q = orient
-            quat = Gf.Quatd(w_q, x_q, y_q, z_q)
+            attempted += 1
+            pos, orient_xyzw = pose
+            try:
+                position = np.array(pos, dtype=np.float64)
+                qx, qy, qz, qw = orient_xyzw
+                orientation = np.array([qw, qx, qy, qz], dtype=np.float64)  # wxyz
+                rigid.set_world_pose(position=position, orientation=orientation)
+                rigid.set_linear_velocity(np.zeros(3))
+                rigid.set_angular_velocity(np.zeros(3))
+                restored += 1
+            except Exception as e:
+                print(f"[SceneBuilder] set_parts_world_poses: 恢复 {part_path} 失败: {e}")
 
-            # 3. 构建变换矩阵
-            mat = Gf.Matrix4d()
-            mat.SetTranslate(Gf.Vec3d(*pos))
-            mat.SetRotate(quat)
-
-            # 4. 添加变换操作并设置矩阵（全版本支持）
-            xform_op = xformable.AddTransformOp()
-            xform_op.Set(mat)
-            # =================================================================
-
-            print(f"✅ 已设置 {prim_path} 世界位姿")
-
-
+        print(
+            f"[SceneBuilder] set_parts_world_poses: 从 {pose_path.name} 恢复 {restored}/{attempted} 个零件位姿"
+        )
 
     def build_box(self):
         self.box_cfg = self.cfg['box']
@@ -540,6 +773,7 @@ class SceneBuilder:
             usd_path=self._usd_path(self.box_cfg['box_usd']),
             prim_path='/Root/Box',
         )
+        self.box_prim_paths = ['/Root/Box']
 
         if self.cfg['task_number'] <= 3:
             from isaacsim.core.cloner import Cloner
@@ -549,6 +783,9 @@ class SceneBuilder:
                 source_prim_path="/Root/Box",
                 prim_paths=target_paths
             )
+            self.box_prim_paths = ['/Root/Box'] + list(target_paths)
+            stage = omni.usd.get_context().get_stage()
+            self._sanitize_rigid_bodies_under_paths(stage, self.box_prim_paths, "Box")
 
             self.boxes = XFormPrim(
                 prim_paths_expr='/Root/Box.*',
@@ -576,28 +813,54 @@ class SceneBuilder:
 
         return self.box
 
+    def _lock_rigid_bodies_under_path(self, path_prefix: str, label: str) -> None:
+        """Set all rigid bodies under a prim path prefix to kinematic."""
+        try:
+            import omni.usd
+            from pxr import UsdPhysics
+            stage = omni.usd.get_context().get_stage()
+            self._sanitize_rigid_bodies_under_paths(stage, path_prefix, label)
+            locked = 0
+            for prim in stage.Traverse():
+                path = str(prim.GetPath())
+                if not path.startswith(path_prefix):
+                    continue
+                if prim.HasAPI(UsdPhysics.RigidBodyAPI) and self._is_xformable_prim(prim):
+                    rb_api = UsdPhysics.RigidBodyAPI(prim)
+                    rb_api.CreateKinematicEnabledAttr(True)
+                    locked += 1
+            print(f"[SceneBuilder] {label} 锁定完成: {locked} 个 RigidBody 已设为 kinematic")
+        except Exception as e:
+            print(f"[SceneBuilder] {label} 锁定失败: {e}")
+
     def _lock_box_positions(self):
         """将 /Root/Box* 下所有 RigidBody prim 设为 kinematic，禁止物理引擎移动箱子。"""
         try:
             import omni.usd
             from pxr import UsdPhysics, Usd
             stage = omni.usd.get_context().get_stage()
+            box_paths = getattr(self, 'box_prim_paths', None) or ['/Root/Box']
+            self._sanitize_rigid_bodies_under_paths(stage, box_paths, "Box")
             locked = 0
             for prim in stage.Traverse():
                 path = str(prim.GetPath())
                 if not path.startswith("/Root/Box"):
                     continue
-                if UsdPhysics.RigidBodyAPI.CanApply(prim):
-                    rb_api = UsdPhysics.RigidBodyAPI.Apply(prim)
-                    rb_api.CreateKinematicEnabledAttr(True)
-                    locked += 1
-                elif prim.HasAPI(UsdPhysics.RigidBodyAPI):
+                if prim.HasAPI(UsdPhysics.RigidBodyAPI) and self._is_xformable_prim(prim):
                     rb_api = UsdPhysics.RigidBodyAPI(prim)
                     rb_api.CreateKinematicEnabledAttr(True)
                     locked += 1
             print(f"[SceneBuilder] 箱子锁定完成: {locked} 个 RigidBody 已设为 kinematic")
         except Exception as e:
             print(f"[SceneBuilder] 箱子锁定失败: {e}")
+
+    def _lock_foam_positions(self):
+        """Set the foam rigid bodies to kinematic so physics cannot move the foam."""
+        if not self.foam_prim_paths:
+            print("[SceneBuilder] Foam 锁定跳过: 未找到 foam prim 路径")
+            return
+        for foam_path in self.foam_prim_paths:
+            self._lock_rigid_bodies_under_path(foam_path, "Foam")
 
     def _apply_robot_pose(self):
         """将 YAML 中 robot_position / robot_rotation 写入机器人 USD 内的
@@ -687,6 +950,18 @@ class SceneBuilder:
                 scale=foam_cfg.get('foam_scale', [1, 1, 1]),
                 parent='/Replicator',
             )
+            self.foam_prim_paths = []
+            try:
+                prims_info = self.foam._get_prims()
+                if 'primsIn' in prims_info:
+                    prims_in = prims_info['primsIn']
+                    if not isinstance(prims_in, (list, tuple)):
+                        prims_in = [prims_in]
+                    self.foam_prim_paths = [str(prim.GetPath()) for prim in prims_in]
+            except Exception as e:
+                print(f"[SceneBuilder] 提取 foam 路径失败: {e}")
+            if foam_cfg.get('lock_foam', False):
+                self._lock_foam_positions()
         return self.foam
 
     def sync_foam_to_box(self):
@@ -726,14 +1001,6 @@ class SceneBuilder:
                     'world_position': [poses[0], poses[1], poses[2]],
                     'world_orientation': [poses[3], poses[4], poses[5], poses[6]] # xyzw
                 }
-            # elif target_obj == 'box':
-            #     box_physx_view = self._physics_sim_view.create_rigid_body_view('/Replicator/Ref_Xform_01/Ref/Cardboard_Box___12x9x4')
-            #     poses = box_physx_view.get_transforms()[0]
-            #     world_poses[target_obj] = {
-            #         'module_name': target_obj,
-            #         'world_position': [poses[0], poses[1], poses[2]],
-            #         'world_orientation': [poses[3], poses[4], poses[5], poses[6]]
-            #     }
         return world_poses
 
     def get_target_object_transforms(self, step_size=None):
@@ -745,6 +1012,73 @@ class SceneBuilder:
             
         return poses_data
 
+    # ------------------------------------------------------------------
+    # Coordinate transform & scene queries (for auto_collect)
+    # ------------------------------------------------------------------
+
+    def init_coordinate_transform(self, ik_solver) -> None:
+        """Initialise ``CoordinateTransform`` from the robot's torso link.
+
+        Must be called after the IK solver is ready (after
+        ``IsaacSimRobotInterface.initialize()``).
+        """
+        self.coordinate_transform = CoordinateTransform.from_torso_link(
+            ik_solver=ik_solver,
+            torso_prim_path="/Root/Ref_Xform/Ref/torso_link",
+        )
+    def get_box_positions(self) -> list:
+        """返回所有箱子的世界坐标位置。
+
+        Returns:
+            list[np.ndarray]: 每个箱子的 [x, y, z] 坐标列表。
+        """
+        box_cfg = self.cfg.get("box", {})
+        positions = box_cfg.get("box_position", [])
+        if positions:
+            return [np.array(p, dtype=float) for p in positions]
+        return [np.array([1.2, 0.3, 1.05], dtype=float)]
+
+
+    def get_robot_world_transform(self) -> np.ndarray:
+        """获取机器人在世界坐标系下的变换矩阵 (4x4)。
+
+        Returns:
+            numpy.ndarray: 4x4 变换矩阵。
+        """
+        from pxr import UsdGeom, Usd
+        import omni.usd
+        stage = omni.usd.get_context().get_stage()
+        robot_prim = stage.GetPrimAtPath(self.robot_prim_path)
+
+        if not robot_prim.IsValid():
+            raise ValueError(f"Robot Prim not found at path: {self.robot_prim_path}")
+
+        time_code = Usd.TimeCode.Default()
+        xform_cache = UsdGeom.XformCache(time_code)
+        local_to_world_matrix = xform_cache.GetLocalToWorldTransform(robot_prim)
+        mat_array = np.array(local_to_world_matrix).reshape((4, 4))
+        return mat_array.T
+
+    def world_to_robot_coords(self, world_pos) -> list:
+        """将世界坐标系下的点转换为机器人基座坐标系下的点。
+
+        Args:
+            world_pos: [x, y, z] 世界坐标。
+
+        Returns:
+            [x_local, y_local, z_local] 相对于机器人的坐标。
+        """
+        T_robot_to_world = self.get_robot_world_transform()
+        try:
+            T_world_to_robot = np.linalg.inv(T_robot_to_world)
+        except np.linalg.LinAlgError:
+            print("[SceneBuilder] 错误：无法计算变换矩阵的逆")
+            return world_pos
+
+        pos_homo = np.append(np.array(world_pos), 1.0)
+        local_pos_homo = T_world_to_robot @ pos_homo
+        local_pos = local_pos_homo[:3] / local_pos_homo[3]
+        return local_pos.tolist()
 
     @staticmethod
     def _euler_to_quat_wxyz(euler_xyz_rad):
@@ -789,37 +1123,76 @@ class SceneBuilder:
         center = np.array(self.plane_cfg['plane_position'][plane_index], dtype=np.float64)
         scale = np.array(self.plane_cfg['plane_scale'][plane_index], dtype=np.float64)
         half_x, half_y = scale[0] * 0.5, scale[1] * 0.5
+        use_fixed_task3_spawn = (
+            self.cfg.get('task_number', 0) == 3
+            and self.part_cfg.get('fixed_spawn', {}).get('enabled', False)
+        )
+        use_sampled_spawn = self.cfg.get('task_number', 0) == 1 or use_fixed_task3_spawn
+        sampled_xy_positions = (
+            self._sample_scatter_xy_positions(center, half_x, half_y, len(target_paths))
+            if use_sampled_spawn else []
+        )
+        fixed_cfg = self.part_cfg.get('fixed_spawn', {})
+        fixed_z_offset = fixed_cfg.get('z_offset', 0.03)
+        sampled_z_offset = fixed_z_offset if use_fixed_task3_spawn else self.part_cfg.get('spawn_z_offset', 0.03)
 
+        created_paths = []
         idx = 0
-        for pool, count in part_pools:
+        for part_spec in part_pools:
+            if len(part_spec) == 2:
+                pool, count = part_spec
+                part_type = None
+            else:
+                pool, count, part_type = part_spec
+            count = self._non_negative_int(count, 'part count')
+            if count == 0:
+                continue
+            if not self._asset_pool_has_entries(pool):
+                raise ValueError("Part asset pool must not be empty when count > 0")
             for _ in range(count):
                 if idx >= len(target_paths):
                     print(f"[SceneBuilder] 警告: 目标路径不足，已创建 {idx} 个")
-                    return
+                    return created_paths
                 prim_path = target_paths[idx]
                 idx += 1
 
-                if isinstance(pool, list):
-                    usd_file = self._usd_path(random.choice(pool))
-                else:
-                    usd_file = self._usd_path(pool)
+                usd_file = self._resolve_asset_path(self._choose_asset_from_pool(pool))
 
                 stage_utils.add_reference_to_stage(usd_path=usd_file, prim_path=prim_path)
                 prim = stage.GetPrimAtPath(prim_path)
+                created_paths.append(prim_path)
+                if part_type is not None:
+                    self.part_type_by_prim_path[prim_path] = part_type
 
-                UsdPhysics.RigidBodyAPI.Apply(prim)
-                UsdPhysics.MassAPI.Apply(prim).CreateMassAttr(self.part_cfg.get('mass', 0.2))
-
-                pos = Gf.Vec3d(
-                    float(center[0] + random.uniform(-half_x, half_x)),
-                    float(center[1] + random.uniform(-half_y, half_y)),
-                    float(center[2] + 0.03),
+                self._apply_rigid_body_to_prim(
+                    prim,
+                    mass=self.part_cfg.get('mass', 0.2),
+                    enabled=True,
                 )
-                euler = np.array([
-                    random.uniform(-np.pi / 2, np.pi / 2),
-                    random.uniform(-np.pi / 2, np.pi / 2),
-                    random.uniform(-np.pi / 2, np.pi / 2),
-                ])
+                self._sanitize_rigid_bodies_under_paths(stage, prim_path, "Part")
+
+                if use_sampled_spawn:
+                    xy = sampled_xy_positions[idx - 1]
+                    pos = Gf.Vec3d(
+                        float(xy[0]),
+                        float(xy[1]),
+                        float(center[2] + sampled_z_offset),
+                    )
+                else:
+                    z_offset = self.part_cfg.get('spawn_z_offset', 0.03)
+                    pos = Gf.Vec3d(
+                        float(center[0] + random.uniform(-half_x, half_x)),
+                        float(center[1] + random.uniform(-half_y, half_y)),
+                        float(center[2] + z_offset),
+                    )
+                if use_fixed_task3_spawn and not fixed_cfg.get('random_rotation', True):
+                    euler = np.radians(np.array(fixed_cfg.get('rotation_deg', [0, 0, 0]), dtype=np.float64))
+                else:
+                    euler = np.array([
+                        random.uniform(-np.pi / 2, np.pi / 2),
+                        random.uniform(-np.pi / 2, np.pi / 2),
+                        random.uniform(-np.pi / 2, np.pi / 2),
+                    ])
                 quat = self._euler_to_quat_wxyz(euler)
 
                 xformable = UsdGeom.Xformable(prim)
@@ -829,24 +1202,26 @@ class SceneBuilder:
                     Gf.Quatf(float(quat[0]), float(quat[1]), float(quat[2]), float(quat[3]))
                 )
 
+        return created_paths
+
     def _randomize_task1_assets(self):
-        """删除旧零件，从资产池中随机选择并在相同路径上创建新零件（仅 USD 层，位姿在 world.reset 后由 scatter_after_reset 设置）"""
+        """删除旧零件，从资产池中随机选择并在相同路径上创建新零件。"""
         saved_paths = list(self._initial_parts_prim_paths)
         self._delete_old_parts()
+        self.part_type_by_prim_path = {}
 
-        part_a_pool = self.part_cfg.get('part_a_assets', [])
-        part_b_pool = self.part_cfg.get('part_b_assets', [])
-        num_a = self.part_cfg.get('num_parts', 2)
-
-        self._create_parts_at_paths(
-            part_pools=[(part_a_pool, num_a), (part_b_pool, num_a)],
+        created_paths = self._create_parts_at_paths(
+            part_pools=[
+                (asset_pool, count, part_type)
+                for part_type, asset_pool, count in self._get_task1_part_plan()
+            ],
             target_paths=saved_paths,
             plane_index=0,
         )
 
-        self.parts_prim_paths = saved_paths
+        self.parts_prim_paths = created_paths
         self._rigid_prims_initialized = False
-        print(f"[SceneBuilder] Task1 已重新创建 {len(saved_paths)} 个零件 (路径不变，等待 scatter)")
+        print(f"[SceneBuilder] Task1 已重新创建 {len(created_paths)} 个零件 (路径不变，等待 scatter)")
 
     def _randomize_task3_assets(self):
         """删除旧零件，在相同路径上为每个箱子重新创建零件（仅 USD 层，位姿在 world.reset 后由 scatter_after_reset 设置）"""
@@ -859,7 +1234,7 @@ class SceneBuilder:
         part_usds = [part_a, part_b]
 
         num_groups = len(self.box_cfg['box_position'])
-        parts_per_group = 3
+        parts_per_group = self.part_cfg.get('num_parts', 3)
 
         for i in range(num_groups):
             asset = part_usds[i] if i < len(part_usds) else part_usds[-1]
@@ -889,27 +1264,137 @@ class SceneBuilder:
         if task == 1:
             self._scatter_parts_direct(plane_index=0)
             print(f"[SceneBuilder] Task1 scatter_after_reset: 已随机散布 {len(self.parts_prim_paths)} 个零件")
-        elif task == 2:
-            # world.reset() 后物理视图已就绪，用随机顺序设置初始位姿并清零速度
-            total_parts = len(self.parts_prim_paths)
-            random_indices = np.random.permutation(np.arange(total_parts))
-            self.rigid_prim.set_world_poses(
-                positions=self._task2_initial_positions,
-                indices=random_indices
-            )
-            self.rigid_prim.set_velocities(velocities=np.zeros((total_parts, 6)))
-            # 更新本轮随机顺序，供 reset() 复用
-            self._task2_initial_indices = random_indices.copy()
-            print(f"[SceneBuilder] Task2 scatter_after_reset: 已设置 {total_parts} 个零件初始位姿")
         elif task == 3:
             num_groups = len(self.box_cfg['box_position'])
-            parts_per_group = 3
+            parts_per_group = self.part_cfg.get('num_parts', 3)
             for i in range(num_groups):
                 start = i * parts_per_group
                 end = start + parts_per_group
                 group_paths = self.parts_prim_paths[start:end]
                 self._scatter_parts_direct(plane_index=i, prim_paths=group_paths)
             print(f"[SceneBuilder] Task3 scatter_after_reset: 已随机散布 {len(self.parts_prim_paths)} 个零件到 {num_groups} 个平面")
+
+    def _sample_scatter_xy_positions(self, center, half_x, half_y, count):
+        """Sample random XY positions away from edges with simple separation."""
+        if count <= 0:
+            return []
+
+        task = self.cfg.get('task_number', 0)
+        edge_margin_x = 0.0
+        edge_margin_y = 0.0
+        if task == 3:
+            edge_margin_x = max(0.008, half_x * 0.25)
+            edge_margin_y = max(0.008, half_y * 0.25)
+
+        usable_half_x = max(half_x - edge_margin_x, half_x * 0.25)
+        usable_half_y = max(half_y - edge_margin_y, half_y * 0.25)
+
+        if task == 1:
+            edge_margin_x = float(self.part_cfg.get('scatter_edge_margin_x', max(0.02, half_x * 0.15)))
+            edge_margin_y = float(self.part_cfg.get('scatter_edge_margin_y', max(0.02, half_y * 0.15)))
+            usable_half_x = max(half_x - edge_margin_x, half_x * 0.25)
+            usable_half_y = max(half_y - edge_margin_y, half_y * 0.25)
+            min_distance = float(
+                self.part_cfg.get(
+                    'scatter_min_distance',
+                    min(0.12, max(0.08, min(half_x, half_y) * 0.75)),
+                )
+            )
+
+            def task1_candidate():
+                return (
+                    center[0] + random.uniform(-usable_half_x, usable_half_x),
+                    center[1] + random.uniform(-usable_half_y, usable_half_y),
+                )
+
+            positions = []
+            for _ in range(count):
+                accepted = None
+                for _attempt in range(300):
+                    candidate = task1_candidate()
+                    if all(np.linalg.norm(np.array(candidate) - np.array(p)) >= min_distance for p in positions):
+                        accepted = candidate
+                        break
+                if accepted is None:
+                    accepted = task1_candidate()
+                    print(
+                        f"[SceneBuilder] Task1 scatter: 无法满足最小间距 {min_distance:.3f}m，"
+                        "已使用随机候选点"
+                    )
+                positions.append(accepted)
+            return positions
+
+        fixed_cfg = self.part_cfg.get('fixed_spawn', {}) if task == 3 else {}
+        if task == 3 and fixed_cfg.get('enabled', False):
+            anchor_offsets = fixed_cfg.get('anchor_offsets')
+            if anchor_offsets:
+                anchors = [(float(offset[0]), float(offset[1])) for offset in anchor_offsets]
+            else:
+                anchor_fraction = float(fixed_cfg.get('anchor_fraction', 0.8))
+                anchor_x = usable_half_x * anchor_fraction
+                anchor_y = usable_half_y * anchor_fraction
+                anchors = [
+                    (-anchor_x, -anchor_y),
+                    (-anchor_x, anchor_y),
+                    (anchor_x, -anchor_y),
+                    (anchor_x, anchor_y),
+                ]
+
+            if not anchors:
+                return []
+            if fixed_cfg.get('random_select', True):
+                selected_anchors = random.sample(anchors, min(count, len(anchors)))
+            else:
+                selected_anchors = anchors[:count]
+            while len(selected_anchors) < count:
+                selected_anchors.append(random.choice(anchors))
+            return [
+                (float(center[0] + dx), float(center[1] + dy))
+                for dx, dy in selected_anchors[:count]
+            ]
+
+        if task == 3 and count <= 4:
+            anchor_x = usable_half_x * 0.8
+            anchor_y = usable_half_y * 0.8
+            anchors = [
+                (-anchor_x, -anchor_y),
+                (-anchor_x, anchor_y),
+                (anchor_x, -anchor_y),
+                (anchor_x, anchor_y),
+            ]
+            selected_anchors = random.sample(anchors, count)
+            jitter_x = max(0.002, usable_half_x * 0.08)
+            jitter_y = max(0.002, usable_half_y * 0.08)
+            positions = []
+            for dx, dy in selected_anchors:
+                x = center[0] + float(np.clip(dx + random.uniform(-jitter_x, jitter_x), -usable_half_x, usable_half_x))
+                y = center[1] + float(np.clip(dy + random.uniform(-jitter_y, jitter_y), -usable_half_y, usable_half_y))
+                positions.append((x, y))
+            return positions
+
+        min_distance = min(
+            0.045,
+            max(0.025, min(usable_half_x, usable_half_y) * 0.85),
+        )
+
+        def random_candidate():
+            return (
+                center[0] + random.uniform(-usable_half_x, usable_half_x),
+                center[1] + random.uniform(-usable_half_y, usable_half_y),
+            )
+
+        positions = []
+        for _ in range(count):
+            accepted = None
+            for _attempt in range(100):
+                candidate = random_candidate()
+                if all(np.linalg.norm(np.array(candidate) - np.array(p)) >= min_distance for p in positions):
+                    accepted = candidate
+                    break
+            if accepted is None:
+                accepted = random_candidate()
+            positions.append(accepted)
+        return positions
 
     def _scatter_parts_direct(self, plane_index=0, prim_paths=None):
         """直接通过 SingleRigidPrim 随机散布零件（完全绕过 Replicator）。
@@ -927,13 +1412,21 @@ class SceneBuilder:
         # 散布范围与 scatter_2d 一致：平面 X/Y 方向各 scale*0.5
         half_x = scale[0] * 0.5
         half_y = scale[1] * 0.5
+        fixed_cfg = self.part_cfg.get('fixed_spawn', {})
+        use_fixed_task3_spawn = (
+            self.cfg.get('task_number', 0) == 3
+            and fixed_cfg.get('enabled', False)
+        )
+        z_offset = fixed_cfg.get('z_offset', 0.03) if use_fixed_task3_spawn else self.part_cfg.get('spawn_z_offset', 0.03)
 
         # 延迟初始化 + 使用缓存的 rigid prim
         self._ensure_rigid_prims()
         rigid_prims = getattr(self, '_parts_rigid_prims', [])
         all_paths = self.parts_prim_paths
 
-        for path in prim_paths:
+        xy_positions = self._sample_scatter_xy_positions(center, half_x, half_y, len(prim_paths))
+
+        for path, xy in zip(prim_paths, xy_positions):
             # 从缓存中查找对应的 rigid prim
             try:
                 idx = all_paths.index(path)
@@ -945,15 +1438,18 @@ class SceneBuilder:
                 continue
 
             pos = np.array([
-                center[0] + random.uniform(-half_x, half_x),
-                center[1] + random.uniform(-half_y, half_y),
-                center[2] + 0.03,   # Z 方向稍高于平面，避免穿模
+                xy[0],
+                xy[1],
+                center[2] + z_offset,
             ], dtype=np.float64)
-            euler = np.array([
-                random.uniform(-np.pi/2, np.pi/2),
-                random.uniform(-np.pi/2, np.pi/2),
-                random.uniform(-np.pi/2, np.pi/2),
-            ])
+            if use_fixed_task3_spawn and not fixed_cfg.get('random_rotation', True):
+                euler = np.radians(np.array(fixed_cfg.get('rotation_deg', [0, 0, 0]), dtype=np.float64))
+            else:
+                euler = np.array([
+                    random.uniform(-np.pi/2, np.pi/2),
+                    random.uniform(-np.pi/2, np.pi/2),
+                    random.uniform(-np.pi/2, np.pi/2),
+                ])
             quat = self._euler_to_quat_wxyz(euler)
 
             rigid.set_world_pose(position=pos, orientation=quat)
@@ -985,7 +1481,11 @@ class SceneBuilder:
             print(f"[SceneBuilder] 箱子已重置到初始位置")
 
 
-    def save_parts_poses(self, save_dir: Optional[Path] = None) -> Optional[Path]:
+    def save_parts_poses(
+        self,
+        save_dir: Optional[Path] = None,
+        episode_index: Optional[int] = None,
+    ) -> Optional[Path]:
         """
         保存所有零件的世界位姿数据到 JSON 文件（适用于所有任务）
 
@@ -1010,14 +1510,20 @@ class SceneBuilder:
 
             # 空数据判断
             if not all_parts_poses:
+                if self.compute_num_tracked_objects(self.cfg) == 0:
+                    print("[save_parts_poses] 当前配置零件数量为 0，跳过保存")
+                    return None
                 print("[save_parts_poses] 错误：未获取到任何零件位姿数据，取消保存")
                 return None
 
             # 2. 生成保存路径
-            # 根据当前任务编号和时间戳生成文件名
+            # 根据当前任务编号、episode索引和时间戳生成文件名
             task_num = self.cfg.get('task_number', 1)
             time_stamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-            file_name = f"task{task_num}_parts_poses_{time_stamp}.json"
+            if episode_index is not None:
+                file_name = f"task{task_num}_episode{episode_index}_parts_poses_{time_stamp}.json"
+            else:
+                file_name = f"task{task_num}_parts_poses_{time_stamp}.json"
 
             # 确定保存目录
             if save_dir is None:
@@ -1041,6 +1547,8 @@ class SceneBuilder:
                 )
 
             # 4. 保存成功日志
+            if episode_index is not None:
+                print(f"[save_parts_poses] episode_index={episode_index}")
             print(f"[save_parts_poses] 保存成功！共 {len(all_parts_poses)} 个零件")
             print(f"[save_parts_poses] 文件路径：{save_path.absolute()}")
             return save_path
@@ -1062,46 +1570,35 @@ class SceneBuilder:
         if task == 1:
             self.save_parts_poses()
             self._randomize_task1_assets()
+            # self.set_parts_world_poses(json_file_path='task1_parts_poses_20260418_112821.json')
             self._reset_boxes()
             print("[SceneBuilder] Task1 已重置")
             return
 
         # ── 任务2重置：传送带零件恢复初始位置 + 重新随机排列顺序 ──
         if task == 2:
-            # 传送带表面速度：Isaac Sim 5.1 / PhysX 107 使用 PhysxSurfaceVelocityAPI（Vector3f）。
-            def _set_conveyor_surface_velocity(velocity_vec3) -> None:
-                import omni.usd
-                from pxr import PhysxSchema
-                stage = omni.usd.get_context().get_stage()
-                for prim in stage.Traverse():
-                    if "ConveyorBelt" not in str(prim.GetPath()):
-                        continue
-                    if prim.HasAPI(PhysxSchema.PhysxSurfaceVelocityAPI):
-                        PhysxSchema.PhysxSurfaceVelocityAPI(prim).GetSurfaceVelocityAttr().Set(
-                            velocity_vec3
-                        )
 
-            try:
-                from pxr import Gf
-                _set_conveyor_surface_velocity(Gf.Vec3f(0.0, 0.0, 0.0))
-            except Exception as e:
-                print(f"[SceneBuilder] 传送带停止失败: {e}")
+            #停止传送带
+            self.set_conveyor_speed([0.0,0.0,0.0])
 
-            total_parts = len(self.parts_prim_paths)
-            random_indices = np.random.permutation(np.arange(total_parts))
-            self.rigid_prim.set_velocities(velocities=np.zeros((total_parts, 6)))
+            # 官方标准：8个零件（5A + 5B）
+            random_indices = np.random.permutation(np.array([0, 1, 2, 3, 4, 5, 6, 7]))
+            # 清零速度和角速度，防止物体保留上一轮运动状态
+            # 注意：rigid_prim 包含所有 /Root/Part_.* 匹配的 prim（包括原始的A/B共12个）
+            # 只需要清零克隆的8个零件的速度
+            self.rigid_prim.set_velocities(velocities=np.zeros((8, 6)))
+            # 恢复初始位姿，随机排列顺序
             self.rigid_prim.set_world_poses(
                 positions=self._task2_initial_positions,
                 indices=random_indices
             )
-            self.rigid_prim.set_velocities(velocities=np.zeros((total_parts, 6)))
+            # 再次清零速度，确保位姿设置后速度为零
+            self.rigid_prim.set_velocities(velocities=np.zeros((8, 6)))
 
             # 重新启动传送带（沿 X 轴正方向，速度 0.1 m/s）
-            try:
-                from pxr import Gf
-                _set_conveyor_surface_velocity(Gf.Vec3f(0.1, 0.0, 0.0))
-            except Exception as e:
-                print(f"[SceneBuilder] 传送带重启失败: {e}")
+
+            Conveyor_speed=self.ConveyorBelt_cfg['ConveyorBelt_speed']
+            self.set_conveyor_speed(Conveyor_speed)
 
             self.save_parts_poses()
             self._reset_boxes()
@@ -1114,6 +1611,8 @@ class SceneBuilder:
             self._reset_boxes()
             if self.box_cfg.get('lock_boxes', False):
                 self._lock_box_positions()
+            if self.cfg.get('foam', {}).get('lock_foam', False):
+                self._lock_foam_positions()
             print("[SceneBuilder] Task3 已重置")
             return
 

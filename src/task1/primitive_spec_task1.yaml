@@ -1,8 +1,0 @@
-
-action_plan:
-  approach_offset_m: 0.08
-  lift_height_m: 0.17
-  settle_time_s: 1.5
-  # Chiều cao TCP so với gốc vật khi gắp (world Z).
-  # Tăng nếu vật cao và cần gắp ở giữa thân; giảm nếu gripper vẫn gắp không khí.
-  grasp_z_offset_m: 0.01
