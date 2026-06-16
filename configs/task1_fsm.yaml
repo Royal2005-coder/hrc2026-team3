@@ -1,0 +1,110 @@
+fsm:
+  name: Task1_PickPlace_FSM
+  initial_state: IDLE
+
+  states:
+
+    IDLE:
+      description: "Waiting for a new PerceptionFrame from Person 1"
+      transitions:
+        - on: FRAME_RECEIVED
+          to: VALIDATE
+
+    VALIDATE:
+      description: "Check confidence, pose sanity, and bin mapping for all objects"
+      actions:
+        - validate_objects()
+      transitions:
+        - on: VALID_OBJECTS_FOUND
+          to: SELECT_OBJECT
+        - on: NO_VALID_OBJECTS
+          to: DONE
+
+    SELECT_OBJECT:
+      description: "Choose best object by highest confidence + reachable pose"
+      actions:
+        - select_object()
+        - log_decision()
+      transitions:
+        - on: OBJECT_SELECTED
+          to: PLAN
+        - on: NO_OBJECTS_LEFT
+          to: DONE
+
+    PLAN:
+      description: "Build ActionPlan and map class_id to target bin"
+      actions:
+        - map_bin()
+        - build_action_plan()
+      transitions:
+        - on: PLAN_READY
+          to: PICKING
+        - on: BIN_NOT_FOUND
+          to: FAIL
+
+    PICKING:
+      description: "Send ActionPlan to Person 3 — robot arm moves to object"
+      actions:
+        - send_action_plan_to_person3()
+      transitions:
+        - on: PRIMITIVE_SUCCESS
+          to: PLACING
+        - on: PRIMITIVE_GRASP_FAIL
+          to: RETRY
+        - on: PRIMITIVE_COLLISION
+          to: FAIL
+        - on: PRIMITIVE_TIMEOUT
+          to: RETRY
+
+    PLACING:
+      description: "Robot arm moves object to target bin and releases"
+      transitions:
+        - on: PRIMITIVE_SUCCESS
+          to: VERIFYING
+        - on: PRIMITIVE_DROP
+          to: RETRY
+        - on: PRIMITIVE_WRONG_BIN
+          to: FAIL
+
+    VERIFYING:
+      description: "Confirm object landed in correct bin (via Person 1 re-check)"
+      transitions:
+        - on: VERIFY_OK
+          to: IDLE           
+        - on: VERIFY_FAIL
+          to: RETRY
+
+    RETRY:
+      description: "Attempt pick-place again with slower speed (max 2 retries)"
+      actions:
+        - increment_retry_count()
+        - apply_retry_policy()    
+      transitions:
+        - on: RETRY_ALLOWED      
+          to: PICKING
+        - on: RETRY_EXCEEDED      
+          to: FAIL
+
+    DONE:
+      description: "All objects processed — task complete"
+      actions:
+        - log_summary()
+
+    FAIL:
+      description: "Unrecoverable error — log and stop"
+      actions:
+        - log_failure()
+        - move_to_safe_home()
+
+  retry_policy:
+    max_retries: 2
+    speed_on_retry: slow
+    timeout_s: 20.0
+
+  trigger_map:
+    SUCCESS:     PRIMITIVE_SUCCESS
+    GRASP_FAIL:  PRIMITIVE_GRASP_FAIL
+    DROP:        PRIMITIVE_DROP
+    WRONG_BIN:   PRIMITIVE_WRONG_BIN
+    COLLISION:   PRIMITIVE_COLLISION
+    TIMEOUT:     PRIMITIVE_TIMEOUT

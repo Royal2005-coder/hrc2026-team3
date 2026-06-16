@@ -1,0 +1,53 @@
+# HRC2026 Team 3 CODEOWNERS
+# Confirmed teacher reviewer:
+# @haintktl-HRC2026
+#
+# Note:
+# @ntt12345 will be added later after teacher identity is confirmed.
+
+# Global teacher review
+* @haintktl-HRC2026
+
+# Perception - Tai
+/src/task1/perception.py @thanh-tai-435 @haintktl-HRC2026
+/src/task1/camera_utils.py @thanh-tai-435 @haintktl-HRC2026
+/src/task1/*perception* @thanh-tai-435 @haintktl-HRC2026
+/Team2-HRC2026-Task1-Perception-main/** @thanh-tai-435 @haintktl-HRC2026
+
+# Planner - Thu
+/src/task1/planner.py @ckothuw123 @haintktl-HRC2026
+/src/task1/fsm.py @ckothuw123 @haintktl-HRC2026
+/src/task1/state.py @ckothuw123 @haintktl-HRC2026
+/src/task1/retry_policy.py @ckothuw123 @haintktl-HRC2026
+/configs/planner.yaml @ckothuw123 @haintktl-HRC2026
+/configs/task1_fsm.yaml @ckothuw123 @haintktl-HRC2026
+/configs/bins.yaml @ckothuw123 @haintktl-HRC2026
+/schemas/** @ckothuw123 @haintktl-HRC2026
+/lab_outputs/planner_outputs/** @ckothuw123 @haintktl-HRC2026
+
+# Planner Support / Transform / Gripper / IK - Bao
+/src/task1/transform_utils.py @tduybao7605 @haintktl-HRC2026
+/src/task1/*gripper* @tduybao7605 @haintktl-HRC2026
+/src/task1/*ik* @tduybao7605 @haintktl-HRC2026
+/src/task1/*transform* @tduybao7605 @haintktl-HRC2026
+/src/task1/robot_math_utils.py @tduybao7605 @haintktl-HRC2026
+/src/baseline_source/RobotArticulation.py @tduybao7605 @haintktl-HRC2026
+
+# Motion - Vinh
+/src/task1/motion.py @Bias209 @haintktl-HRC2026
+/src/task1/*motion* @Bias209 @haintktl-HRC2026
+/src/task1/*waypoint* @Bias209 @haintktl-HRC2026
+/src/task1/*trajectory* @Bias209 @haintktl-HRC2026
+/waypoints_task1.csv @Bias209 @haintktl-HRC2026
+
+# Evaluation / Runner / PM - Gia
+/src/task1/eval.py @Royal2005-coder @haintktl-HRC2026
+/src/task1/logger.py @Royal2005-coder @haintktl-HRC2026
+/src/task1/task1_runner.py @Royal2005-coder @haintktl-HRC2026
+/src/task1/*eval* @Royal2005-coder @haintktl-HRC2026
+
+# Docs / PM
+/docs/** @Royal2005-coder @haintktl-HRC2026
+/reports/** @Royal2005-coder @haintktl-HRC2026
+/README.md @Royal2005-coder @haintktl-HRC2026
+/SETUP.md @Royal2005-coder @haintktl-HRC2026

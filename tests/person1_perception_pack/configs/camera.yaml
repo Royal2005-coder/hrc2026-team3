@@ -1,0 +1,40 @@
+# camera.yaml
+# Camera parameters for HRC2026 Task 1
+# Người 1: Tài — using head_stereo_left
+# ─────────────────────────────────────────────────
+
+cameras:
+  head_stereo_left:
+    prim_path: "/Root/Ref_Xform/Ref/head_pitch_link/head_stereo_left/head_stereo_left_Camera_01"
+    type: "stereo_left"
+    rgb:
+      width: 640
+      height: 480
+      encoding: "bgr8"
+    depth:
+      width: 640
+      height: 480
+      unit: "meter"               # XÁC NHẬN bằng capture_rgbd.py
+      min_range: 0.01
+      max_range: 100.0
+    intrinsics:
+      # THAY bằng output từ extract_camera_params.py
+      fx: 615.2
+      fy: 615.0
+      cx: 320.0
+      cy: 240.0
+    extrinsic:
+      source: "computed_from_world_transforms"
+      # THAY bằng output từ extract_camera_params.py
+      position_m: [0.0, 0.0, 0.0]
+      quaternion_xyzw: [0.0, 0.0, 0.0, 1.0]
+
+  # Camera phụ (backup) — nếu head stereo không đủ tốt
+  head_stereo_right:
+    prim_path: "/Root/Ref_Xform/Ref/head_pitch_link/head_stereo_right/head_stereo_right_Camera_01"
+    type: "stereo_right"
+    notes: "Cùng cặp stereo, dùng nếu cần stereo depth matching"
+
+# Robot base (dùng để tính T_base_camera)
+robot:
+  base_link_prim: "/Root/Ref_Xform/Ref/base_link"

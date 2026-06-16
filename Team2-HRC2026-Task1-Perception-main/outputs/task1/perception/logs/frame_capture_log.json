@@ -1,0 +1,166 @@
+{
+  "timestamp": "2026-05-20T08:01:28.758908+00:00",
+  "baseline_path": "/workspace/GlobalHumanoidRobotChallenge_2026_Baseline",
+  "config_path": "/workspace/GlobalHumanoidRobotChallenge_2026_Baseline/Ubtech_sim/config/Part_Sorting.yaml",
+  "headless": true,
+  "requested_camera_resolution": [
+    512,
+    512
+  ],
+  "render_steps": 20,
+  "resolution_config": {
+    "requested_resolution": [
+      512,
+      512
+    ],
+    "cameras": {
+      "head_left": {
+        "before": [
+          128,
+          128
+        ],
+        "after": [
+          512,
+          512
+        ],
+        "set_resolution_available": true,
+        "failure_reason": null
+      },
+      "head_right": {
+        "before": [
+          128,
+          128
+        ],
+        "after": [
+          512,
+          512
+        ],
+        "set_resolution_available": true,
+        "failure_reason": null
+      },
+      "wrist_left": {
+        "before": [
+          128,
+          128
+        ],
+        "after": [
+          512,
+          512
+        ],
+        "set_resolution_available": true,
+        "failure_reason": null
+      },
+      "wrist_right": {
+        "before": [
+          128,
+          128
+        ],
+        "after": [
+          512,
+          512
+        ],
+        "set_resolution_available": true,
+        "failure_reason": null
+      }
+    }
+  },
+  "cameras": [
+    {
+      "camera_name": "head_left",
+      "rgb_available": true,
+      "depth_available": true,
+      "rgb_shape": [
+        512,
+        512,
+        3
+      ],
+      "depth_shape": [
+        512,
+        512
+      ],
+      "rgb_dtype": "uint8",
+      "depth_dtype": "float32",
+      "depth_min": 0.246400386095047,
+      "depth_median": 2.7269556522369385,
+      "depth_max": 15.74309253692627,
+      "depth_valid_ratio": 0.9999885559082031,
+      "rgb_path": "/home/ubuntu/Team2/Task1-Perception/outputs/task1/perception/samples/sample_rgb_head_left.png",
+      "depth_path": "/home/ubuntu/Team2/Task1-Perception/outputs/task1/perception/samples/sample_depth_head_left.npy",
+      "depth_vis_path": "/home/ubuntu/Team2/Task1-Perception/outputs/task1/perception/samples/sample_depth_vis_head_left.png",
+      "failure_reason": null
+    },
+    {
+      "camera_name": "head_right",
+      "rgb_available": true,
+      "depth_available": true,
+      "rgb_shape": [
+        512,
+        512,
+        3
+      ],
+      "depth_shape": [
+        512,
+        512
+      ],
+      "rgb_dtype": "uint8",
+      "depth_dtype": "float32",
+      "depth_min": 0.24759390950202942,
+      "depth_median": 2.7269017696380615,
+      "depth_max": 15.74310302734375,
+      "depth_valid_ratio": 0.9999885559082031,
+      "rgb_path": "/home/ubuntu/Team2/Task1-Perception/outputs/task1/perception/samples/sample_rgb_head_right.png",
+      "depth_path": "/home/ubuntu/Team2/Task1-Perception/outputs/task1/perception/samples/sample_depth_head_right.npy",
+      "depth_vis_path": "/home/ubuntu/Team2/Task1-Perception/outputs/task1/perception/samples/sample_depth_vis_head_right.png",
+      "failure_reason": null
+    },
+    {
+      "camera_name": "wrist_left",
+      "rgb_available": true,
+      "depth_available": true,
+      "rgb_shape": [
+        512,
+        512,
+        3
+      ],
+      "depth_shape": [
+        512,
+        512
+      ],
+      "rgb_dtype": "uint8",
+      "depth_dtype": "float32",
+      "depth_min": 0.056235771626234055,
+      "depth_median": 8.218366622924805,
+      "depth_max": 17.746383666992188,
+      "depth_valid_ratio": 1.0,
+      "rgb_path": "/home/ubuntu/Team2/Task1-Perception/outputs/task1/perception/samples/sample_rgb_wrist_left.png",
+      "depth_path": "/home/ubuntu/Team2/Task1-Perception/outputs/task1/perception/samples/sample_depth_wrist_left.npy",
+      "depth_vis_path": "/home/ubuntu/Team2/Task1-Perception/outputs/task1/perception/samples/sample_depth_vis_wrist_left.png",
+      "failure_reason": null
+    },
+    {
+      "camera_name": "wrist_right",
+      "rgb_available": true,
+      "depth_available": true,
+      "rgb_shape": [
+        512,
+        512,
+        3
+      ],
+      "depth_shape": [
+        512,
+        512
+      ],
+      "rgb_dtype": "uint8",
+      "depth_dtype": "float32",
+      "depth_min": 0.056255094707012177,
+      "depth_median": 7.510443687438965,
+      "depth_max": 17.74087905883789,
+      "depth_valid_ratio": 1.0,
+      "rgb_path": "/home/ubuntu/Team2/Task1-Perception/outputs/task1/perception/samples/sample_rgb_wrist_right.png",
+      "depth_path": "/home/ubuntu/Team2/Task1-Perception/outputs/task1/perception/samples/sample_depth_wrist_right.npy",
+      "depth_vis_path": "/home/ubuntu/Team2/Task1-Perception/outputs/task1/perception/samples/sample_depth_vis_wrist_right.png",
+      "failure_reason": null
+    }
+  ],
+  "failure_reason": null
+}

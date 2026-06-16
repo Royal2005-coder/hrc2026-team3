@@ -1,0 +1,3 @@
+object_id,class_id,u,v,depth_m,x_cam,y_cam,z_cam,x_base,y_base,z_base,status
+obj_000,part_A,63.5,101.5,2.2675,-2.245,-1.6163,2.2675,-2.6254,2.2771,0.6503,ok
+obj_001,part_A,63.5,5.0,6.4801,-6.4159,-7.8374,6.4801,-9.6179,6.4481,-2.0978,ok

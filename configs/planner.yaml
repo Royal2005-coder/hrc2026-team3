@@ -1,0 +1,8 @@
+planner:
+  confidence_threshold: 0.75    
+  selection_strategy: "highest_confidence"  
+
+workspace_bounds:
+  x: [-0.7, -0.4]  
+  y: [-0.4, 0.4]    
+  z: [0.5, 1.0]     

@@ -1,0 +1,763 @@
+{
+  "timestamp": "2026-05-20T08:09:18.047536+00:00",
+  "baseline_path": "/workspace/GlobalHumanoidRobotChallenge_2026_Baseline",
+  "config_path": "/workspace/GlobalHumanoidRobotChallenge_2026_Baseline/Ubtech_sim/config/Part_Sorting.yaml",
+  "headless": true,
+  "requested_camera_resolution": [
+    512,
+    512
+  ],
+  "render_steps": 20,
+  "resolution_config": {
+    "requested_resolution": [
+      512,
+      512
+    ],
+    "cameras": {
+      "head_left": {
+        "before": [
+          128,
+          128
+        ],
+        "after": [
+          512,
+          512
+        ],
+        "set_resolution_available": true,
+        "failure_reason": null
+      },
+      "head_right": {
+        "before": [
+          128,
+          128
+        ],
+        "after": [
+          512,
+          512
+        ],
+        "set_resolution_available": true,
+        "failure_reason": null
+      },
+      "wrist_left": {
+        "before": [
+          128,
+          128
+        ],
+        "after": [
+          512,
+          512
+        ],
+        "set_resolution_available": true,
+        "failure_reason": null
+      },
+      "wrist_right": {
+        "before": [
+          128,
+          128
+        ],
+        "after": [
+          512,
+          512
+        ],
+        "set_resolution_available": true,
+        "failure_reason": null
+      }
+    }
+  },
+  "scene_path": "/workspace/GlobalHumanoidRobotChallenge_2026_Baseline/assets/resources/Collected_Task4/SubUSDs/2_small_warehouse2.usd",
+  "cameras": [
+    {
+      "camera_name": "head_left",
+      "prim_path": "/Root/Ref_Xform/Ref/head_pitch_link/head_stereo_left/head_stereo_left_Camera_01",
+      "prim_valid": true,
+      "resolution": [
+        512,
+        512
+      ],
+      "depth_unit": "unknown",
+      "rgb_depth_alignment": "unknown",
+      "T_base_camera": "unknown",
+      "pose_base_claimed": false,
+      "camera_api_methods": {
+        "get_resolution": {
+          "available": true,
+          "value": [
+            512,
+            512
+          ],
+          "error": null
+        },
+        "get_intrinsics_matrix": {
+          "available": true,
+          "value": "unknown",
+          "error": "pinhole projection type is not set to be able to use get_intrinsics_matrix method."
+        },
+        "get_projection_matrix": {
+          "available": false,
+          "value": "unknown",
+          "error": "method_not_found"
+        },
+        "get_focal_length": {
+          "available": true,
+          "value": 0.0023316089063882828,
+          "error": null
+        },
+        "get_horizontal_aperture": {
+          "available": true,
+          "value": 0.0057599999010562895,
+          "error": null
+        },
+        "get_vertical_aperture": {
+          "available": true,
+          "value": 0.0057599999010562895,
+          "error": null
+        },
+        "get_clipping_range": {
+          "available": true,
+          "value": [
+            0.05000000074505806,
+            100000.0
+          ],
+          "error": null
+        },
+        "get_world_pose": {
+          "available": true,
+          "value": "unknown",
+          "error": "can only convert an array of size 1 to a Python scalar"
+        },
+        "get_local_pose": {
+          "available": true,
+          "value": "unknown",
+          "error": "can only convert an array of size 1 to a Python scalar"
+        }
+      },
+      "usd_attributes": {
+        "focalLength": {
+          "available": true,
+          "value": 0.023316089063882828
+        },
+        "horizontalAperture": {
+          "available": true,
+          "value": 0.0575999990105629
+        },
+        "verticalAperture": {
+          "available": true,
+          "value": 0.0575999990105629
+        },
+        "horizontalApertureOffset": {
+          "available": true,
+          "value": 0.0
+        },
+        "verticalApertureOffset": {
+          "available": true,
+          "value": 0.0
+        },
+        "clippingRange": {
+          "available": true,
+          "value": "(0.05, 100000)"
+        },
+        "projection": {
+          "available": true,
+          "value": "perspective"
+        },
+        "focusDistance": {
+          "available": true,
+          "value": 100.0
+        },
+        "fStop": {
+          "available": true,
+          "value": 20.0
+        }
+      },
+      "camera_world_pose": {
+        "T_world_camera_matrix4x4": [
+          [
+            0.9999999957262766,
+            -7.461170460443932e-05,
+            -5.459432690868991e-05,
+            0.0
+          ],
+          [
+            8.721557230408136e-05,
+            0.5653944477231366,
+            0.8248206537649826,
+            0.0
+          ],
+          [
+            -3.067394565871574e-05,
+            -0.824820655001403,
+            0.5653944518140996,
+            0.0
+          ],
+          [
+            0.6680542100916681,
+            -0.0414475517595172,
+            1.6013834934114686,
+            1.0
+          ]
+        ],
+        "position_m": [
+          0.6680542100916681,
+          -0.0414475517595172,
+          1.6013834934114686
+        ],
+        "quaternion_xyzw": [
+          0.4661574562819522,
+          6.75944765539426e-06,
+          -4.572932998211803e-05,
+          0.8847017711160514
+        ],
+        "source": "UsdGeom.XformCache.GetLocalToWorldTransform(camera_prim)"
+      },
+      "intrinsics": {
+        "status": "computed_from_usd_focal_aperture_assuming_center_principal_point",
+        "fx": 207.25412857244675,
+        "fy": 207.25412857244675,
+        "cx": 256.0,
+        "cy": 256.0,
+        "matrix_3x3": [
+          [
+            207.25412857244675,
+            0.0,
+            256.0
+          ],
+          [
+            0.0,
+            207.25412857244675,
+            256.0
+          ],
+          [
+            0.0,
+            0.0,
+            1.0
+          ]
+        ],
+        "warning": "Computed intrinsics need runtime/API validation before use for pose_base."
+      },
+      "notes": [
+        "Depth unit was not verified by geometry inspection.",
+        "T_base_camera is not derived here; only camera world pose is logged if available."
+      ]
+    },
+    {
+      "camera_name": "head_right",
+      "prim_path": "/Root/Ref_Xform/Ref/head_pitch_link/head_stereo_right/head_stereo_right_Camera_01",
+      "prim_valid": true,
+      "resolution": [
+        512,
+        512
+      ],
+      "depth_unit": "unknown",
+      "rgb_depth_alignment": "unknown",
+      "T_base_camera": "unknown",
+      "pose_base_claimed": false,
+      "camera_api_methods": {
+        "get_resolution": {
+          "available": true,
+          "value": [
+            512,
+            512
+          ],
+          "error": null
+        },
+        "get_intrinsics_matrix": {
+          "available": true,
+          "value": "unknown",
+          "error": "pinhole projection type is not set to be able to use get_intrinsics_matrix method."
+        },
+        "get_projection_matrix": {
+          "available": false,
+          "value": "unknown",
+          "error": "method_not_found"
+        },
+        "get_focal_length": {
+          "available": true,
+          "value": 0.0023316089063882828,
+          "error": null
+        },
+        "get_horizontal_aperture": {
+          "available": true,
+          "value": 0.0057599999010562895,
+          "error": null
+        },
+        "get_vertical_aperture": {
+          "available": true,
+          "value": 0.0057599999010562895,
+          "error": null
+        },
+        "get_clipping_range": {
+          "available": true,
+          "value": [
+            0.05000000074505806,
+            100000.0
+          ],
+          "error": null
+        },
+        "get_world_pose": {
+          "available": true,
+          "value": "unknown",
+          "error": "can only convert an array of size 1 to a Python scalar"
+        },
+        "get_local_pose": {
+          "available": true,
+          "value": "unknown",
+          "error": "can only convert an array of size 1 to a Python scalar"
+        }
+      },
+      "usd_attributes": {
+        "focalLength": {
+          "available": true,
+          "value": 0.023316089063882828
+        },
+        "horizontalAperture": {
+          "available": true,
+          "value": 0.0575999990105629
+        },
+        "verticalAperture": {
+          "available": true,
+          "value": 0.0575999990105629
+        },
+        "horizontalApertureOffset": {
+          "available": true,
+          "value": 0.0
+        },
+        "verticalApertureOffset": {
+          "available": true,
+          "value": 0.0
+        },
+        "clippingRange": {
+          "available": true,
+          "value": "(0.05, 100000)"
+        },
+        "projection": {
+          "available": true,
+          "value": "perspective"
+        },
+        "focusDistance": {
+          "available": true,
+          "value": 100.0
+        },
+        "fStop": {
+          "available": true,
+          "value": 20.0
+        }
+      },
+      "camera_world_pose": {
+        "T_world_camera_matrix4x4": [
+          [
+            0.9999999957262766,
+            -7.461170460443932e-05,
+            -5.459432690868991e-05,
+            0.0
+          ],
+          [
+            8.721557230408136e-05,
+            0.5653944477231366,
+            0.8248206537649826,
+            0.0
+          ],
+          [
+            -3.067394565871574e-05,
+            -0.824820655001403,
+            0.5653944518140996,
+            0.0
+          ],
+          [
+            0.7320342098182352,
+            -0.04145232541637778,
+            1.601380000466433,
+            1.0
+          ]
+        ],
+        "position_m": [
+          0.7320342098182352,
+          -0.04145232541637778,
+          1.601380000466433
+        ],
+        "quaternion_xyzw": [
+          0.4661574562819522,
+          6.75944765539426e-06,
+          -4.572932998211803e-05,
+          0.8847017711160514
+        ],
+        "source": "UsdGeom.XformCache.GetLocalToWorldTransform(camera_prim)"
+      },
+      "intrinsics": {
+        "status": "computed_from_usd_focal_aperture_assuming_center_principal_point",
+        "fx": 207.25412857244675,
+        "fy": 207.25412857244675,
+        "cx": 256.0,
+        "cy": 256.0,
+        "matrix_3x3": [
+          [
+            207.25412857244675,
+            0.0,
+            256.0
+          ],
+          [
+            0.0,
+            207.25412857244675,
+            256.0
+          ],
+          [
+            0.0,
+            0.0,
+            1.0
+          ]
+        ],
+        "warning": "Computed intrinsics need runtime/API validation before use for pose_base."
+      },
+      "notes": [
+        "Depth unit was not verified by geometry inspection.",
+        "T_base_camera is not derived here; only camera world pose is logged if available."
+      ]
+    },
+    {
+      "camera_name": "wrist_left",
+      "prim_path": "/Root/Ref_Xform/Ref/L_camera_link/L_camera_link/L_wrist_camera/L_wrist_Camera",
+      "prim_valid": true,
+      "resolution": [
+        512,
+        512
+      ],
+      "depth_unit": "unknown",
+      "rgb_depth_alignment": "unknown",
+      "T_base_camera": "unknown",
+      "pose_base_claimed": false,
+      "camera_api_methods": {
+        "get_resolution": {
+          "available": true,
+          "value": [
+            512,
+            512
+          ],
+          "error": null
+        },
+        "get_intrinsics_matrix": {
+          "available": true,
+          "value": "unknown",
+          "error": "can only convert an array of size 1 to a Python scalar"
+        },
+        "get_projection_matrix": {
+          "available": false,
+          "value": "unknown",
+          "error": "method_not_found"
+        },
+        "get_focal_length": {
+          "available": true,
+          "value": 1.814756202697754,
+          "error": null
+        },
+        "get_horizontal_aperture": {
+          "available": true,
+          "value": 2.0954999923706055,
+          "error": null
+        },
+        "get_vertical_aperture": {
+          "available": true,
+          "value": 2.0954999923706055,
+          "error": null
+        },
+        "get_clipping_range": {
+          "available": true,
+          "value": [
+            0.009999999776482582,
+            10000000.0
+          ],
+          "error": null
+        },
+        "get_world_pose": {
+          "available": true,
+          "value": "unknown",
+          "error": "can only convert an array of size 1 to a Python scalar"
+        },
+        "get_local_pose": {
+          "available": true,
+          "value": "unknown",
+          "error": "can only convert an array of size 1 to a Python scalar"
+        }
+      },
+      "usd_attributes": {
+        "focalLength": {
+          "available": true,
+          "value": 18.14756202697754
+        },
+        "horizontalAperture": {
+          "available": true,
+          "value": 20.954999923706055
+        },
+        "verticalAperture": {
+          "available": true,
+          "value": 20.954999923706055
+        },
+        "horizontalApertureOffset": {
+          "available": true,
+          "value": 0.0
+        },
+        "verticalApertureOffset": {
+          "available": true,
+          "value": 0.0
+        },
+        "clippingRange": {
+          "available": true,
+          "value": "(0.01, 10000000)"
+        },
+        "projection": {
+          "available": true,
+          "value": "perspective"
+        },
+        "focusDistance": {
+          "available": true,
+          "value": 1.0
+        },
+        "fStop": {
+          "available": true,
+          "value": 0.0
+        }
+      },
+      "camera_world_pose": {
+        "T_world_camera_matrix4x4": [
+          [
+            0.7952615934821918,
+            -0.08216531734889881,
+            -0.6006728382048923,
+            0.0
+          ],
+          [
+            0.6062594013411533,
+            0.1125526370263521,
+            0.7872619908161969,
+            0.0
+          ],
+          [
+            0.0029216806179252694,
+            -0.9902427805964407,
+            0.13932228557914877,
+            0.0
+          ],
+          [
+            0.4371524834664741,
+            0.2837898313015026,
+            1.3929197524717267,
+            1.0
+          ]
+        ],
+        "position_m": [
+          0.4371524834664741,
+          0.2837898313015026,
+          1.3929197524717267
+        ],
+        "quaternion_xyzw": [
+          0.6211655719042813,
+          0.21093171760371418,
+          -0.240576419808034,
+          0.7153908924650377
+        ],
+        "source": "UsdGeom.XformCache.GetLocalToWorldTransform(camera_prim)"
+      },
+      "intrinsics": {
+        "status": "computed_from_usd_focal_aperture_assuming_center_principal_point",
+        "fx": 443.4050007941597,
+        "fy": 443.4050007941597,
+        "cx": 256.0,
+        "cy": 256.0,
+        "matrix_3x3": [
+          [
+            443.4050007941597,
+            0.0,
+            256.0
+          ],
+          [
+            0.0,
+            443.4050007941597,
+            256.0
+          ],
+          [
+            0.0,
+            0.0,
+            1.0
+          ]
+        ],
+        "warning": "Computed intrinsics need runtime/API validation before use for pose_base."
+      },
+      "notes": [
+        "Depth unit was not verified by geometry inspection.",
+        "T_base_camera is not derived here; only camera world pose is logged if available."
+      ]
+    },
+    {
+      "camera_name": "wrist_right",
+      "prim_path": "/Root/Ref_Xform/Ref/R_camera_link/R_camera_link/R_wrist_camera/R_wrist_Camera",
+      "prim_valid": true,
+      "resolution": [
+        512,
+        512
+      ],
+      "depth_unit": "unknown",
+      "rgb_depth_alignment": "unknown",
+      "T_base_camera": "unknown",
+      "pose_base_claimed": false,
+      "camera_api_methods": {
+        "get_resolution": {
+          "available": true,
+          "value": [
+            512,
+            512
+          ],
+          "error": null
+        },
+        "get_intrinsics_matrix": {
+          "available": true,
+          "value": "unknown",
+          "error": "can only convert an array of size 1 to a Python scalar"
+        },
+        "get_projection_matrix": {
+          "available": false,
+          "value": "unknown",
+          "error": "method_not_found"
+        },
+        "get_focal_length": {
+          "available": true,
+          "value": 1.814756202697754,
+          "error": null
+        },
+        "get_horizontal_aperture": {
+          "available": true,
+          "value": 2.0954999923706055,
+          "error": null
+        },
+        "get_vertical_aperture": {
+          "available": true,
+          "value": 2.0954999923706055,
+          "error": null
+        },
+        "get_clipping_range": {
+          "available": true,
+          "value": [
+            0.009999999776482582,
+            10000000.0
+          ],
+          "error": null
+        },
+        "get_world_pose": {
+          "available": true,
+          "value": "unknown",
+          "error": "can only convert an array of size 1 to a Python scalar"
+        },
+        "get_local_pose": {
+          "available": true,
+          "value": "unknown",
+          "error": "can only convert an array of size 1 to a Python scalar"
+        }
+      },
+      "usd_attributes": {
+        "focalLength": {
+          "available": true,
+          "value": 18.14756202697754
+        },
+        "horizontalAperture": {
+          "available": true,
+          "value": 20.954999923706055
+        },
+        "verticalAperture": {
+          "available": true,
+          "value": 20.954999923706055
+        },
+        "horizontalApertureOffset": {
+          "available": true,
+          "value": 0.0
+        },
+        "verticalApertureOffset": {
+          "available": true,
+          "value": 0.0
+        },
+        "clippingRange": {
+          "available": true,
+          "value": "(0.01, 10000000)"
+        },
+        "projection": {
+          "available": true,
+          "value": "perspective"
+        },
+        "focusDistance": {
+          "available": true,
+          "value": 1.0
+        },
+        "fStop": {
+          "available": true,
+          "value": 0.0
+        }
+      },
+      "camera_world_pose": {
+        "T_world_camera_matrix4x4": [
+          [
+            0.7953592215963039,
+            0.08206954609930794,
+            0.6005566569648332,
+            0.0
+          ],
+          [
+            -0.6061309039042921,
+            0.11260180467163695,
+            0.7873538981403838,
+            0.0
+          ],
+          [
+            -0.0030059863419034947,
+            -0.9902451328775854,
+            0.13930377187416054,
+            0.0
+          ],
+          [
+            0.9629567484448345,
+            0.28375774629222644,
+            1.3929227024994544,
+            1.0
+          ]
+        ],
+        "position_m": [
+          0.9629567484448345,
+          0.28375774629222644,
+          1.3929227024994544
+        ],
+        "quaternion_xyzw": [
+          0.6211790492785696,
+          -0.21091397014018126,
+          0.2404905120821922,
+          0.7154133067923222
+        ],
+        "source": "UsdGeom.XformCache.GetLocalToWorldTransform(camera_prim)"
+      },
+      "intrinsics": {
+        "status": "computed_from_usd_focal_aperture_assuming_center_principal_point",
+        "fx": 443.4050007941597,
+        "fy": 443.4050007941597,
+        "cx": 256.0,
+        "cy": 256.0,
+        "matrix_3x3": [
+          [
+            443.4050007941597,
+            0.0,
+            256.0
+          ],
+          [
+            0.0,
+            443.4050007941597,
+            256.0
+          ],
+          [
+            0.0,
+            0.0,
+            1.0
+          ]
+        ],
+        "warning": "Computed intrinsics need runtime/API validation before use for pose_base."
+      },
+      "notes": [
+        "Depth unit was not verified by geometry inspection.",
+        "T_base_camera is not derived here; only camera world pose is logged if available."
+      ]
+    }
+  ],
+  "failure_reason": null
+}

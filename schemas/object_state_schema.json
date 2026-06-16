@@ -1,0 +1,92 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "ObjectState",
+  "description": "One detected object inside a PerceptionFrame from Person 1. Planner validates each object against this schema before processing.",
+  "type": "object",
+  "required": [
+    "object_id",
+    "class_id",
+    "confidence",
+    "pose_base",
+    "grasp_hint"
+  ],
+  "additionalProperties": true,
+  "properties": {
+
+    "object_id": {
+      "type": "string",
+      "description": "Unique object identifier for this frame",
+      "examples": ["obj_001", "obj_002"]
+    },
+
+    "class_id": {
+      "type": "string",
+      "description": "Detected object class — must match a known bin mapping",
+      "enum": ["part_A", "part_B"],
+      "examples": ["part_A"]
+    },
+
+    "confidence": {
+      "type": "number",
+      "description": "Detection confidence score from Person 1 (0.0–1.0). Objects below 0.75 are rejected.",
+      "minimum": 0.0,
+      "maximum": 1.0,
+      "examples": [0.91, 0.85]
+    },
+
+    "pose_base": {
+      "type": "object",
+      "description": "Object pose in robot base frame — already transformed by Person 1",
+      "required": ["position_m", "quaternion_xyzw"],
+      "additionalProperties": false,
+      "properties": {
+        "position_m": {
+          "type": "array",
+          "description": "[x, y, z] in meters, robot base frame",
+          "items": { "type": "number" },
+          "minItems": 3,
+          "maxItems": 3
+        },
+        "quaternion_xyzw": {
+          "type": "array",
+          "description": "[x, y, z, w] — must be unit quaternion",
+          "items": { "type": "number" },
+          "minItems": 4,
+          "maxItems": 4
+        }
+      }
+    },
+
+    "grasp_hint": {
+      "type": "object",
+      "description": "Suggested gripper approach from Person 1's shape analysis",
+      "required": ["yaw_rad", "approach_axis"],
+      "additionalProperties": true,
+      "properties": {
+        "yaw_rad": {
+          "type": "number",
+          "minimum": -3.1416,
+          "maximum":  3.1416
+        },
+        "grasp_width_m": {
+          "type": "number",
+          "minimum": 0.01,
+          "maximum": 0.15
+        },
+        "approach_axis": {
+          "type": "string",
+          "enum": ["z_down", "x_front", "y_side"]
+        }
+      }
+    },
+
+    "failure_reason": {
+      "description": "Set by Person 1 if detection had issues. Null means clean detection.",
+      "oneOf": [
+        { "type": "string" },
+        { "type": "null" }
+      ],
+      "examples": [null, "low_texture", "occluded"]
+    }
+  }
+}

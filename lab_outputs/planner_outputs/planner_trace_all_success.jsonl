@@ -1,0 +1,34 @@
+{"step_id": 1, "from_state": "IDLE", "to_state": "VALIDATE", "reason": "frame received"}
+{"step_id": 2, "from_state": "VALIDATE", "to_state": "SELECT_OBJECT", "reason": "4 valid objects found"}
+{"step_id": 2, "event": "object_selected", "object_id": "obj_000", "class_id": "part_B", "confidence": 0.8}
+{"step_id": 3, "from_state": "SELECT_OBJECT", "to_state": "PLAN", "reason": "selected obj_000", "object_id": "obj_000"}
+{"step_id": 3, "event": "plan_built", "plan_id": "plan_0001", "target_bin": "bin_B"}
+{"step_id": 4, "from_state": "PLAN", "to_state": "PICKING", "reason": "plan ready", "object_id": "obj_000"}
+{"step_id": 5, "from_state": "PICKING", "to_state": "PLACING", "reason": "grasp success", "object_id": "obj_000"}
+{"step_id": 6, "from_state": "PLACING", "to_state": "VERIFYING", "reason": "place success", "object_id": "obj_000"}
+{"step_id": 6, "event": "verify_ok", "object_id": "obj_000"}
+{"step_id": 7, "from_state": "VERIFYING", "to_state": "SELECT_OBJECT", "reason": "next object", "object_id": "obj_000"}
+{"step_id": 7, "event": "object_selected", "object_id": "obj_001", "class_id": "part_B", "confidence": 0.8}
+{"step_id": 8, "from_state": "SELECT_OBJECT", "to_state": "PLAN", "reason": "selected obj_001", "object_id": "obj_001"}
+{"step_id": 8, "event": "plan_built", "plan_id": "plan_0002", "target_bin": "bin_B"}
+{"step_id": 9, "from_state": "PLAN", "to_state": "PICKING", "reason": "plan ready", "object_id": "obj_001"}
+{"step_id": 10, "from_state": "PICKING", "to_state": "PLACING", "reason": "grasp success", "object_id": "obj_001"}
+{"step_id": 11, "from_state": "PLACING", "to_state": "VERIFYING", "reason": "place success", "object_id": "obj_001"}
+{"step_id": 11, "event": "verify_ok", "object_id": "obj_001"}
+{"step_id": 12, "from_state": "VERIFYING", "to_state": "SELECT_OBJECT", "reason": "next object", "object_id": "obj_001"}
+{"step_id": 12, "event": "object_selected", "object_id": "obj_002", "class_id": "part_A", "confidence": 0.8}
+{"step_id": 13, "from_state": "SELECT_OBJECT", "to_state": "PLAN", "reason": "selected obj_002", "object_id": "obj_002"}
+{"step_id": 13, "event": "plan_built", "plan_id": "plan_0003", "target_bin": "bin_A"}
+{"step_id": 14, "from_state": "PLAN", "to_state": "PICKING", "reason": "plan ready", "object_id": "obj_002"}
+{"step_id": 15, "from_state": "PICKING", "to_state": "PLACING", "reason": "grasp success", "object_id": "obj_002"}
+{"step_id": 16, "from_state": "PLACING", "to_state": "VERIFYING", "reason": "place success", "object_id": "obj_002"}
+{"step_id": 16, "event": "verify_ok", "object_id": "obj_002"}
+{"step_id": 17, "from_state": "VERIFYING", "to_state": "SELECT_OBJECT", "reason": "next object", "object_id": "obj_002"}
+{"step_id": 17, "event": "object_selected", "object_id": "obj_003", "class_id": "part_A", "confidence": 0.8}
+{"step_id": 18, "from_state": "SELECT_OBJECT", "to_state": "PLAN", "reason": "selected obj_003", "object_id": "obj_003"}
+{"step_id": 18, "event": "plan_built", "plan_id": "plan_0004", "target_bin": "bin_A"}
+{"step_id": 19, "from_state": "PLAN", "to_state": "PICKING", "reason": "plan ready", "object_id": "obj_003"}
+{"step_id": 20, "from_state": "PICKING", "to_state": "PLACING", "reason": "grasp success", "object_id": "obj_003"}
+{"step_id": 21, "from_state": "PLACING", "to_state": "VERIFYING", "reason": "place success", "object_id": "obj_003"}
+{"step_id": 21, "event": "verify_ok", "object_id": "obj_003"}
+{"step_id": 22, "from_state": "VERIFYING", "to_state": "DONE", "reason": "all objects placed", "object_id": "obj_003"}

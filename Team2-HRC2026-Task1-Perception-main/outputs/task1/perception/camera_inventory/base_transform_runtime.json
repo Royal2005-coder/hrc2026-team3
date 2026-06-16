@@ -1,0 +1,103 @@
+{
+  "timestamp": "2026-05-20T11:12:12.178687+00:00",
+  "baseline_path": "/workspace/GlobalHumanoidRobotChallenge_2026_Baseline",
+  "config_path": "/workspace/GlobalHumanoidRobotChallenge_2026_Baseline/Ubtech_sim/config/Part_Sorting.yaml",
+  "headless": true,
+  "base_prim_path": "/Root/Ref_Xform/Ref",
+  "config_transform": {
+    "position_m": [
+      0.7,
+      -0.2,
+      0.9
+    ],
+    "rotation_deg_xyz": [
+      0.0,
+      0.0,
+      90.0
+    ],
+    "quaternion_xyzw": [
+      0.0,
+      0.0,
+      0.7071067811865475,
+      0.7071067811865476
+    ],
+    "T_world_base_matrix4x4": [
+      [
+        6.123233995736766e-17,
+        -1.0,
+        0.0,
+        0.7
+      ],
+      [
+        1.0,
+        6.123233995736766e-17,
+        0.0,
+        -0.2
+      ],
+      [
+        0.0,
+        0.0,
+        1.0,
+        0.9
+      ],
+      [
+        0.0,
+        0.0,
+        0.0,
+        1.0
+      ]
+    ],
+    "source": "Part_Sorting.yaml robot.robot_position + robot.robot_rotation"
+  },
+  "runtime_transform": {
+    "position_m": [
+      0.7,
+      -0.2,
+      0.9
+    ],
+    "quaternion_xyzw": [
+      0.0,
+      0.0,
+      0.7071067811865475,
+      0.7071067811865476
+    ],
+    "T_world_base_matrix4x4_raw_usd": [
+      [
+        2.220446049250313e-16,
+        1.0,
+        0.0,
+        0.0
+      ],
+      [
+        -1.0,
+        2.220446049250313e-16,
+        0.0,
+        0.0
+      ],
+      [
+        0.0,
+        0.0,
+        1.0,
+        0.0
+      ],
+      [
+        0.7,
+        -0.2,
+        0.9,
+        1.0
+      ]
+    ],
+    "source": "UsdGeom.XformCache.GetLocalToWorldTransform(/Root/Ref_Xform/Ref)"
+  },
+  "position_comparison": {
+    "delta_runtime_minus_config_m": [
+      0.0,
+      0.0,
+      0.0
+    ],
+    "norm_m": 0.0,
+    "status": "pass"
+  },
+  "failure_reason": null,
+  "scene_path": "/workspace/GlobalHumanoidRobotChallenge_2026_Baseline/assets/resources/Collected_Task4/SubUSDs/2_small_warehouse2.usd"
+}

@@ -1,0 +1,19 @@
+{
+  "seed": 20260521,
+  "resolution": [
+    512,
+    512
+  ],
+  "settle_time_s": 2.0,
+  "render_steps": 35,
+  "counts": {
+    "total_objects": 4,
+    "part_a": 2,
+    "part_b": 2,
+    "unknown": 42
+  },
+  "four_object_pass": true,
+  "pose_base_available": true,
+  "orientation_available": true,
+  "yaw_available": true
+}

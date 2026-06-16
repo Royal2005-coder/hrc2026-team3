@@ -1,0 +1,156 @@
+{
+  "frame_id": 0,
+  "timestamp": 1779512302.723,
+  "summary": {
+    "total_objects": 4,
+    "accepted": 4,
+    "rejected": 0,
+    "confidence_threshold": 0.75
+  },
+  "objects": [
+    {
+      "object_id": "obj_000",
+      "class_id": "part_B",
+      "confidence": 0.8,
+      "status": "ACCEPTED",
+      "reject_reason": null,
+      "object_pose_robot_base": {
+        "position_m": [
+          -0.5788014433882747,
+          -0.16831586561258807,
+          0.8269522782696205
+        ],
+        "quaternion_xyzw": [
+          0.0,
+          0.0,
+          0.0,
+          1.0
+        ],
+        "yaw_rad_extracted": 0.0
+      },
+      "assigned_bin": "bin_B",
+      "bin_pose_robot_base": {
+        "position_m": [
+          -0.45,
+          -0.25,
+          0.8
+        ],
+        "quaternion_xyzw": [
+          0.0,
+          0.0,
+          0.0,
+          1.0
+        ],
+        "description": "Red bin \u2014 right side of table"
+      }
+    },
+    {
+      "object_id": "obj_001",
+      "class_id": "part_B",
+      "confidence": 0.8,
+      "status": "ACCEPTED",
+      "reject_reason": null,
+      "object_pose_robot_base": {
+        "position_m": [
+          -0.5566331272179099,
+          0.07742559248654579,
+          0.757416785565063
+        ],
+        "quaternion_xyzw": [
+          0.0,
+          0.0,
+          0.0,
+          1.0
+        ],
+        "yaw_rad_extracted": 0.0
+      },
+      "assigned_bin": "bin_B",
+      "bin_pose_robot_base": {
+        "position_m": [
+          -0.45,
+          -0.25,
+          0.8
+        ],
+        "quaternion_xyzw": [
+          0.0,
+          0.0,
+          0.0,
+          1.0
+        ],
+        "description": "Red bin \u2014 right side of table"
+      }
+    },
+    {
+      "object_id": "obj_002",
+      "class_id": "part_A",
+      "confidence": 0.8,
+      "status": "ACCEPTED",
+      "reject_reason": null,
+      "object_pose_robot_base": {
+        "position_m": [
+          -0.5356901218383749,
+          -0.18139264475697434,
+          0.6350359566203969
+        ],
+        "quaternion_xyzw": [
+          0.0,
+          0.0,
+          0.0,
+          1.0
+        ],
+        "yaw_rad_extracted": 0.0
+      },
+      "assigned_bin": "bin_A",
+      "bin_pose_robot_base": {
+        "position_m": [
+          -0.45,
+          0.25,
+          0.8
+        ],
+        "quaternion_xyzw": [
+          0.0,
+          0.0,
+          0.0,
+          1.0
+        ],
+        "description": "Blue bin \u2014 left side of table"
+      }
+    },
+    {
+      "object_id": "obj_003",
+      "class_id": "part_A",
+      "confidence": 0.8,
+      "status": "ACCEPTED",
+      "reject_reason": null,
+      "object_pose_robot_base": {
+        "position_m": [
+          -0.5163034511970368,
+          0.024423283785202348,
+          0.6197873978654941
+        ],
+        "quaternion_xyzw": [
+          0.0,
+          0.0,
+          0.0,
+          1.0
+        ],
+        "yaw_rad_extracted": 0.0
+      },
+      "assigned_bin": "bin_A",
+      "bin_pose_robot_base": {
+        "position_m": [
+          -0.45,
+          0.25,
+          0.8
+        ],
+        "quaternion_xyzw": [
+          0.0,
+          0.0,
+          0.0,
+          1.0
+        ],
+        "description": "Blue bin \u2014 left side of table"
+      }
+    }
+  ]
+}
