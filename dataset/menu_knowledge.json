@@ -1,0 +1,307 @@
+{
+  "menuItems": [
+    {
+      "menuItemId": "VR_LATTE",
+      "name": "Viva Latte",
+      "category": "Coffee",
+      "price": 55000,
+      "description": "Latte signature của Viva, vị sữa béo nhẹ và espresso cân bằng. Thích hợp uống cả ngày.",
+      "tags": ["best_seller", "milk", "coffee", "espresso"],
+      "attributes": {
+        "caffeine": true,
+        "temperatureOptions": ["hot", "iced"],
+        "sizeOptions": ["S", "M", "L"],
+        "sweetnessOptions": ["0%", "30%", "50%", "70%", "100%"],
+        "defaultSweetness": "50%",
+        "iceOptions": ["no_ice", "less", "normal", "extra"],
+        "toppingOptions": ["pearl", "coconut_jelly", "cream_foam"]
+      },
+      "available": true
+    },
+    {
+      "menuItemId": "VR_CAPPUCCINO",
+      "name": "Cappuccino",
+      "category": "Coffee",
+      "price": 55000,
+      "description": "Cappuccino cổ điển với lớp bọt sữa mịn đặc trưng, hương espresso đậm đà.",
+      "tags": ["classic", "milk", "coffee", "foam"],
+      "attributes": {
+        "caffeine": true,
+        "temperatureOptions": ["hot", "iced"],
+        "sizeOptions": ["S", "M", "L"],
+        "sweetnessOptions": ["0%", "30%", "50%", "70%", "100%"],
+        "defaultSweetness": "30%",
+        "iceOptions": ["no_ice", "less", "normal"],
+        "toppingOptions": ["cream_foam", "chocolate_powder"]
+      },
+      "available": true
+    },
+    {
+      "menuItemId": "VR_AMERICANO",
+      "name": "Americano",
+      "category": "Coffee",
+      "price": 45000,
+      "description": "Espresso pha loãng với nước nóng, vị thanh nhẹ hơn espresso thuần, phù hợp người thích cà phê nhẹ.",
+      "tags": ["coffee", "light", "no_milk"],
+      "attributes": {
+        "caffeine": true,
+        "temperatureOptions": ["hot", "iced"],
+        "sizeOptions": ["S", "M", "L"],
+        "sweetnessOptions": ["0%", "30%", "50%"],
+        "defaultSweetness": "0%",
+        "iceOptions": ["no_ice", "less", "normal", "extra"],
+        "toppingOptions": []
+      },
+      "available": true
+    },
+    {
+      "menuItemId": "VR_COLD_BREW",
+      "name": "Cold Brew",
+      "category": "Coffee",
+      "price": 65000,
+      "description": "Cà phê ủ lạnh 12 giờ, vị ngọt tự nhiên, ít đắng, mượt mà. Chỉ phục vụ lạnh.",
+      "tags": ["coffee", "cold_only", "smooth", "best_seller"],
+      "attributes": {
+        "caffeine": true,
+        "temperatureOptions": ["iced"],
+        "sizeOptions": ["M", "L"],
+        "sweetnessOptions": ["0%", "30%", "50%"],
+        "defaultSweetness": "0%",
+        "iceOptions": ["less", "normal", "extra"],
+        "toppingOptions": ["cream_foam", "coconut_jelly"]
+      },
+      "available": true
+    },
+    {
+      "menuItemId": "VR_ESPRESSO",
+      "name": "Espresso",
+      "category": "Coffee",
+      "price": 40000,
+      "description": "Espresso nguyên chất, đậm đà, mạnh. Dành cho người yêu cà phê thuần túy.",
+      "tags": ["coffee", "strong", "no_milk", "pure"],
+      "attributes": {
+        "caffeine": true,
+        "temperatureOptions": ["hot"],
+        "sizeOptions": ["single", "double"],
+        "sweetnessOptions": ["0%"],
+        "defaultSweetness": "0%",
+        "iceOptions": [],
+        "toppingOptions": []
+      },
+      "available": true
+    },
+    {
+      "menuItemId": "VR_JASMINE_MILK_TEA",
+      "name": "Tea Sữa Jasmine",
+      "category": "Tea",
+      "price": 55000,
+      "description": "Trà hoa nhài thơm nhẹ pha cùng sữa tươi, vị thanh mát dịu nhẹ. Không caffeine.",
+      "tags": ["tea", "milk", "no_caffeine", "floral"],
+      "attributes": {
+        "caffeine": false,
+        "temperatureOptions": ["hot", "iced"],
+        "sizeOptions": ["S", "M", "L"],
+        "sweetnessOptions": ["0%", "30%", "50%", "70%", "100%"],
+        "defaultSweetness": "50%",
+        "iceOptions": ["no_ice", "less", "normal", "extra"],
+        "toppingOptions": ["pearl", "coconut_jelly", "aloe_vera", "cream_foam"]
+      },
+      "available": true
+    },
+    {
+      "menuItemId": "VR_PEACH_LEMONGRASS_TEA",
+      "name": "Trà Đào Cam Sả",
+      "category": "Tea",
+      "price": 55000,
+      "description": "Trà đào thơm ngọt kết hợp cam tươi và sả, vị chua ngọt sảng khoái. Không caffeine.",
+      "tags": ["tea", "fruit", "no_caffeine", "refreshing", "best_seller"],
+      "attributes": {
+        "caffeine": false,
+        "temperatureOptions": ["iced"],
+        "sizeOptions": ["M", "L"],
+        "sweetnessOptions": ["30%", "50%", "70%", "100%"],
+        "defaultSweetness": "70%",
+        "iceOptions": ["less", "normal", "extra"],
+        "toppingOptions": ["aloe_vera", "coconut_jelly"]
+      },
+      "available": true
+    },
+    {
+      "menuItemId": "VR_THAI_MILK_TEA",
+      "name": "Trà Sữa Thái",
+      "category": "Tea",
+      "price": 55000,
+      "description": "Trà Thái cam đậm sắc kết hợp sữa đặc béo ngậy, vị ngọt đặc trưng kiểu Thái.",
+      "tags": ["tea", "milk", "sweet", "thai", "no_caffeine"],
+      "attributes": {
+        "caffeine": false,
+        "temperatureOptions": ["iced"],
+        "sizeOptions": ["M", "L"],
+        "sweetnessOptions": ["30%", "50%", "70%", "100%"],
+        "defaultSweetness": "70%",
+        "iceOptions": ["less", "normal", "extra"],
+        "toppingOptions": ["pearl", "coconut_jelly"]
+      },
+      "available": true
+    },
+    {
+      "menuItemId": "VR_ICE_MATCHA",
+      "name": "Ice Blended Matcha",
+      "category": "Ice Blended",
+      "price": 65000,
+      "description": "Đá xay matcha Nhật đặc trưng, vị trà xanh thanh đắng nhẹ, béo mượt từ sữa tươi.",
+      "tags": ["ice_blended", "matcha", "no_caffeine", "green_tea"],
+      "attributes": {
+        "caffeine": false,
+        "temperatureOptions": ["iced"],
+        "sizeOptions": ["M", "L"],
+        "sweetnessOptions": ["30%", "50%", "70%"],
+        "defaultSweetness": "50%",
+        "iceOptions": ["normal"],
+        "toppingOptions": ["cream_foam", "red_bean", "pearl"]
+      },
+      "available": true
+    },
+    {
+      "menuItemId": "VR_ICE_TARO",
+      "name": "Ice Blended Khoai Môn",
+      "category": "Ice Blended",
+      "price": 65000,
+      "description": "Đá xay khoai môn tím mịn ngọt, mùi thơm đặc trưng của khoai môn tươi. Không caffeine.",
+      "tags": ["ice_blended", "taro", "no_caffeine", "sweet"],
+      "attributes": {
+        "caffeine": false,
+        "temperatureOptions": ["iced"],
+        "sizeOptions": ["M", "L"],
+        "sweetnessOptions": ["30%", "50%", "70%"],
+        "defaultSweetness": "50%",
+        "iceOptions": ["normal"],
+        "toppingOptions": ["cream_foam", "pearl", "coconut_jelly"]
+      },
+      "available": true
+    },
+    {
+      "menuItemId": "VR_ICE_STRAWBERRY",
+      "name": "Ice Blended Dâu Tây",
+      "category": "Ice Blended",
+      "price": 65000,
+      "description": "Đá xay dâu tây tươi chua ngọt tự nhiên, màu hồng bắt mắt, giải nhiệt hiệu quả.",
+      "tags": ["ice_blended", "strawberry", "no_caffeine", "fruity"],
+      "attributes": {
+        "caffeine": false,
+        "temperatureOptions": ["iced"],
+        "sizeOptions": ["M", "L"],
+        "sweetnessOptions": ["30%", "50%", "70%"],
+        "defaultSweetness": "50%",
+        "iceOptions": ["normal"],
+        "toppingOptions": ["cream_foam", "coconut_jelly"]
+      },
+      "available": true
+    },
+    {
+      "menuItemId": "VR_CROISSANT",
+      "name": "Croissant Bơ",
+      "category": "Pastry",
+      "price": 35000,
+      "description": "Croissant nhập khẩu, vỏ ngoài giòn rụm, bên trong mềm xốp thơm mùi bơ Pháp.",
+      "tags": ["pastry", "butter", "bakery", "no_caffeine"],
+      "attributes": {
+        "caffeine": false,
+        "temperatureOptions": ["warm"],
+        "sizeOptions": ["regular"],
+        "sweetnessOptions": [],
+        "iceOptions": [],
+        "toppingOptions": []
+      },
+      "available": true
+    },
+    {
+      "menuItemId": "VR_CHEESE_CAKE",
+      "name": "Bánh Phô Mai New York",
+      "category": "Pastry",
+      "price": 55000,
+      "description": "Cheesecake New York style đặc sánh, vị phô mai béo ngậy cân bằng với lớp đế giòn.",
+      "tags": ["pastry", "cheesecake", "dessert", "no_caffeine"],
+      "attributes": {
+        "caffeine": false,
+        "temperatureOptions": ["cold"],
+        "sizeOptions": ["regular"],
+        "sweetnessOptions": [],
+        "iceOptions": [],
+        "toppingOptions": []
+      },
+      "available": true
+    },
+    {
+      "menuItemId": "VR_COMBO_SINGLE",
+      "name": "Combo Cà Phê & Bánh",
+      "category": "Combo",
+      "price": 85000,
+      "description": "1 ly Latte hoặc Cappuccino (size M) + 1 Croissant Bơ. Tiết kiệm 5.000đ so với gọi lẻ.",
+      "tags": ["combo", "coffee", "pastry", "value"],
+      "attributes": {
+        "caffeine": true,
+        "note": "Áp dụng cho Viva Latte hoặc Cappuccino size M kèm Croissant Bơ"
+      },
+      "available": true
+    },
+    {
+      "menuItemId": "VR_COMBO_DUO",
+      "name": "Combo Đôi",
+      "category": "Combo",
+      "price": 100000,
+      "description": "2 ly bất kỳ trong danh mục Coffee hoặc Tea (size M). Tiết kiệm 10.000đ so với gọi lẻ.",
+      "tags": ["combo", "duo", "value", "discount"],
+      "attributes": {
+        "caffeine": "depends_on_choice",
+        "note": "Chọn 2 ly bất kỳ trong danh mục Coffee hoặc Tea, size M"
+      },
+      "available": true
+    }
+  ],
+  "campaigns": [
+    {
+      "campaignId": "CAMP_COMBO_DAILY",
+      "name": "Combo Ngày Vui",
+      "description": "Mua Combo Cà Phê & Bánh chỉ 85.000đ, tiết kiệm 5.000đ. Áp dụng cả ngày.",
+      "condition": "Mua combo VR_COMBO_SINGLE",
+      "discount": 5000,
+      "validUntil": "2026-12-31"
+    },
+    {
+      "campaignId": "CAMP_DUO",
+      "name": "Combo Đôi Vui",
+      "description": "2 ly Coffee hoặc Tea size M chỉ 100.000đ, tiết kiệm 10.000đ.",
+      "condition": "Mua combo VR_COMBO_DUO",
+      "discount": 10000,
+      "validUntil": "2026-12-31"
+    }
+  ],
+  "faq": [
+    {
+      "id": "FAQ_PAYMENT",
+      "question": "Thanh toán bằng gì?",
+      "answer": "Bạn có thể thanh toán bằng QR code (MoMo, VietQR, VNPay) hoặc tiền mặt tại quầy. Robot sẽ hiển thị QR để bạn quét sau khi xác nhận đơn."
+    },
+    {
+      "id": "FAQ_ORDER_MORE",
+      "question": "Gọi thêm món như thế nào?",
+      "answer": "Bạn có thể bấm nút Đặt món trên màn hình robot hoặc nói chuyện với Cadebot để gọi thêm bất kỳ lúc nào."
+    },
+    {
+      "id": "FAQ_DELIVERY",
+      "question": "Bao lâu thì nhận được món?",
+      "answer": "Sau khi đơn được xác nhận, barista sẽ pha chế và robot sẽ giao món đến bàn của bạn. Thời gian thường từ 5-10 phút tùy tình trạng quán."
+    },
+    {
+      "id": "FAQ_VOUCHER",
+      "question": "Dùng voucher như thế nào?",
+      "answer": "Bạn nhập mã voucher hoặc số điện thoại thành viên ở bước giỏ hàng trước khi thanh toán."
+    },
+    {
+      "id": "FAQ_MODIFY_ORDER",
+      "question": "Đặt nhầm món có sửa được không?",
+      "answer": "Bạn có thể sửa giỏ hàng trước khi xác nhận thanh toán. Sau khi thanh toán, vui lòng gọi nhân viên để được hỗ trợ."
+    }
+  ]
+}
