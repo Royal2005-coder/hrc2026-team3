@@ -29,11 +29,19 @@ hf download vinhnguyen02092005/hrc2026-outputs \
     --local-dir outputs
 ```
 
-### Download only the latest checkpoint (step 030000, ~1.5 GB)
+### Download ACT checkpoints (latest model)
 
 ```bash
 hf download vinhnguyen02092005/hrc2026-outputs \
-    --include "outputs/train/smolvla_part_sorting_long/checkpoints/030000/*" \
+    --include "outputs/train/act_part_sorting/*" \
+    --local-dir .
+```
+
+### Download SmolVLA checkpoints (old, không dùng nữa)
+
+```bash
+hf download vinhnguyen02092005/hrc2026-outputs \
+    --include "outputs/train/smolvla_part_sorting_long/*" \
     --local-dir .
 ```
 
@@ -70,16 +78,14 @@ hf download vinhnguyen02092005/hrc2026-datasets \
 ```
 outputs/
 └── train/
-    └── smolvla_part_sorting_long/
+    ├── act_part_sorting/          ← model hiện tại (ACT, MIN_MAX normalization)
+    │   └── checkpoints/
+    │       ├── 005000/
+    │       ├── 010000/
+    │       └── ...
+    └── smolvla_part_sorting_long/ ← cũ (SmolVLA, không dùng nữa, chỉ có trên HF)
         └── checkpoints/
-            ├── 005000/   # 1.5 GB
-            ├── 010000/   # 1.5 GB
-            ├── 015000/   # 1.5 GB
-            ├── 020000/   # 1.5 GB
-            ├── 025000/   # 1.5 GB
-            └── 030000/   # 1.5 GB  ← latest
-                ├── pretrained_model/
-                └── training_state/
+            └── 005000..030000/
 ```
 
 ## Dataset Structure
@@ -184,7 +190,7 @@ docker rm -f eval_smolvla 2>/dev/null; docker run -d \
   sleep infinity
 ```
 
-**Bước 3 — Chạy eval checkpoint (đổi `030000` sang checkpoint muốn test):**
+**Bước 3a — Chạy eval SmolVLA (checkpoint 025000 — dùng cho demo):**
 ```bash
 docker exec -d eval_smolvla bash -c '
 /isaac-sim/python.sh src/lerobot/scripts/lerobot_record.py \
@@ -203,6 +209,28 @@ docker exec -d eval_smolvla bash -c '
   --dataset.video=true \
   --play_sounds=false \
   > outputs/eval/smolvla_25k.log 2>&1
+'
+```
+
+**Bước 3b — Chạy eval ACT (đổi `005000` sang checkpoint muốn test — dùng khi ACT training xong):**
+```bash
+docker exec -d eval_smolvla bash -c '
+/isaac-sim/python.sh src/lerobot/scripts/lerobot_record.py \
+  --robot.type=walker_s2_sim \
+  --task=Part_Sorting \
+  --policy.path=outputs/train/act_part_sorting/checkpoints/005000/pretrained_model \
+  --dataset.repo_id=team3/eval_act_5k \
+  --dataset.single_task="Part Sorting" \
+  --dataset.num_episodes=10 \
+  --dataset.push_to_hub=false \
+  --dataset.episode_time_s=100 \
+  --dataset.num_image_writer_processes=4 \
+  --dataset.root=datasets/eval/act_5k \
+  --dataset.streaming_encoding=true \
+  --dataset.encoder_threads=2 \
+  --dataset.video=true \
+  --play_sounds=false \
+  > outputs/eval/act_5k.log 2>&1
 '
 ```
 
